@@ -27,7 +27,7 @@
     </queries>
     
     <application
-        android:allowBackup="false"
+        android:allowBackup="true"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="Coara browser"
