@@ -22,7 +22,7 @@ public class exec extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(R.layout.exec); // レイアウト内に WebView コンポーネント（ID: webview）が存在することを確認してください
+        setContentView(R.layout.exec);
         webView = findViewById(R.id.webview);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
