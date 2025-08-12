@@ -133,7 +133,7 @@ public class SettingsActivity extends AppCompatActivity {
     }
     showMarkdownDialog("端末情報", result.toString());
 }
-
+}
     private void showLicense() {
         StringBuilder licenseText = new StringBuilder();
         try {
@@ -174,4 +174,5 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
