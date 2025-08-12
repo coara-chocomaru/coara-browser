@@ -13,7 +13,7 @@ public class num extends AppCompatActivity {
     private EditText editText;
     private TextView resultView;
     private Button button0, button1, button2, button3, button4, button5, button6, button7, button8, button9;
-    private Button buttonAdd, buttonSub, buttonMul, buttonClear, buttonEqual;
+    private Button buttonAdd, buttonSub, buttonMul, buttonDiv, buttonClear, buttonEqual;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -22,6 +22,7 @@ public class num extends AppCompatActivity {
 
         editText = findViewById(R.id.editTextNumber);
         resultView = findViewById(R.id.textViewResult);
+
         button0 = findViewById(R.id.button0);
         button1 = findViewById(R.id.button1);
         button2 = findViewById(R.id.button2);
@@ -35,9 +36,10 @@ public class num extends AppCompatActivity {
         buttonAdd = findViewById(R.id.buttonAdd);
         buttonSub = findViewById(R.id.buttonSub);
         buttonMul = findViewById(R.id.buttonMul);
+        buttonDiv = findViewById(R.id.buttonDiv);
         buttonClear = findViewById(R.id.buttonClear);
         buttonEqual = findViewById(R.id.buttonEqual);
-        
+
         View.OnClickListener appendListener = v -> {
             editText.append(((Button) v).getText().toString());
         };
@@ -55,6 +57,7 @@ public class num extends AppCompatActivity {
         buttonAdd.setOnClickListener(appendListener);
         buttonSub.setOnClickListener(appendListener);
         buttonMul.setOnClickListener(appendListener);
+        buttonDiv.setOnClickListener(appendListener);
 
         buttonClear.setOnClickListener(v -> {
             editText.setText("");
@@ -73,6 +76,8 @@ public class num extends AppCompatActivity {
         try {
             BigInteger result = new ExpressionEvaluator().parse(input);
             resultView.setText("結果: " + result.toString());
+        } catch (ArithmeticException ae) {
+            resultView.setText("ゼロ除算エラー");
         } catch (Exception e) {
             resultView.setText("計算エラー");
         }
@@ -126,6 +131,12 @@ public class num extends AppCompatActivity {
             while (true) {
                 if (eat('*')) {
                     x = x.multiply(parseFactor());
+                } else if (eat('/')) {
+                    BigInteger divisor = parseFactor();
+                    if (divisor.equals(BigInteger.ZERO)) {
+                        throw new ArithmeticException("ゼロ除算");
+                    }
+                    x = x.divide(divisor);
                 } else {
                     return x;
                 }
