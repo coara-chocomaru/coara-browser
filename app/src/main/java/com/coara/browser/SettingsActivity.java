@@ -60,20 +60,79 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showDeviceInfo() {
-        StringBuilder result = new StringBuilder();
-        try {
-            Process process = Runtime.getRuntime().exec("getprop");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                result.append(line).append("\n");
+    StringBuilder result = new StringBuilder();
+    try {
+        Process process = Runtime.getRuntime().exec("getprop");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        String line;
+
+        Map<String, String> deviceInfo = new TreeMap<>(); 
+        while ((line = reader.readLine()) != null) {
+        
+            if (line.startsWith("[ro.")) {
+
+                String[] parts = line.split("]: \\[");
+                if (parts.length == 2) {
+                    String key = parts[0].substring(1); 
+                    String value = parts[1].substring(0, parts[1].length() - 1); 
+                    if (key.startsWith("ro.product.") || 
+                        key.startsWith("ro.build.") || 
+                        key.equals("ro.serialno") || 
+                        key.equals("ro.board.platform") ||
+                        key.equals("ro.hardware") ||
+                        key.equals("ro.bootloader")) {
+                        deviceInfo.put(key, value);
+                    }
+                }
             }
-            reader.close();
-        } catch (Exception e) {
-            result.append("取得失敗");
         }
-        showTextDialog("端末情報", result.toString());
+        reader.close();
+
+        if (!deviceInfo.isEmpty()) {
+            result.append("**デバイス情報**\n\n");
+            for (Map.Entry<String, String> entry : deviceInfo.entrySet()) {
+                String key = entry.getKey();
+                String value = entry.getValue();
+                String displayKey = key;
+                switch (key) {
+                    case "ro.product.model":
+                        displayKey = "モデル";
+                        break;
+                    case "ro.product.manufacturer":
+                        displayKey = "メーカー";
+                        break;
+                    case "ro.build.id":
+                        displayKey = "ビルドID";
+                        break;
+                    case "ro.build.version.release":
+                        displayKey = "OSバージョン";
+                        break;
+                    case "ro.serialno":
+                        displayKey = "シリアル番号";
+                        break;
+                    case "ro.board.platform":
+                        displayKey = "プラットフォーム";
+                        break;
+                    case "ro.hardware":
+                        displayKey = "ハードウェア";
+                        break;
+                    case "ro.bootloader":
+                        displayKey = "ブートローダー";
+                        break;
+                    default:
+                        displayKey = key.replace("ro.", "").replace(".", " ");
+                        break;
+                }
+                result.append(String.format("**%s**: %s\n", displayKey, value));
+            }
+        } else {
+            result.append("デバイス情報を取得できませんでした");
+        }
+    } catch (Exception e) {
+        result.append("デバイス情報の取得に失敗しました: ").append(e.getMessage());
     }
+    showMarkdownDialog("端末情報", result.toString());
+}
 
     private void showLicense() {
         StringBuilder licenseText = new StringBuilder();
@@ -115,3 +174,4 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
