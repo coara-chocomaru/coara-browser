@@ -6,7 +6,8 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
-import java.math.BigInteger;
+import java.math.BigDecimal;
+import java.math.MathContext;
 
 public class num extends AppCompatActivity {
 
@@ -14,6 +15,7 @@ public class num extends AppCompatActivity {
     private TextView resultView;
     private Button button0, button1, button2, button3, button4, button5, button6, button7, button8, button9;
     private Button buttonAdd, buttonSub, buttonMul, buttonDiv, buttonClear, buttonEqual;
+    private Button buttonDot; 
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -39,10 +41,12 @@ public class num extends AppCompatActivity {
         buttonDiv = findViewById(R.id.buttonDiv);
         buttonClear = findViewById(R.id.buttonClear);
         buttonEqual = findViewById(R.id.buttonEqual);
+        buttonDot = findViewById(R.id.buttonDot); 
 
         View.OnClickListener appendListener = v -> {
             editText.append(((Button) v).getText().toString());
         };
+
 
         button0.setOnClickListener(appendListener);
         button1.setOnClickListener(appendListener);
@@ -58,6 +62,7 @@ public class num extends AppCompatActivity {
         buttonSub.setOnClickListener(appendListener);
         buttonMul.setOnClickListener(appendListener);
         buttonDiv.setOnClickListener(appendListener);
+        buttonDot.setOnClickListener(appendListener);
 
         buttonClear.setOnClickListener(v -> {
             editText.setText("");
@@ -74,8 +79,8 @@ public class num extends AppCompatActivity {
             return;
         }
         try {
-            BigInteger result = new ExpressionEvaluator().parse(input);
-            resultView.setText("結果: " + result.toString());
+            BigDecimal result = new ExpressionEvaluator().parse(input);
+            resultView.setText("結果: " + result.stripTrailingZeros().toPlainString());
         } catch (ArithmeticException ae) {
             resultView.setText("ゼロ除算エラー");
         } catch (Exception e) {
@@ -88,13 +93,13 @@ public class num extends AppCompatActivity {
         private int pos = -1;
         private int ch;
 
-        public BigInteger parse(String s) {
+        public BigDecimal parse(String s) {
             this.str = s;
             pos = -1;
             nextChar();
-            BigInteger x = parseExpression();
+            BigDecimal x = parseExpression();
             if (pos < str.length()) {
-                throw new RuntimeException("不正な文字");
+                throw new RuntimeException("不正な文字: " + (char)ch);
             }
             return x;
         }
@@ -112,48 +117,52 @@ public class num extends AppCompatActivity {
             }
             return false;
         }
-
-        private BigInteger parseExpression() {
-            BigInteger x = parseTerm();
+        private BigDecimal parseExpression() {
+            BigDecimal x = parseTerm();
             while (true) {
-                if (eat('+')) {
-                    x = x.add(parseTerm());
-                } else if (eat('-')) {
-                    x = x.subtract(parseTerm());
-                } else {
-                    return x;
-                }
+                if (eat('+')) x = x.add(parseTerm());
+                else if (eat('-')) x = x.subtract(parseTerm());
+                else return x;
             }
         }
 
-        private BigInteger parseTerm() {
-            BigInteger x = parseFactor();
+
+        private BigDecimal parseTerm() {
+            BigDecimal x = parseFactor();
             while (true) {
                 if (eat('*')) {
                     x = x.multiply(parseFactor());
                 } else if (eat('/')) {
-                    BigInteger divisor = parseFactor();
-                    if (divisor.equals(BigInteger.ZERO)) {
+                    BigDecimal divisor = parseFactor();
+                    if (divisor.compareTo(BigDecimal.ZERO) == 0) {
                         throw new ArithmeticException("ゼロ除算");
                     }
-                    x = x.divide(divisor);
+                    x = x.divide(divisor, MathContext.DECIMAL64); // 高精度除算
                 } else {
                     return x;
                 }
             }
         }
 
-        private BigInteger parseFactor() {
+        private BigDecimal parseFactor() {
             if (eat('+')) return parseFactor();
             if (eat('-')) return parseFactor().negate();
 
-            int startPos = pos;
-            if (ch >= '0' && ch <= '9') {
-                while (ch >= '0' && ch <= '9') nextChar();
-                String numStr = str.substring(startPos, pos);
-                return new BigInteger(numStr);
+            BigDecimal x;
+            int startPos = this.pos;
+
+            if (eat('(')) {
+                x = parseExpression();
+                if (!eat(')')) throw new RuntimeException("閉じ括弧が必要");
+            } else if ((ch >= '0' && ch <= '9') || ch == '.') {
+                while ((ch >= '0' && ch <= '9') || ch == '.') nextChar();
+                String numStr = str.substring(startPos, this.pos);
+                x = new BigDecimal(numStr);
+            } else {
+                throw new RuntimeException("予期しない文字: " + (char)ch);
             }
-            throw new RuntimeException("予期しない文字");
+
+            return x;
         }
     }
 }
