@@ -23,133 +23,59 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:columnCount="4"
-        android:rowCount="4"
         android:layout_marginTop="8dp">
 
-        <Button
-            android:id="@+id/button7"
-            android:text="7"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button8"
-            android:text="8"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button9"
-            android:text="9"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/buttonAdd"
-            android:text="+"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
+        <Button android:id="@+id/button7" android:text="7"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button8" android:text="8"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button9" android:text="9"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonAdd" android:text="+"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
 
-        <Button
-            android:id="@+id/button4"
-            android:text="4"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button5"
-            android:text="5"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button6"
-            android:text="6"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/buttonSub"
-            android:text="-"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
+        <Button android:id="@+id/button4" android:text="4"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button5" android:text="5"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button6" android:text="6"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonSub" android:text="-"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
 
-        <Button
-            android:id="@+id/button1"
-            android:text="1"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button2"
-            android:text="2"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/button3"
-            android:text="3"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/buttonMul"
-            android:text="*"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
+        <Button android:id="@+id/button1" android:text="1"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button2" android:text="2"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/button3" android:text="3"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonMul" android:text="*"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
 
-        <Button
-            android:id="@+id/button0"
-            android:text="0"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/buttonClear"
-            android:text="C"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:padding="16dp"
-            android:textSize="20sp" />
-        <Button
-            android:id="@+id/buttonEqual"
-            android:text="="
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_columnWeight="1"
-            android:layout_columnSpan="2"
-            android:padding="16dp"
-            android:textSize="20sp" />
+        <Button android:id="@+id/button0" android:text="0"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonClear" android:text="C"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonDiv" android:text="/"
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
+        <Button android:id="@+id/buttonEqual" android:text="="
+            android:layout_width="0dp" android:layout_height="wrap_content"
+            android:layout_columnWeight="1" android:padding="16dp" android:textSize="20sp" />
 
     </GridLayout>
 
