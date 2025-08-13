@@ -68,14 +68,14 @@ public class SettingsActivity extends AppCompatActivity {
         String[][] props = {
                 {"ro.product.model", "モデル"},
                 {"ro.product.manufacturer", "メーカー"},
-                {"ro.product.brand", "ブランド"},
+                {"ro.product.brand", "キャリア"},
                 {"ro.system.build.id", "ビルドid"},
                 {"ro.system.build.version.release", "OS version"},
                 {"ro.vndk.version", "VNDK"},
                 {"ro.system.build.version.sdk", "SDK"},
                 {"ro.hardware", "SoC"},
-                {"ro.kernel.version", "Kernel"},
-                {"ro.boot.ddr_size", "RAM"}
+                {"ro.build.type", "ビルドType"},
+                {"ro.boot.slot_suffix", "A/B slot"}
         };
 
         java.util.Map<String, String> propValues = new java.util.HashMap<>();
@@ -148,4 +148,5 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
