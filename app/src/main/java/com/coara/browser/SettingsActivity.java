@@ -60,20 +60,53 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showDeviceInfo() {
-        StringBuilder result = new StringBuilder();
-        try {
-            Process process = Runtime.getRuntime().exec("getprop");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                result.append(line).append("\n");
+    StringBuilder result = new StringBuilder();
+    try {
+        Process process = Runtime.getRuntime().exec("getprop");
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        String line;
+        String[][] props = {
+                {"ro.product.model", "モデル"},
+                {"ro.product.manufacturer", "メーカー"},
+                {"ro.product.brand", "ブランド"},
+                {"ro.system.build.id", "ビルドid"},
+                {"ro.system.build.version.release", "OS version"},
+                {"ro.vndk.version", "VNDK"},
+                {"ro.system.build.version.sdk", "SDK"},
+                {"ro.hardware", "SoC"},
+                {"ro.kernel.version", "Kernel"},
+                {"ro.boot.ddr_size", "RAM"}
+        };
+
+        java.util.Map<String, String> propValues = new java.util.HashMap<>();
+
+        while ((line = reader.readLine()) != null) {
+            if (!line.startsWith("[")) continue; 
+            int keyStart = line.indexOf('[') + 1;
+            int keyEnd = line.indexOf(']');
+            int valueStart = line.indexOf('[', keyEnd) + 1;
+            int valueEnd = line.indexOf(']', valueStart);
+
+            if (keyStart < 0 || keyEnd < 0 || valueStart < 0 || valueEnd < 0) continue;
+            String key = line.substring(keyStart, keyEnd).trim();
+            String value = line.substring(valueStart, valueEnd).trim();
+
+            if (key.startsWith("ro.")) {
+                propValues.put(key, value);
             }
-            reader.close();
-        } catch (Exception e) {
-            result.append("取得失敗");
         }
-        showTextDialog("端末情報", result.toString());
+        reader.close();
+
+        for (String[] prop : props) {
+            String val = propValues.getOrDefault(prop[0], "不明");
+            result.append(prop[1]).append("  ").append(val).append("\n");
+        }
+
+    } catch (Exception e) {
+        result.append("取得失敗");
     }
+    showTextDialog("端末情報", result.toString());
+}
 
     private void showLicense() {
         StringBuilder licenseText = new StringBuilder();
@@ -115,3 +148,4 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
