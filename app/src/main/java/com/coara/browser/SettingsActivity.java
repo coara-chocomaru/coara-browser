@@ -6,6 +6,9 @@ import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.text.SpannableStringBuilder;
+import android.text.Spanned;
+import android.text.style.ForegroundColorSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
@@ -18,7 +21,9 @@ import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import io.noties.markwon.Markwon;
 
 public class SettingsActivity extends AppCompatActivity {
@@ -60,47 +65,47 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private void showDeviceInfo() {
-    StringBuilder result = new StringBuilder();
-    try {
-        Process process = Runtime.getRuntime().exec("getprop");
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        String line;
-        String[][] props = {
-                {"ro.product.model", "model"},
-                {"ro.product.manufacturer", "manufacturer"},
-                {"ro.product.brand", "carrier"},
-                {"ro.system.build.id", "Build id"},
-                {"ro.system.build.version.release", "OS version"},
-                {"ro.vndk.version", "VNDK"},
-                {"ro.system.build.version.sdk", "SDK"},
-                {"ro.hardware", "soc"},
-                {"ro.build.type", "Build Type"},
-                {"ro.product.locale", "Language"},
-                {"ro.sf.lcd_density", "Density"},
-                {"ro.boot.baseband", "baseband"},
-                {"ro.boot.slot_suffix", "slot"}
-        };
+        SpannableStringBuilder result = new SpannableStringBuilder();
+        try {
+            Process process = Runtime.getRuntime().exec("getprop");
+            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            String line;
+            String[][] props = {
+                    {"ro.product.model", "model"},
+                    {"ro.product.manufacturer", "manufacturer"},
+                    {"ro.product.brand", "carrier"},
+                    {"ro.system.build.id", "Build id"},
+                    {"ro.system.build.version.release", "OS version"},
+                    {"ro.vndk.version", "VNDK"},
+                    {"ro.system.build.version.sdk", "SDK"},
+                    {"ro.hardware", "soc"},
+                    {"ro.build.type", "Build Type"},
+                    {"ro.product.locale", "Language"},
+                    {"ro.sf.lcd_density", "Density"},
+                    {"ro.boot.baseband", "baseband"},
+                    {"ro.boot.slot_suffix", "slot"}
+            };
 
-        java.util.Map<String, String> propValues = new java.util.HashMap<>();
+            Map<String, String> propValues = new HashMap<>();
 
-        while ((line = reader.readLine()) != null) {
-            if (!line.startsWith("[")) continue; 
-            int keyStart = line.indexOf('[') + 1;
-            int keyEnd = line.indexOf(']');
-            int valueStart = line.indexOf('[', keyEnd) + 1;
-            int valueEnd = line.indexOf(']', valueStart);
+            while ((line = reader.readLine()) != null) {
+                if (!line.startsWith("[")) continue;
+                int keyStart = line.indexOf('[') + 1;
+                int keyEnd = line.indexOf(']');
+                int valueStart = line.indexOf('[', keyEnd) + 1;
+                int valueEnd = line.indexOf(']', valueStart);
 
-            if (keyStart < 0 || keyEnd < 0 || valueStart < 0 || valueEnd < 0) continue;
-            String key = line.substring(keyStart, keyEnd).trim();
-            String value = line.substring(valueStart, valueEnd).trim();
+                if (keyStart < 0 || keyEnd < 0 || valueStart < 0 || valueEnd < 0) continue;
+                String key = line.substring(keyStart, keyEnd).trim();
+                String value = line.substring(valueStart, valueEnd).trim();
 
-            if (key.startsWith("ro.")) {
-                propValues.put(key, value);
+                if (key.startsWith("ro.")) {
+                    propValues.put(key, value);
+                }
             }
-        }
-        reader.close();
+            reader.close();
 
-        for (String[] prop : props) {
+            for (String[] prop : props) {
                 String label = prop[1] + "  ";
                 String val = propValues.getOrDefault(prop[0], "不明");
 
@@ -112,8 +117,9 @@ public class SettingsActivity extends AppCompatActivity {
                         new ForegroundColorSpan(0xFF448AFF),
                         start, end,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                 );
-                   } catch (Exception e) {
+                );
+            }
+        } catch (Exception e) {
             result.append("取得失敗");
         }
         showTextDialog("端末情報", result);
@@ -134,7 +140,7 @@ public class SettingsActivity extends AppCompatActivity {
         showMarkdownDialog("ライセンス情報", licenseText.toString());
     }
 
-    private void showTextDialog(String title, String message) {
+    private void showTextDialog(String title, CharSequence message) {
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setTitle(title);
         builder.setMessage(message);
@@ -158,9 +164,3 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
-
-
-
-
-
-
