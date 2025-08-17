@@ -1496,14 +1496,26 @@ public class SecretActivity extends AppCompatActivity {
         return webViews.get(currentTabIndex);
     }
     private void loadUrl() {
-        String url = urlEditText.getText().toString().trim();
-        if (!url.startsWith("http://") && !url.startsWith("https://") && !url.startsWith("intent:")) {
-            url = "http://" + url;
+    String input = urlEditText.getText().toString().trim();
+    if (input.isEmpty()) return;
+    String url;
+    if (input.startsWith("http://") || input.startsWith("https://") || input.startsWith("intent:")) {
+        url = input;
+    } else if (input.contains(" ") || !input.contains(".")) {
+        try {
+            String query = URLEncoder.encode(input, "UTF-8");
+            url = "https://www.google.com/search?q=" + query;
+        } catch (UnsupportedEncodingException e) {
+            Toast.makeText(this, "エンコードエラー", Toast.LENGTH_SHORT).show();
+            return;
         }
+    } else {
+        url = "http://" + input;
+    }
         WebView current = getCurrentWebView();
-        if (current != null) {
-            current.loadUrl(url);
-        }
+    if (current != null) {
+        current.loadUrl(url);
+      }
     }
     private class AndroidBridge {
     @JavascriptInterface
