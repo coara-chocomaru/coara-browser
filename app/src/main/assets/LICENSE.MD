@@ -39,7 +39,7 @@
    - 著作権: © The Android Open Source Project
 
 8. **WebKit for Android**  
-   - アーティファクト: `androidx.webkit:webkit:1.13.0`  
+   - アーティファクト: `androidx.webkit:webkit:1.14.0`  
    - ライセンス: Apache License, Version 2.0  
    - 著作権: © The Android Open Source Project
 
