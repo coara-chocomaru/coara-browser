@@ -66,16 +66,19 @@ public class SettingsActivity extends AppCompatActivity {
         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         String line;
         String[][] props = {
-                {"ro.product.model", "モデル"},
-                {"ro.product.manufacturer", "メーカー"},
-                {"ro.product.brand", "キャリア"},
-                {"ro.system.build.id", "ビルドid"},
+                {"ro.product.model", "model"},
+                {"ro.product.manufacturer", "manufacturer"},
+                {"ro.product.brand", "carrier"},
+                {"ro.system.build.id", "Build id"},
                 {"ro.system.build.version.release", "OS version"},
                 {"ro.vndk.version", "VNDK"},
                 {"ro.system.build.version.sdk", "SDK"},
                 {"ro.hardware", "SoC"},
-                {"ro.build.type", "ビルドType"},
-                {"ro.boot.slot_suffix", "A/B slot"}
+                {"ro.build.type", "Build Type"},
+                {"ro.product.locale", "Language"},
+                {"ro.sf.lcd_density", "Density"},
+                {"ro.boot.baseband", "baseband"},
+                {"ro.boot.slot_suffix", "slot"}
         };
 
         java.util.Map<String, String> propValues = new java.util.HashMap<>();
@@ -148,5 +151,6 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
 
