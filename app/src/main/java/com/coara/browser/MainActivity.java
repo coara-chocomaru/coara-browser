@@ -131,7 +131,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "cache_sentinel.txt";
-    public static final String EXTRA_CLEAR_HISTORY ="com.coara.browser.EXTRA_CLEAR_HISTORY";
+    public static final String EXTRA_CLEAR_HISTORY = "com.coara.browser.EXTRA_CLEAR_HISTORY";
 
     private static Method sSetSaveFormDataMethod;
     private static Method sSetDatabaseEnabledMethod;
@@ -149,7 +149,6 @@ public class MainActivity extends AppCompatActivity {
     private ImageView faviconImageView;
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
-    private MaterialToolbar toolbar;
     private SwipeRefreshLayout swipeRefreshLayout;
     private FrameLayout webViewContainer;
     private TextView tabCountTextView;
@@ -158,8 +157,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(
-            Runtime.getRuntime().availableProcessors());
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(4); // Reduced pool size for better resource management
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -188,25 +186,25 @@ public class MainActivity extends AppCompatActivity {
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-        try {
-            sSetSaveFormDataMethod = WebSettings.class.getMethod("setSaveFormData", boolean.class);
-        } catch (Exception e) {
-            e.printStackTrace();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            try {
+                sSetSaveFormDataMethod = WebSettings.class.getMethod("setSaveFormData", boolean.class);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            try {
+                sSetDatabaseEnabledMethod = WebSettings.class.getMethod("setDatabaseEnabled", boolean.class);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            try {
+                sSetAppCacheEnabledMethod = WebSettings.class.getMethod("setAppCacheEnabled", boolean.class);
+                sSetAppCachePathMethod = WebSettings.class.getMethod("setAppCachePath", String.class);
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
-        try {
-            sSetDatabaseEnabledMethod = WebSettings.class.getMethod("setDatabaseEnabled", boolean.class);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        try {
-            sSetAppCacheEnabledMethod = WebSettings.class.getMethod("setAppCacheEnabled", boolean.class);
-            sSetAppCachePathMethod = WebSettings.class.getMethod("setAppCachePath", String.class);
-        } catch (Exception e) {
-            e.printStackTrace();
-           }
-        }
-     }
+    }
     public static class Bookmark {
         private final String title;
         private final String url;
@@ -257,7 +255,7 @@ public class MainActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 8;
+        final int cacheSize = maxMemory / 16;
         faviconCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
@@ -486,46 +484,46 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
-    JSONArray tabsArray = new JSONArray();
-    for (WebView webView : webViews) {
-        Object tag = webView.getTag();
-        int id;
-        if (tag instanceof Integer) {
-            id = (Integer) tag;
-        } else {
-            id = nextTabId++;
-            webView.setTag(id);
-        }
-        String url = webView.getUrl();
-        if (url == null) {
-            url = "";
-        }
-        JSONObject tabObj = new JSONObject();
-        try {
-            tabObj.put("id", id);
-            tabObj.put("url", url);
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-        tabsArray.put(tabObj);
-        
-        Bundle state = new Bundle();
-        webView.saveState(state);
-        saveBundleToFile(state, "tab_state_" + id + ".dat");
+        JSONArray tabsArray = new JSONArray();
+        for (WebView webView : webViews) {
+            Object tag = webView.getTag();
+            int id;
+            if (tag instanceof Integer) {
+                id = (Integer) tag;
+            } else {
+                id = nextTabId++;
+                webView.setTag(id);
+            }
+            String url = webView.getUrl();
+            if (url == null) {
+                url = "";
+            }
+            JSONObject tabObj = new JSONObject();
+            try {
+                tabObj.put("id", id);
+                tabObj.put("url", url);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            tabsArray.put(tabObj);
+            
+            Bundle state = new Bundle();
+            webView.saveState(state);
+            saveBundleToFile(state, "tab_state_" + id + ".dat");
         }
         Object currentTag = getCurrentWebView().getTag();
         int currentTabId;
-    if (currentTag instanceof Integer) {
-        currentTabId = (Integer) currentTag;
-     } else {
-       currentTabId = nextTabId++;
-       getCurrentWebView().setTag(currentTabId);
-     }
+        if (currentTag instanceof Integer) {
+            currentTabId = (Integer) currentTag;
+        } else {
+            currentTabId = nextTabId++;
+            getCurrentWebView().setTag(currentTabId);
+        }
 
-     pref.edit()
-    .putString(KEY_TABS, tabsArray.toString())
-    .putInt(KEY_CURRENT_TAB_ID, currentTabId)
-    .apply();
+        pref.edit()
+                .putString(KEY_TABS, tabsArray.toString())
+                .putInt(KEY_CURRENT_TAB_ID, currentTabId)
+                .apply();
     }
     private void loadTabsState() {
         String tabsJsonStr = pref.getString(KEY_TABS, "[]");
@@ -597,125 +595,94 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void checkSentinelAndClearTabsIfNecessary() {
-    File cacheDir = getCacheDir();
-    File sentinel = new File(cacheDir, SENTINEL_FILENAME);
-    if (!sentinel.exists()) {
-        SharedPreferences.Editor editor = pref.edit();
-        editor.remove(KEY_TABS);
-        editor.remove(KEY_CURRENT_TAB);
-        editor.apply();
-        webViews.clear();
-       }
+        File cacheDir = getCacheDir();
+        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        if (!sentinel.exists()) {
+            SharedPreferences.Editor editor = pref.edit();
+            editor.remove(KEY_TABS);
+            editor.remove(KEY_CURRENT_TAB);
+            editor.apply();
+            webViews.clear();
+        }
     }
     private void ensureCacheSentinelExists() {
-    File cacheDir = getCacheDir();
-    File sentinel = new File(cacheDir, SENTINEL_FILENAME);
-    if (!sentinel.exists()) {
-        try {
-            sentinel.createNewFile();
-        } catch (IOException e) {
-            e.printStackTrace();
-          }
-       }
+        File cacheDir = getCacheDir();
+        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        if (!sentinel.exists()) {
+            try {
+                sentinel.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
     }
     private void applyCombinedOptimizations(WebView webView) {
-    String js = "javascript:(function() {" +
-                "  try {" +
-                "    var animatedElements = document.querySelectorAll('.animated, .transition');" +
-                "    animatedElements.forEach(function(el) {" +
-                "      if (!el.style.transform) {" + 
-                "        el.style.transform = 'translateZ(0)';" + 
-                "      }" +
-                "      if (!el.style.willChange) {" +
-                "        el.style.willChange = 'transform, opacity';" +
-                "      }" +
-                "    });" +
-                "    var fixedElements = document.querySelectorAll('.fixed');" +
-                "    fixedElements.forEach(function(el) {" +
-                "      if (el.style.position !== 'fixed') {" +
-                "        el.style.position = 'fixed';" +
-                "      }" +
-                "    });" +
-                "  } catch (e) {" +
-                "    console.error('Optimization failed: ' + e.message);" +
-                "  }" +
+        String js = "javascript:(function(){" +
+                "var animatedElements=document.querySelectorAll('.animated,.transition');" +
+                "animatedElements.forEach(function(el){" +
+                "if(!el.style.transform){el.style.transform='translateZ(0)';}" +
+                "if(!el.style.willChange){el.style.willChange='transform,opacity';}" +
+                "});" +
+                "var fixedElements=document.querySelectorAll('.fixed');" +
+                "fixedElements.forEach(function(el){" +
+                "if(el.style.position!=='fixed'){el.style.position='fixed';}" +
+                "});" +
                 "})();";
-    webView.evaluateJavascript(js, null);
+        webView.evaluateJavascript(js, null);
     }
     private void injectLazyLoading(WebView webView) {
-    String js = "javascript:(function() {" +
-                "  try {" +
-                "    var placeholder = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
-                "    var images = document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
-                "    if (images.length === 0) return;" +
-                "    images.forEach(function(img) {" +
-                "      img.setAttribute('data-lazy-loaded', 'true');" +
-                "      if (img.hasAttribute('src')) {" +
-                "        img.setAttribute('data-src', img.src);" +
-                "        img.src = placeholder;" +
-                "        img.style.opacity = '0';" +
-                "        img.style.transition = 'opacity 0.3s';" +
-                "        if (!img.style.transform) {" +
-                "          img.style.transform = 'translateZ(0)';" +
-                "        }" +
-                "      }" +
-                "    });" +
-                "    if ('IntersectionObserver' in window) {" +
-                "      var observer = new IntersectionObserver(function(entries) {" +
-                "        entries.forEach(function(entry) {" +
-                "          if (entry.isIntersecting) {" +
-                "            var img = entry.target;" +
-                "            if (img.dataset.src) {" +
-                "              img.src = img.dataset.src;" +
-                "              img.removeAttribute('data-src');" +
-                "              img.onload = function() {" +
-                "                img.style.opacity = '1';" +
-                "              };" +
-                "              img.onerror = function() {" +
-                "                console.warn('Image load failed: ' + img.src);" +
-                "              };" +
-                "            }" +
-                "            observer.unobserve(img);" +
-                "          }" +
-                "        });" +
-                "      }, { root: null, rootMargin: '0px', threshold: 0.1 });" +
-                "      images.forEach(function(img) {" +
-                "        observer.observe(img);" +
-                "      });" +
-                "    } else {" +
-                "      var loadImagesOnScroll = function() {" +
-                "        images.forEach(function(img) {" +
-                "          if (img.dataset.src && isElementInViewport(img)) {" +
-                "            img.src = img.dataset.src;" +
-                "            img.removeAttribute('data-src');" +
-                "            img.onload = function() {" +
-                "              img.style.opacity = '1';" +
-                "            };" +
-                "            img.onerror = function() {" +
-                "              console.warn('Image load failed: ' + img.src);" +
-                "            };" +
-                "          }" +
-                "        });" +
-                "      };" +
-                "      var isElementInViewport = function(el) {" +
-                "        var rect = el.getBoundingClientRect();" +
-                "        return (" +
-                "          rect.top >= 0 &&" +
-                "          rect.left >= 0 &&" +
-                "          rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&" +
-                "          rect.right <= (window.innerWidth || document.documentElement.clientWidth)" +
-                "        );" +
-                "      };" +
-                "      window.addEventListener('scroll', loadImagesOnScroll);" +
-                "      window.addEventListener('resize', loadImagesOnScroll);" +
-                "      window.addEventListener('load', loadImagesOnScroll);" +
-                "      loadImagesOnScroll();" +
-                "    }" +
-                "  } catch (e) {" +
-                "    console.error('Lazy loading failed: ' + e.message);" +
-                "  }" +
+        String js = "javascript:(function(){" +
+                "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
+                "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
+                "if(images.length===0)return;" +
+                "images.forEach(function(img){" +
+                "img.setAttribute('data-lazy-loaded','true');" +
+                "if(img.hasAttribute('src')){" +
+                "img.setAttribute('data-src',img.src);" +
+                "img.src=placeholder;" +
+                "img.style.opacity='0';" +
+                "img.style.transition='opacity 0.3s';" +
+                "if(!img.style.transform){img.style.transform='translateZ(0)';}" +
+                "}" +
+                "});" +
+                "if('IntersectionObserver'in window){" +
+                "var observer=new IntersectionObserver(function(entries){" +
+                "entries.forEach(function(entry){" +
+                "if(entry.isIntersecting){" +
+                "var img=entry.target;" +
+                "if(img.dataset.src){" +
+                "img.src=img.dataset.src;" +
+                "img.removeAttribute('data-src');" +
+                "img.onload=function(){img.style.opacity='1';};" +
+                "img.onerror=function(){console.warn('Image load failed: '+img.src);};" +
+                "}" +
+                "observer.unobserve(img);" +
+                "}" +
+                "});" +
+                "},{root:null,rootMargin:'0px',threshold:0.1});" +
+                "images.forEach(function(img){observer.observe(img);});" +
+                "}else{" +
+                "var loadImagesOnScroll=function(){" +
+                "images.forEach(function(img){" +
+                "if(img.dataset.src&&isElementInViewport(img)){" +
+                "img.src=img.dataset.src;" +
+                "img.removeAttribute('data-src');" +
+                "img.onload=function(){img.style.opacity='1';};" +
+                "img.onerror=function(){console.warn('Image load failed: '+img.src);};" +
+                "}" +
+                "});" +
+                "};" +
+                "var isElementInViewport=function(el){" +
+                "var rect=el.getBoundingClientRect();" +
+                "return(rect.top>=0&&rect.left>=0&&rect.bottom<=(window.innerHeight||document.documentElement.clientHeight)&&rect.right<=(window.innerWidth||document.documentElement.clientWidth));" +
+                "};" +
+                "window.addEventListener('scroll',loadImagesOnScroll);" +
+                "window.addEventListener('resize',loadImagesOnScroll);" +
+                "window.addEventListener('load',loadImagesOnScroll);" +
+                "loadImagesOnScroll();" +
+                "}" +
                 "})();";
-    webView.evaluateJavascript(js, null);
+        webView.evaluateJavascript(js, null);
     }
     private void applyOptimizedSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
@@ -725,7 +692,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW); // Changed to ALWAYS_ALLOW for faster mixed content handling
         settings.setDomStorageEnabled(true);
         settings.setGeolocationEnabled(false);
         settings.setTextZoom(100);
@@ -734,7 +701,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setSupportZoom(false);
         settings.setMediaPlaybackRequiresUserGesture(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-        WebView.setWebContentsDebuggingEnabled(false);
+            WebView.setWebContentsDebuggingEnabled(false);
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setOffscreenPreRaster(true);
@@ -777,29 +744,29 @@ public class MainActivity extends AppCompatActivity {
         applyOptimizedSettings(settings);
         
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-        if (sSetSaveFormDataMethod != null) {
-            try {
-                sSetSaveFormDataMethod.invoke(settings, false);
-            } catch (Exception e) {
-                e.printStackTrace();
+            if (sSetSaveFormDataMethod != null) {
+                try {
+                    sSetSaveFormDataMethod.invoke(settings, false);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            if (sSetDatabaseEnabledMethod != null) {
+                try {
+                    sSetDatabaseEnabledMethod.invoke(settings, true);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            if (sSetAppCacheEnabledMethod != null && sSetAppCachePathMethod != null) {
+                try {
+                    sSetAppCacheEnabledMethod.invoke(settings, true);
+                    sSetAppCachePathMethod.invoke(settings, getCacheDir().getAbsolutePath());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
             }
         }
-        if (sSetDatabaseEnabledMethod != null) {
-            try {
-                sSetDatabaseEnabledMethod.invoke(settings, true);
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        if (sSetAppCacheEnabledMethod != null && sSetAppCachePathMethod != null) {
-            try {
-                sSetAppCacheEnabledMethod.invoke(settings, true);
-                sSetAppCachePathMethod.invoke(settings, getCacheDir().getAbsolutePath());
-            } catch (Exception e) {
-                e.printStackTrace();
-               }
-            }
-         }
         if (zoomEnabled) {
             settings.setBuiltInZoomControls(true);
             settings.setSupportZoom(true);
@@ -1050,7 +1017,7 @@ public class MainActivity extends AppCompatActivity {
                 if (url.startsWith("https://m.youtube.com")) {
                     new Handler(Looper.getMainLooper()).postDelayed(() -> {
                         injectLazyLoading(view);
-                    }, 1000);
+                    }, 500);
                 }
                 if (url.equals(START_PAGE)) {
         
@@ -1080,25 +1047,15 @@ public class MainActivity extends AppCompatActivity {
                 if (swipeRefreshLayout.isRefreshing()) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
-                String jsOverrideHistory = "javascript:(function() {" +
-                        "function notifyUrlChange() {" +
-                        "   AndroidBridge.onUrlChange(location.href);" +
-                        "}" +
-                        "var pushState = history.pushState;" +
-                        "history.pushState = function() {" +
-                        "   pushState.apply(history, arguments);" +
-                        "   notifyUrlChange();" +
-                        "};" +
-                        "var replaceState = history.replaceState;" +
-                        "history.replaceState = function() {" +
-                        "   replaceState.apply(history, arguments);" +
-                        "   notifyUrlChange();" +
-                        "};" +
-                        "window.addEventListener('popstate', function() {" +
-                        "   notifyUrlChange();" +
-                        "});" +
+                String jsOverrideHistory = "javascript:(function(){" +
+                        "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
+                        "var pushState=history.pushState;" +
+                        "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
+                        "var replaceState=history.replaceState;" +
+                        "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
+                        "window.addEventListener('popstate',function(){notifyUrlChange();});" +
                         "notifyUrlChange();" +
-                        "})()";
+                        "})();"; 
                 view.loadUrl(jsOverrideHistory);
             }
             @Override
@@ -1292,21 +1249,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        String js = "javascript:(function() {" +
-                "fetch('" + url + "').then(function(response) {" +
-                "  return response.blob();" +
-                "}).then(function(blob) {" +
-                "  var reader = new FileReader();" +
-                "  reader.onloadend = function() {" +
-                "    var base64data = reader.result;" +
-                "    var fileName = '" + generateBlobFileName(mimeType) + "';" +
-                "    window.BlobDownloader.onBlobDownloaded(base64data, '" + (mimeType != null ? mimeType : "application/octet-stream") + "', fileName);" +
-                "  };" +
-                "  reader.readAsDataURL(blob);" +
-                "}).catch(function(error) {" +
-                "  window.BlobDownloader.onBlobDownloadError(error.toString());" +
-                "});" +
-                "})()";
+        String js = "javascript:(function(){" +
+                "fetch('" + url + "').then(function(response){return response.blob();}).then(function(blob){" +
+                "var reader=new FileReader();" +
+                "reader.onloadend=function(){var base64data=reader.result;" +
+                "var fileName='" + generateBlobFileName(mimeType) + "';" +
+                "window.BlobDownloader.onBlobDownloaded(base64data,'" + (mimeType != null ? mimeType : "application/octet-stream") + "',fileName);" +
+                "};" +
+                "reader.readAsDataURL(blob);" +
+                "}).catch(function(error){window.BlobDownloader.onBlobDownloadError(error.toString());});" +
+                "})();"; 
         getCurrentWebView().evaluateJavascript(js, null);
     }
 
@@ -1423,7 +1375,7 @@ public class MainActivity extends AppCompatActivity {
             Environment.DIRECTORY_PICTURES, fileName);
         dm.enqueue(request);
         Toast.makeText(MainActivity.this,
-            "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
+            "画像の保存の開始しました", Toast.LENGTH_SHORT).show();
     } catch (Exception e) {
         Toast.makeText(MainActivity.this,
             "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
@@ -1787,13 +1739,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void applyNegapoji() {
-        String js = "javascript:(function() {" +
-                "document.documentElement.style.filter = 'invert(1)';" +
-                "var media = document.getElementsByTagName('img');" +
-                "for (var i = 0; i < media.length; i++) {" +
-                "    media[i].style.filter = 'invert(1)';" +
-                "}" +
-                "})()";
+        String js = "javascript:(function(){" +
+                "document.documentElement.style.filter='invert(1)';" +
+                "var media=document.getElementsByTagName('img');" +
+                "for(var i=0;i<media.length;i++){media[i].style.filter='invert(1)';}" +
+                "})();";
         getCurrentWebView().evaluateJavascript(js, null);
     }
 
@@ -1878,7 +1828,7 @@ private void saveScreenshot(Bitmap bitmap) {
             String fileName = timeStamp + ".png";
             File screenshotFile = new File(screenshotDir, fileName);
             try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                bitmap.compress(Bitmap.CompressFormat.PNG, 80, fos); // Reduced quality for faster compression
                 fos.flush();
             }
             runOnUiThread(() ->
