@@ -101,16 +101,25 @@ public class SettingsActivity extends AppCompatActivity {
         reader.close();
 
         for (String[] prop : props) {
-            String val = propValues.getOrDefault(prop[0], "不明");
-            result.append(prop[1]).append("  ").append(val).append("\n");
+                String label = prop[1] + "  ";
+                String val = propValues.getOrDefault(prop[0], "不明");
+
+                result.append(label);
+                int start = result.length();
+                result.append(val).append("\n");
+                int end = result.length();
+                result.setSpan(
+                        new ForegroundColorSpan(0xFF448AFF),
+                        start, end,
+                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                 );
+              }
+
+                   } catch (Exception e) {
+                       result.append("取得失敗");
         }
-
-    } catch (Exception e) {
-        result.append("取得失敗");
-    }
-    showTextDialog("端末情報", result.toString());
-}
-
+        showTextDialog("端末情報", result.toString());
+     }
     private void showLicense() {
         StringBuilder licenseText = new StringBuilder();
         try {
@@ -151,6 +160,7 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
 
 
