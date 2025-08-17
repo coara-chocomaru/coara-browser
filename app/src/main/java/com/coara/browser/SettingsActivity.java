@@ -113,13 +113,11 @@ public class SettingsActivity extends AppCompatActivity {
                         start, end,
                         Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
                  );
-              }
-
                    } catch (Exception e) {
-                       result.append("取得失敗");
+            result.append("取得失敗");
         }
-        showTextDialog("端末情報", result.toString());
-     }
+        showTextDialog("端末情報", result);
+    }
     private void showLicense() {
         StringBuilder licenseText = new StringBuilder();
         try {
@@ -160,6 +158,7 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
 
 
