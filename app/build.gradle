@@ -9,8 +9,8 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 30
-        versionCode = 196
-        versionName = "4.1.27"
+        versionCode = 198
+        versionName = "4.1.28"
         multiDexEnabled = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
     }
@@ -65,6 +65,6 @@ dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.4.0'
     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
     implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'androidx.webkit:webkit:1.13.0'
+    implementation 'androidx.webkit:webkit:1.14.0'
     implementation 'androidx.activity:activity:1.10.1'
 }
