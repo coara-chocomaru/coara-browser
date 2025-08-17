@@ -149,6 +149,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView faviconImageView;
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
+    private MaterialToolbar toolbar;
     private SwipeRefreshLayout swipeRefreshLayout;
     private FrameLayout webViewContainer;
     private TextView tabCountTextView;
