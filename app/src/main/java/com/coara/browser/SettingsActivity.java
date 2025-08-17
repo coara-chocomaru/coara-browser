@@ -36,7 +36,7 @@ public class SettingsActivity extends AppCompatActivity {
 
         List<SettingItem> settingsList = new ArrayList<>();
         settingsList.add(new SettingItem("アプリ情報", "アプリの情報", this::openAppInfo));
-        settingsList.add(new SettingItem("端末情報", "デバイスの(getprop)情報を表示", this::showDeviceInfo));
+        settingsList.add(new SettingItem("端末情報", "デバイスの基本情報を表示", this::showDeviceInfo));
         settingsList.add(new SettingItem("アプリバージョン", getAppVersion(), null));
         settingsList.add(new SettingItem("ライセンス", "利用規約を表示", this::showLicense));
 
@@ -73,7 +73,7 @@ public class SettingsActivity extends AppCompatActivity {
                 {"ro.system.build.version.release", "OS version"},
                 {"ro.vndk.version", "VNDK"},
                 {"ro.system.build.version.sdk", "SDK"},
-                {"ro.hardware", "SoC"},
+                {"ro.hardware", "soc"},
                 {"ro.build.type", "Build Type"},
                 {"ro.product.locale", "Language"},
                 {"ro.sf.lcd_density", "Density"},
@@ -151,6 +151,7 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
 
 
 
