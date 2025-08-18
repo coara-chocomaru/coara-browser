@@ -156,8 +156,8 @@ public class SecretActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(2);
-    private final ArrayList<WebView> webViews = new ArrayList<>(MAX_TABS); 
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+    private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
     private int currentHistoryIndex = -1;
@@ -185,19 +185,25 @@ public class SecretActivity extends AppCompatActivity {
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            try {
-                sSetSaveFormDataMethod = WebSettings.class.getMethod("setSaveFormData", boolean.class);
-            } catch (Exception ignored) {}
-            try {
-                sSetDatabaseEnabledMethod = WebSettings.class.getMethod("setDatabaseEnabled", boolean.class);
-            } catch (Exception ignored) {}
-            try {
-                sSetAppCacheEnabledMethod = WebSettings.class.getMethod("setAppCacheEnabled", boolean.class);
-                sSetAppCachePathMethod = WebSettings.class.getMethod("setAppCachePath", String.class);
-            } catch (Exception ignored) {}
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+        try {
+            sSetSaveFormDataMethod = WebSettings.class.getMethod("setSaveFormData", boolean.class);
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-    }
+        try {
+            sSetDatabaseEnabledMethod = WebSettings.class.getMethod("setDatabaseEnabled", boolean.class);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        try {
+            sSetAppCacheEnabledMethod = WebSettings.class.getMethod("setAppCacheEnabled", boolean.class);
+            sSetAppCachePathMethod = WebSettings.class.getMethod("setAppCachePath", String.class);
+        } catch (Exception e) {
+            e.printStackTrace();
+           }
+        }
+     }
     public static class Bookmark {
         private final String title;
         private final String url;
@@ -221,16 +227,16 @@ public class SecretActivity extends AppCompatActivity {
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.secret_main);
+    super.onCreate(savedInstanceState);
+    setContentView(R.layout.secret_main);
 
-        createNotificationChannel();
+    createNotificationChannel();
 
-        toolbar = findViewById(R.id.topAppBar);
-        setSupportActionBar(toolbar);
-        if (getSupportActionBar() != null) {
-            getSupportActionBar().setTitle("");
-        }
+    toolbar = findViewById(R.id.topAppBar);
+    setSupportActionBar(toolbar);
+    if (getSupportActionBar() != null) {
+        getSupportActionBar().setTitle("");
+    }
 
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         checkSentinelAndClearTabsIfNecessary();
@@ -245,7 +251,7 @@ public class SecretActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 32; 
+        final int cacheSize = maxMemory / 16;
         faviconCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
@@ -282,10 +288,11 @@ public class SecretActivity extends AppCompatActivity {
             initialWebView.loadUrl(START_PAGE);
         }
         updateTabCount();
-        boolean shouldClear = getIntent().getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
+        boolean shouldClear = getIntent()
+            .getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
         if (shouldClear) {
             clear0();
-        }
+       }
 
         preInitializeWebView();
         if (!defaultLoadsImagesAutomaticallyInitialized && !webViews.isEmpty()) {
@@ -320,13 +327,13 @@ public class SecretActivity extends AppCompatActivity {
 
         swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> {
             WebView current = getCurrentWebView();
-            return current != null && current.getScrollY() > 0;
+            return (current != null && current.getScrollY() > 0);
         });
         swipeRefreshLayout.setOnRefreshListener(() -> {
             WebView current = getCurrentWebView();
             if (current != null) current.reload();
         });
-
+            
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             permissionLauncher = registerForActivityResult(
                 new ActivityResultContracts.RequestPermission(),
@@ -352,10 +359,14 @@ public class SecretActivity extends AppCompatActivity {
                     break;
                 }
             }
-            if (allGranted) {
-                pendingPermissionRequest.grant(pendingPermissionRequest.getResources());
-            } else {
-                pendingPermissionRequest.deny();
+            try {
+                if (allGranted) {
+                    pendingPermissionRequest.grant(pendingPermissionRequest.getResources());
+                } else {
+                    pendingPermissionRequest.deny();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
             }
             pendingPermissionRequest = null;
         }
