@@ -256,7 +256,7 @@ public class MainActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 16;
+        final int cacheSize = maxMemory / 32;
         faviconCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
