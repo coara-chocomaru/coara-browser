@@ -127,6 +127,7 @@ public class SecretActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String CHANNEL_ID = "download_channel";
     private static final String START_PAGE = "file:///android_asset/secret.html";
+    private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "secret_cache_sentinel.txt";
@@ -137,9 +138,7 @@ public class SecretActivity extends AppCompatActivity {
     private View findInPageBarView;
     private EditText etFindQuery;
     private TextView tvFindCount;
-    private Button btnFindPrev;
-    private Button btnFindNext;
-    private Button btnFindClose;
+    private Button btnFindPrev, btnFindNext, btnFindClose;
     private PermissionRequest pendingPermissionRequest = null;
     private ActivityResultLauncher<String[]> permissionRequestLauncher;
 
@@ -157,8 +156,8 @@ public class SecretActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
-    private final ArrayList<WebView> webViews = new ArrayList<>(MAX_TABS);
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(2);
+    private final ArrayList<WebView> webViews = new ArrayList<>(MAX_TABS); 
     private int currentTabIndex = 0;
     private int nextTabId = 0;
     private int currentHistoryIndex = -1;
@@ -166,7 +165,7 @@ public class SecretActivity extends AppCompatActivity {
     private int totalMatches = 0;
     private boolean isBackNavigation = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
-    private final List<HistoryItem> historyItems = new ArrayList<>(MAX_HISTORY_SIZE);
+    private final List<HistoryItem> historyItems = new ArrayList<>();
 
     private boolean darkModeEnabled = false;
     private boolean basicAuthEnabled = false;
@@ -189,20 +188,17 @@ public class SecretActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
                 sSetSaveFormDataMethod = WebSettings.class.getMethod("setSaveFormData", boolean.class);
-            } catch (NoSuchMethodException ignored) {
-            }
+            } catch (Exception ignored) {}
             try {
                 sSetDatabaseEnabledMethod = WebSettings.class.getMethod("setDatabaseEnabled", boolean.class);
-            } catch (NoSuchMethodException ignored) {
-            }
+            } catch (Exception ignored) {}
             try {
                 sSetAppCacheEnabledMethod = WebSettings.class.getMethod("setAppCacheEnabled", boolean.class);
                 sSetAppCachePathMethod = WebSettings.class.getMethod("setAppCachePath", String.class);
-            } catch (NoSuchMethodException ignored) {
-            }
+            } catch (Exception ignored) {}
         }
     }
-    public static final class Bookmark {
+    public static class Bookmark {
         private final String title;
         private final String url;
         public Bookmark(String title, String url) {
@@ -213,7 +209,7 @@ public class SecretActivity extends AppCompatActivity {
         public String getUrl() { return url; }
     }
 
-    public static final class HistoryItem {
+    public static class HistoryItem {
         private final String title;
         private final String url;
         public HistoryItem(String title, String url) {
@@ -249,7 +245,7 @@ public class SecretActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 16;
+        final int cacheSize = maxMemory / 32; 
         faviconCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
@@ -278,7 +274,8 @@ public class SecretActivity extends AppCompatActivity {
             loadTabsState();
         } else {
             WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId++);
+            initialWebView.setTag(nextTabId);
+            nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
@@ -429,12 +426,13 @@ public class SecretActivity extends AppCompatActivity {
     private void saveBundleToFile(Bundle bundle, String fileName) {
         File file = new File(getFilesDir(), fileName);
         Parcel parcel = Parcel.obtain();
-        bundle.writeToParcel(parcel, 0);
-        byte[] bytes = parcel.marshall();
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            fos.write(bytes);
-        } catch (IOException ignored) {
-        } finally {
+        try {
+            bundle.writeToParcel(parcel, 0);
+            byte[] bytes = parcel.marshall();
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(bytes);
+            }
+        } catch (Exception ignored) {} finally {
             parcel.recycle();
         }
     }
@@ -451,7 +449,7 @@ public class SecretActivity extends AppCompatActivity {
             Bundle bundle = Bundle.CREATOR.createFromParcel(parcel);
             parcel.recycle();
             return bundle;
-        } catch (IOException ignored) {
+        } catch (Exception ignored) {
             return null;
         }
     }
@@ -483,12 +481,17 @@ public class SecretActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        backgroundExecutor.shutdownNow();
+        backgroundExecutor.shutdown();
+        for (WebView wv : webViews) {
+            wv.destroy();
+        }
+        webViews.clear();
     }
 
     private void saveTabsState() {
         JSONArray tabsArray = new JSONArray();
-        for (int i = 0, size = webViews.size(); i < size; i++) {
+        int size = webViews.size();
+        for (int i = 0; i < size; i++) {
             WebView webView = webViews.get(i);
             int id = (int) webView.getTag();
             String url = webView.getUrl();
@@ -497,8 +500,7 @@ public class SecretActivity extends AppCompatActivity {
             try {
                 tabObj.put("id", id);
                 tabObj.put("url", url);
-            } catch (JSONException ignored) {
-            }
+            } catch (JSONException ignored) {}
             tabsArray.put(tabObj);
             Bundle state = new Bundle();
             webView.saveState(state);
@@ -518,7 +520,8 @@ public class SecretActivity extends AppCompatActivity {
             webViews.clear();
             webViewContainer.removeAllViews();
             int maxId = 0;
-            for (int i = 0, length = tabsArray.length(); i < length; i++) {
+            int length = tabsArray.length();
+            for (int i = 0; i < length; i++) {
                 JSONObject tabObj = tabsArray.getJSONObject(i);
                 int id = tabObj.getInt("id");
                 String url = tabObj.getString("url");
@@ -540,14 +543,16 @@ public class SecretActivity extends AppCompatActivity {
             nextTabId = maxId + 1;
             if (webViews.isEmpty()) {
                 WebView initialWebView = createNewWebView();
-                initialWebView.setTag(nextTabId++);
+                initialWebView.setTag(nextTabId);
+                nextTabId++;
                 webViews.add(initialWebView);
                 currentTabIndex = 0;
                 webViewContainer.addView(initialWebView);
                 initialWebView.loadUrl(START_PAGE);
             } else {
                 boolean found = false;
-                for (int i = 0, size = webViews.size(); i < size; i++) {
+                int size = webViews.size();
+                for (int i = 0; i < size; i++) {
                     if ((int) webViews.get(i).getTag() == currentTabId) {
                         currentTabIndex = i;
                         found = true;
@@ -561,7 +566,8 @@ public class SecretActivity extends AppCompatActivity {
             }
         } catch (JSONException ignored) {
             WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId++);
+            initialWebView.setTag(nextTabId);
+            nextTabId++;
             webViews.clear();
             webViews.add(initialWebView);
             currentTabIndex = 0;
@@ -573,7 +579,7 @@ public class SecretActivity extends AppCompatActivity {
     }
     private void updateTabCount() {
         if (tabCountTextView != null) {
-            tabCountTextView.setText(String.valueOf(webViews.size()));
+            tabCountTextView.setText(Integer.toString(webViews.size()));
         }
     }
     private void checkSentinelAndClearTabsIfNecessary() {
@@ -593,16 +599,15 @@ public class SecretActivity extends AppCompatActivity {
         if (!sentinel.exists()) {
             try {
                 sentinel.createNewFile();
-            } catch (IOException ignored) {
-            }
+            } catch (IOException ignored) {}
         }
     }
     private void applyCombinedOptimizations(WebView webView) {
-        final String js = "javascript:(function() {try{var animatedElements=document.querySelectorAll('.animated,.transition');animatedElements.forEach(function(el){if(!el.style.transform){el.style.transform='translateZ(0)'}if(!el.style.willChange){el.style.willChange='transform,opacity'}});var fixedElements=document.querySelectorAll('.fixed');fixedElements.forEach(function(el){if(el.style.position!=='fixed'){el.style.position='fixed'}});}catch(e){console.error('Optimization failed: '+e.message)}})();";
+        String js = "javascript:(function() {try{var animatedElements=document.querySelectorAll('.animated,.transition');for(var i=0;i<animatedElements.length;i++){var el=animatedElements[i];if(!el.style.transform){el.style.transform='translateZ(0)';}if(!el.style.willChange){el.style.willChange='transform,opacity';}}var fixedElements=document.querySelectorAll('.fixed');for(var i=0;i<fixedElements.length;i++){var el=fixedElements[i];if(el.style.position!=='fixed'){el.style.position='fixed';}}}catch(e){console.error('Optimization failed: '+e.message);}})();"; // Minified JS for faster injection
         webView.evaluateJavascript(js, null);
     }
     private void injectLazyLoading(WebView webView) {
-        final String js = "javascript:(function(){try{var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');if(images.length===0)return;images.forEach(function(img){img.setAttribute('data-lazy-loaded','true');if(img.hasAttribute('src')){img.setAttribute('data-src',img.src);img.src=placeholder;img.style.opacity='0';img.style.transition='opacity 0.3s';if(!img.style.transform){img.style.transform='translateZ(0)'}}});if('IntersectionObserver'in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting){var img=entry.target;if(img.dataset.src){img.src=img.dataset.src;img.removeAttribute('data-src');img.onload=function(){img.style.opacity='1'};img.onerror=function(){console.warn('Image load failed: '+img.src)};observer.unobserve(img)}})},{root:null,rootMargin:'0px',threshold:0.1});images.forEach(function(img){observer.observe(img)})}else{var loadImagesOnScroll=function(){images.forEach(function(img){if(img.dataset.src&&isElementInViewport(img)){img.src=img.dataset.src;img.removeAttribute('data-src');img.onload=function(){img.style.opacity='1'};img.onerror=function(){console.warn('Image load failed: '+img.src)}}})};var isElementInViewport=function(el){var rect=el.getBoundingClientRect();return(rect.top>=0&&rect.left>=0&&rect.bottom<=(window.innerHeight||document.documentElement.clientHeight)&&rect.right<=(window.innerWidth||document.documentElement.clientWidth))};window.addEventListener('scroll',loadImagesOnScroll);window.addEventListener('resize',loadImagesOnScroll);window.addEventListener('load',loadImagesOnScroll);loadImagesOnScroll()}}catch(e){console.error('Lazy loading failed: '+e.message)}})();";
+        String js = "javascript:(function() {try{var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');if(images.length===0)return;for(var i=0;i<images.length;i++){var img=images[i];img.setAttribute('data-lazy-loaded','true');if(img.hasAttribute('src')){img.setAttribute('data-src',img.src);img.src=placeholder;img.style.opacity='0';img.style.transition='opacity 0.3s';if(!img.style.transform){img.style.transform='translateZ(0)';}}}if('IntersectionObserver'in window){var observer=new IntersectionObserver(function(entries){entries.forEach(function(entry){if(entry.isIntersecting){var img=entry.target;if(img.dataset.src){img.src=img.dataset.src;img.removeAttribute('data-src');img.onload=function(){img.style.opacity='1';};img.onerror=function(){console.warn('Image load failed: '+img.src);};}observer.unobserve(img);}});},{root:null,rootMargin:'0px',threshold:0.1});for(var i=0;i<images.length;i++){observer.observe(images[i]);}}else{var loadImagesOnScroll=function(){for(var i=0;i<images.length;i++){var img=images[i];if(img.dataset.src&&isElementInViewport(img)){img.src=img.dataset.src;img.removeAttribute('data-src');img.onload=function(){img.style.opacity='1';};img.onerror=function(){console.warn('Image load failed: '+img.src);};}}};var isElementInViewport=function(el){var rect=el.getBoundingClientRect();return(rect.top>=0&&rect.left>=0&&rect.bottom<=(window.innerHeight||document.documentElement.clientHeight)&&rect.right<=(window.innerWidth||document.documentElement.clientWidth));};window.addEventListener('scroll',loadImagesOnScroll);window.addEventListener('resize',loadImagesOnScroll);window.addEventListener('load',loadImagesOnScroll);loadImagesOnScroll();}}catch(e){console.error('Lazy loading failed: '+e.message);}})();"; // Minified JS
         webView.evaluateJavascript(js, null);
     }
     private void applyOptimizedSettings(WebSettings settings) {
@@ -625,7 +630,8 @@ public class SecretActivity extends AppCompatActivity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
             WebView.setWebContentsDebuggingEnabled(false);
         }
-        CookieManager.getInstance().setAcceptCookie(false);
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(false);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             settings.setOffscreenPreRaster(true);
         }
@@ -664,26 +670,23 @@ public class SecretActivity extends AppCompatActivity {
         String defaultUA = settings.getUserAgentString();
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
-
+        
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             if (sSetSaveFormDataMethod != null) {
                 try {
                     sSetSaveFormDataMethod.invoke(settings, false);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
             if (sSetDatabaseEnabledMethod != null) {
                 try {
                     sSetDatabaseEnabledMethod.invoke(settings, true);
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
             if (sSetAppCacheEnabledMethod != null && sSetAppCachePathMethod != null) {
                 try {
                     sSetAppCacheEnabledMethod.invoke(settings, true);
                     sSetAppCachePathMethod.invoke(settings, getCacheDir().getAbsolutePath());
-                } catch (Exception ignored) {
-                }
+                } catch (Exception ignored) {}
             }
         }
         if (zoomEnabled) {
@@ -792,13 +795,12 @@ public class SecretActivity extends AppCompatActivity {
                                 if (webViews.size() >= MAX_TABS) {
                                     Toast.makeText(SecretActivity.this,
                                         "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-                                    } else {
-                                        WebView newWebView = createNewWebView();
-                                        webViews.add(newWebView);
-                                        updateTabCount();
-                                        switchToTab(webViews.size() - 1);
-                                        newWebView.loadUrl(extra);
-                                    }
+                                } else {
+                                    WebView newWebView = createNewWebView();
+                                    webViews.add(newWebView);
+                                    updateTabCount();
+                                    switchToTab(webViews.size() - 1);
+                                    newWebView.loadUrl(extra);
                                 }
                             }
                         }).show();
@@ -859,7 +861,7 @@ public class SecretActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return null;
+                return null; // Avoid unnecessary overrides
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -884,8 +886,7 @@ public class SecretActivity extends AppCompatActivity {
                             }
                             return true;
                         }
-                    } catch (Exception ignored) {
-                    }
+                    } catch (Exception ignored) {}
                 }
                 return false;
             }
@@ -911,14 +912,13 @@ public class SecretActivity extends AppCompatActivity {
                             }
                             return true;
                         }
-                    } catch (Exception ignored) {
-                    }
+                    } catch (Exception ignored) {}
                 }
                 return false;
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                String lowerUrl = url.toLowerCase(Locale.ROOT);
+                String lowerUrl = url.toLowerCase(Locale.ROOT); // Use Locale.ROOT for faster lowercase
                 boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
                 view.getSettings().setCacheMode(isMatched ? WebSettings.LOAD_DEFAULT : WebSettings.LOAD_NO_CACHE);
                 urlEditText.setText(url);
@@ -956,8 +956,8 @@ public class SecretActivity extends AppCompatActivity {
                 if (swipeRefreshLayout.isRefreshing()) {
                     swipeRefreshLayout.setRefreshing(false);
                 }
-                final String jsOverrideHistory = "javascript:(function(){function notifyUrlChange(){AndroidBridge.onUrlChange(location.href)}var pushState=history.pushState;history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange()};var replaceState=history.replaceState;history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange()};window.addEventListener('popstate',function(){notifyUrlChange()});notifyUrlChange()})()";
-                view.evaluateJavascript(jsOverrideHistory, null);
+                String jsOverrideHistory = "javascript:(function(){function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}var pushState=history.pushState;history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};var replaceState=history.replaceState;history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};window.addEventListener('popstate',function(){notifyUrlChange();});notifyUrlChange();})()"; // Minified
+                view.loadUrl(jsOverrideHistory);
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
@@ -1011,7 +1011,7 @@ public class SecretActivity extends AppCompatActivity {
            @Override
            public void onPermissionRequest(final PermissionRequest request) {
             String[] resources = request.getResources();
-            List<String> permissionsNeeded = new ArrayList<>();
+            List<String> permissionsNeeded = new ArrayList<>(resources.length);
 
             for (String resource : resources) {
                 if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
@@ -1145,7 +1145,7 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        String js = "javascript:(function(){fetch('" + url + "').then(function(response){return response.blob()}).then(function(blob){var reader=new FileReader();reader.onloadend=function(){var base64data=reader.result;var fileName='" + generateBlobFileName(mimeType) + "';window.BlobDownloader.onBlobDownloaded(base64data,'" + (mimeType != null ? mimeType : "application/octet-stream") + "',fileName)};reader.readAsDataURL(blob)}).catch(function(error){window.BlobDownloader.onBlobDownloadError(error.toString())})})()";
+        String js = "javascript:(function(){fetch('" + url + "').then(function(response){return response.blob();}).then(function(blob){var reader=new FileReader();reader.onloadend=function(){var base64data=reader.result;var fileName='" + generateBlobFileName(mimeType) + "';window.BlobDownloader.onBlobDownloaded(base64data,'" + (mimeType != null ? mimeType : "application/octet-stream") + "',fileName);};reader.readAsDataURL(blob);}).catch(function(error){window.BlobDownloader.onBlobDownloadError(error.toString());});})()"; // Minified
         getCurrentWebView().evaluateJavascript(js, null);
     }
 
@@ -1162,11 +1162,11 @@ public class SecretActivity extends AppCompatActivity {
                 ext = ".html";
             }
         }
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date()); // Use Locale.ROOT for consistency
         return "blob_download_" + timeStamp + ext;
     }
 
-    private final class BlobDownloadInterface {
+    private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
             runOnUiThread(() -> {
@@ -1196,77 +1196,77 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void saveImage(String imageUrl) {
-        if (imageUrl != null && imageUrl.startsWith("data:")) {
-            int commaIndex = imageUrl.indexOf(',');
-            if (commaIndex == -1) {
-                Toast.makeText(SecretActivity.this, "無効なデータURL", Toast.LENGTH_SHORT).show();
+        try {
+            if (imageUrl != null && imageUrl.startsWith("data:")) {
+                int commaIndex = imageUrl.indexOf(',');
+                if (commaIndex == -1) {
+                    Toast.makeText(SecretActivity.this, "無効なデータURL", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String metadata = imageUrl.substring(5, commaIndex); 
+                boolean isBase64 = metadata.contains("base64");
+                String mimeType = "image/*";
+                if (metadata.contains(";")) {
+                    mimeType = metadata.split(";")[0];
+                }
+                byte[] imageData;
+                if (isBase64) {
+                    String base64Data = imageUrl.substring(commaIndex + 1);
+                    imageData = Base64.decode(base64Data, Base64.DEFAULT);
+                } else {
+                    String dataPart = imageUrl.substring(commaIndex + 1);
+                    imageData = dataPart.getBytes("UTF-8");
+                }
+                String fileName = "saved_image_" + System.currentTimeMillis();
+                if (mimeType.equalsIgnoreCase("image/png")) {
+                    fileName += ".png";
+                } else if (mimeType.equalsIgnoreCase("image/jpeg")) {
+                    fileName += ".jpg";
+                } else if (mimeType.equalsIgnoreCase("image/bmp")) {
+                    fileName += ".bmp";
+                } else if (mimeType.equalsIgnoreCase("image/gif")) {
+                    fileName += ".gif";
+                } else if (mimeType.equalsIgnoreCase("image/img")) {
+                    fileName += ".img";
+                }
+                File picturesDir = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_PICTURES);
+                File file = new File(picturesDir, fileName);
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    fos.write(imageData);
+                    fos.flush();
+                }
+                Toast.makeText(SecretActivity.this,
+                    "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
+                    Toast.LENGTH_LONG).show();
                 return;
             }
-            String metadata = imageUrl.substring(5, commaIndex); 
-            boolean isBase64 = metadata.contains("base64");
-            String mimeType = "image/*";
-            if (metadata.contains(";")) {
-                mimeType = metadata.split(";")[0];
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(SecretActivity.this,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(SecretActivity.this,
+                    "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
+                return;
             }
-            byte[] imageData;
-            if (isBase64) {
-                String base64Data = imageUrl.substring(commaIndex + 1);
-                imageData = Base64.decode(base64Data, Base64.DEFAULT);
-            } else {
-                String dataPart = imageUrl.substring(commaIndex + 1);
-                try {
-                    imageData = dataPart.getBytes("UTF-8");
-                } catch (UnsupportedEncodingException ignored) {
-                    imageData = dataPart.getBytes();
-                }
-            }
-            String fileName = "saved_image_" + System.currentTimeMillis();
-            if (mimeType.equalsIgnoreCase("image/png")) {
-                fileName += ".png";
-            } else if (mimeType.equalsIgnoreCase("image/jpeg")) {
-                fileName += ".jpg";
-            } else if (mimeType.equalsIgnoreCase("image/bmp")) {
-                fileName += ".bmp";
-            } else if (mimeType.equalsIgnoreCase("image/gif")) {
-                fileName += ".gif";
-            } else if (mimeType.equalsIgnoreCase("image/img")) {
-                fileName += ".img";
-            }
-            File picturesDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES);
-            File file = new File(picturesDir, fileName);
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(imageData);
-                fos.flush();
-            } catch (IOException ignored) {
-            }
+            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            DownloadManager.Request request =
+                new DownloadManager.Request(Uri.parse(imageUrl));
+            request.setMimeType("image/*");
+            String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
+            request.setTitle(fileName);
+            request.setDescription("画像を保存中...");
+            request.setNotificationVisibility(
+                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(
+                Environment.DIRECTORY_PICTURES, fileName);
+            dm.enqueue(request);
             Toast.makeText(SecretActivity.this,
-                "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
-                Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            ContextCompat.checkSelfPermission(SecretActivity.this,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            != PackageManager.PERMISSION_GRANTED) {
+                "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
+        } catch (Exception ignored) {
             Toast.makeText(SecretActivity.this,
-                "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
-            return;
+                "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
         }
-        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        DownloadManager.Request request =
-            new DownloadManager.Request(Uri.parse(imageUrl));
-        request.setMimeType("image/*");
-        String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
-        request.setTitle(fileName);
-        request.setDescription("画像を保存中...");
-        request.setNotificationVisibility(
-            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_PICTURES, fileName);
-        dm.enqueue(request);
-        Toast.makeText(SecretActivity.this,
-            "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
     }
     private void exportBookmarksToFile() {
         final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
@@ -1274,7 +1274,7 @@ public class SecretActivity extends AppCompatActivity {
         if (!downloadDir.exists()) {
             downloadDir.mkdirs();
         }
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
         final File file;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             file = new File(downloadDir, "JSON-bookmark" + timeStamp + ".txt");
@@ -1284,6 +1284,7 @@ public class SecretActivity extends AppCompatActivity {
         backgroundExecutor.execute(() -> {
             try (FileOutputStream fos = new FileOutputStream(file)) {
                 fos.write(bookmarksJson.getBytes("UTF-8"));
+                fos.flush();
                 runOnUiThread(() ->
                     Toast.makeText(SecretActivity.this, "ブックマークをエクスポートしました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show()
                 );
@@ -1303,7 +1304,8 @@ public class SecretActivity extends AppCompatActivity {
             }
         }
         WebView newWebView = createNewWebView();
-        newWebView.setTag(nextTabId++);
+        newWebView.setTag(nextTabId);
+        nextTabId++;
         webViews.add(newWebView);
         updateTabCount();
         switchToTab(webViews.size() - 1);
@@ -1343,6 +1345,7 @@ public class SecretActivity extends AppCompatActivity {
                 String query = URLEncoder.encode(input, "UTF-8");
                 url = "https://www.google.com/search?q=" + query;
             } catch (UnsupportedEncodingException ignored) {
+                Toast.makeText(this, "エンコードエラー", Toast.LENGTH_SHORT).show();
                 return;
             }
         } else {
@@ -1353,7 +1356,7 @@ public class SecretActivity extends AppCompatActivity {
             current.loadUrl(url);
         }
     }
-    private final class AndroidBridge {
+    private class AndroidBridge {
         @JavascriptInterface
         public void onUrlChange(final String url) {
             runOnUiThread(() -> {
@@ -1616,7 +1619,8 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
     private void clearSecretDataAndReturnToMain() {
-        for (int i = 0, size = webViews.size(); i < size; i++) {
+        int size = webViews.size();
+        for (int i = 0; i < size; i++) {
             WebView webView = webViews.get(i);
             webView.clearCache(true);
             webView.clearHistory();
@@ -1633,9 +1637,9 @@ public class SecretActivity extends AppCompatActivity {
 
         SharedPreferences secretPrefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         secretPrefs.edit()
-            .remove(KEY_HISTORY)
-            .remove(KEY_TABS)
-            .apply();
+                .remove(KEY_HISTORY)
+                .remove(KEY_TABS)
+                .apply();
 
         Intent intent = new Intent(this, MainActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -1644,7 +1648,7 @@ public class SecretActivity extends AppCompatActivity {
         finish();
     }
     private void applyNegapoji() {
-        final String js = "javascript:(function(){document.documentElement.style.filter='invert(1)';var media=document.getElementsByTagName('img');for(var i=0;i<media.length;i++){media[i].style.filter='invert(1)'}})()";
+        String js = "javascript:(function(){document.documentElement.style.filter='invert(1)';var media=document.getElementsByTagName('img');for(var i=0;i<media.length;i++){media[i].style.filter='invert(1)';}})()"; // Minified
         getCurrentWebView().evaluateJavascript(js, null);
     }
 
@@ -1665,7 +1669,8 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void clearPageCache() {
-        for (int i = 0, size = webViews.size(); i < size; i++) {
+        int size = webViews.size();
+        for (int i = 0; i < size; i++) {
             webViews.get(i).clearCache(true);
         }
     }
@@ -1673,7 +1678,8 @@ public class SecretActivity extends AppCompatActivity {
     private void clearTabs() {
         WebView current = getCurrentWebView();
         current.loadUrl(START_PAGE);
-        for (int i = 0, size = webViews.size(); i < size; i++) {
+        int size = webViews.size();
+        for (int i = 0; i < size; i++) {
             if (i != currentTabIndex) {
                 webViews.get(i).destroy();
             }
@@ -1720,7 +1726,7 @@ public class SecretActivity extends AppCompatActivity {
                 if (!screenshotDir.exists()) {
                     screenshotDir.mkdirs();
                 }
-                String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+                String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ROOT).format(new Date());
                 String fileName = timeStamp + ".png";
                 File screenshotFile = new File(screenshotDir, fileName);
                 try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
@@ -1734,12 +1740,15 @@ public class SecretActivity extends AppCompatActivity {
                 runOnUiThread(() ->
                     Toast.makeText(SecretActivity.this, "スクリーンショット保存中にエラー", Toast.LENGTH_LONG).show()
                 );
+            } finally {
+                bitmap.recycle(); // Recycle bitmap to free memory
             }
         });
     }
 
     private void updateDarkMode() {
-        for (int i = 0, size = webViews.size(); i < size; i++) {
+        int size = webViews.size();
+        for (int i = 0; i < size; i++) {
             WebView webView = webViews.get(i);
             WebSettings settings = webView.getSettings();
             if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
@@ -1754,7 +1763,8 @@ public class SecretActivity extends AppCompatActivity {
 
     private void enableCT3UA() {
         WebSettings settings = getCurrentWebView().getSettings();
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 7.0; TAB-A03-BR3 Build/02.05.000; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 7.0; TAB-A03-BR3 Build/02.05.000; wv) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
         Toast.makeText(SecretActivity.this, "CT3UA適用", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
@@ -1803,12 +1813,14 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void disablejs() {
-        getCurrentWebView().getSettings().setJavaScriptEnabled(true);
+        WebSettings settings = getCurrentWebView().getSettings();
+        settings.setJavaScriptEnabled(true);
         Toast.makeText(SecretActivity.this, "JavaScript有効", Toast.LENGTH_SHORT).show();
     }
 
     private void enablejs() {
-        getCurrentWebView().getSettings().setJavaScriptEnabled(false);
+        WebSettings settings = getCurrentWebView().getSettings();
+        settings.setJavaScriptEnabled(false);
         Toast.makeText(SecretActivity.this, "JavaScript無効", Toast.LENGTH_SHORT).show();
     }
 
@@ -1828,7 +1840,8 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void enableimgblock() {
-        getCurrentWebView().getSettings().setLoadsImagesAutomatically(false);
+        WebSettings settings = getCurrentWebView().getSettings();
+        settings.setLoadsImagesAutomatically(false);
         reloadCurrentPage();
         Toast.makeText(SecretActivity.this, "画像ブロック有効", Toast.LENGTH_SHORT).show();
     }
@@ -2049,8 +2062,10 @@ public class SecretActivity extends AppCompatActivity {
             String json = readTextFromUri(uri);
             parseAndImportBookmarks(json);
             Toast.makeText(SecretActivity.this, "ブックマークをインポートしました", Toast.LENGTH_SHORT).show();
-        } catch (IOException | JSONException ignored) {
+        } catch (IOException ignored) {
             Toast.makeText(SecretActivity.this, "ファイルの読み取りに失敗しました", Toast.LENGTH_SHORT).show();
+        } catch (JSONException ignored) {
+            Toast.makeText(SecretActivity.this, "JSON解析エラー", Toast.LENGTH_SHORT).show();
         }
     }
     private String readTextFromUri(Uri uri) throws IOException {
@@ -2067,7 +2082,8 @@ public class SecretActivity extends AppCompatActivity {
     private void parseAndImportBookmarks(String jsonStr) throws JSONException {
         JSONArray array = new JSONArray(jsonStr);
         bookmarks.clear();
-        for (int i = 0, length = array.length(); i < length; i++) {
+        int length = array.length();
+        for (int i = 0; i < length; i++) {
             JSONObject obj = array.getJSONObject(i);
             String title = obj.optString("title", "Untitled");
             String url = obj.optString("url", "");
@@ -2088,7 +2104,8 @@ public class SecretActivity extends AppCompatActivity {
     private void parseAndAddBookmarks(String jsonStr) {
         try {
             JSONArray array = new JSONArray(jsonStr);
-            for (int i = 0, length = array.length(); i < length; i++) {
+            int length = array.length();
+            for (int i = 0; i < length; i++) {
                 JSONObject obj = array.getJSONObject(i);
                 String title = obj.optString("title", "Untitled");
                 String url = obj.optString("url", "");
@@ -2096,20 +2113,19 @@ public class SecretActivity extends AppCompatActivity {
                     bookmarks.add(new Bookmark(title, url));
                 }
             }
-        } catch (JSONException ignored) {
-        }
+        } catch (JSONException ignored) {}
     }
 
     private void saveBookmarks() {
         JSONArray array = new JSONArray();
-        for (int i = 0, size = bookmarks.size(); i < size; i++) {
+        int size = bookmarks.size();
+        for (int i = 0; i < size; i++) {
             Bookmark bm = bookmarks.get(i);
             JSONObject obj = new JSONObject();
             try {
                 obj.put("title", bm.getTitle());
                 obj.put("url", bm.getUrl());
-            } catch (JSONException ignored) {
-            }
+            } catch (JSONException ignored) {}
             array.put(obj);
         }
         pref.edit().putString(KEY_BOOKMARKS, array.toString()).apply();
@@ -2119,26 +2135,26 @@ public class SecretActivity extends AppCompatActivity {
         String jsonStr = pref.getString(KEY_HISTORY, "[]");
         try {
             JSONArray array = new JSONArray(jsonStr);
-            for (int i = 0, length = array.length(); i < length; i++) {
+            int length = array.length();
+            for (int i = 0; i < length; i++) {
                 JSONObject obj = array.getJSONObject(i);
                 String title = obj.getString("title");
                 String url = obj.getString("url");
                 historyItems.add(new HistoryItem(title, url));
             }
-        } catch (JSONException ignored) {
-        }
+        } catch (JSONException ignored) {}
     }
 
     private void saveHistory() {
         JSONArray array = new JSONArray();
-        for (int i = 0, size = historyItems.size(); i < size; i++) {
+        int size = historyItems.size();
+        for (int i = 0; i < size; i++) {
             HistoryItem item = historyItems.get(i);
             JSONObject obj = new JSONObject();
             try {
                 obj.put("title", item.getTitle());
                 obj.put("url", item.getUrl());
-            } catch (JSONException ignored) {
-            }
+            } catch (JSONException ignored) {}
             array.put(obj);
         }
         pref.edit().putString(KEY_HISTORY, array.toString()).apply();
@@ -2158,11 +2174,8 @@ public class SecretActivity extends AppCompatActivity {
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CharSequence name = "Downloads";
-            String description = "Download notifications";
-            int importance = NotificationManager.IMPORTANCE_LOW;
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
-            channel.setDescription(description);
+            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, "Downloads", NotificationManager.IMPORTANCE_LOW);
+            channel.setDescription("Download notifications");
             NotificationManager notificationManager = getSystemService(NotificationManager.class);
             if (notificationManager != null) {
                 notificationManager.createNotificationChannel(channel);
@@ -2207,8 +2220,7 @@ public class SecretActivity extends AppCompatActivity {
                     return BitmapFactory.decodeStream(is);
                 }
             }
-        } catch (Exception ignored) {
-        }
+        } catch (Exception ignored) {}
         return null;
     }
 
@@ -2216,7 +2228,7 @@ public class SecretActivity extends AppCompatActivity {
         try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] hash = digest.digest(url.getBytes("UTF-8"));
-            StringBuilder sb = new StringBuilder();
+            StringBuilder sb = new StringBuilder(hash.length * 2);
             for (byte b : hash) {
                 sb.append(String.format("%02x", b));
             }
@@ -2233,8 +2245,7 @@ public class SecretActivity extends AppCompatActivity {
         File file = new File(faviconsDir, getFaviconFilename(url));
         try (FileOutputStream fos = new FileOutputStream(file)) {
             bitmap.compress(Bitmap.CompressFormat.PNG, 50, fos);
-        } catch (IOException ignored) {
-        }
+        } catch (IOException ignored) {}
     }
     private void loadFaviconFromDisk(String url) {
         File faviconsDir = new File(getFilesDir(), "favicons");
@@ -2247,17 +2258,19 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
     private void initializePersistentFavicons() {
-        for (int i = 0, size = bookmarks.size(); i < size; i++) {
+        int bookmarkSize = bookmarks.size();
+        for (int i = 0; i < bookmarkSize; i++) {
             final String url = bookmarks.get(i).getUrl();
             backgroundExecutor.execute(() -> loadFaviconFromDisk(url));
         }
-        for (int i = 0, size = historyItems.size(); i < size; i++) {
+        int historySize = historyItems.size();
+        for (int i = 0; i < historySize; i++) {
             final String url = historyItems.get(i).getUrl();
             backgroundExecutor.execute(() -> loadFaviconFromDisk(url));
         }
     }
 
-    private final class TabAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+    private class TabAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         private static final int VIEW_TYPE_TAB = 0;
         private static final int VIEW_TYPE_ADD = 1;
         private final List<WebView> tabs;
@@ -2327,7 +2340,7 @@ public class SecretActivity extends AppCompatActivity {
                 });
             }
         }
-        final class TabViewHolder extends RecyclerView.ViewHolder {
+        class TabViewHolder extends RecyclerView.ViewHolder {
             ImageView favicon;
             TextView title;
             ImageButton closeButton;
@@ -2338,7 +2351,7 @@ public class SecretActivity extends AppCompatActivity {
                 closeButton = itemView.findViewById(R.id.tabCloseButton);
             }
         }
-        final class AddTabViewHolder extends RecyclerView.ViewHolder {
+        class AddTabViewHolder extends RecyclerView.ViewHolder {
             ImageView addButton;
             public AddTabViewHolder(View itemView) {
                 super(itemView);
@@ -2347,7 +2360,7 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
 
-    private final class HistoryAdapter extends RecyclerView.Adapter<HistoryAdapter.HistoryViewHolder> {
+    private class HistoryAdapter extends RecyclerView.Adapter<HistoryAdapter.HistoryViewHolder> {
         private final List<HistoryItem> items;
         private final AlertDialog dialog;
         public HistoryAdapter(List<HistoryItem> items, AlertDialog dialog) {
@@ -2396,7 +2409,7 @@ public class SecretActivity extends AppCompatActivity {
         }
         @Override
         public int getItemCount() { return items.size(); }
-        final class HistoryViewHolder extends RecyclerView.ViewHolder {
+        class HistoryViewHolder extends RecyclerView.ViewHolder {
             ImageView favicon;
             TextView title;
             TextView url;
@@ -2409,7 +2422,7 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
 
-    private final class BookmarkAdapter extends RecyclerView.Adapter<BookmarkAdapter.BookmarkViewHolder> {
+    private class BookmarkAdapter extends RecyclerView.Adapter<BookmarkAdapter.BookmarkViewHolder> {
         private final List<Bookmark> items;
         private final boolean managementMode;
         private final AlertDialog dialog;
@@ -2461,7 +2474,7 @@ public class SecretActivity extends AppCompatActivity {
         }
         @Override
         public int getItemCount() { return items.size(); }
-        final class BookmarkViewHolder extends RecyclerView.ViewHolder {
+        class BookmarkViewHolder extends RecyclerView.ViewHolder {
             ImageView favicon;
             TextView title;
             TextView url;
