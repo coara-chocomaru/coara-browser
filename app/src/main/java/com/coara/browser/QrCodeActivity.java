@@ -93,7 +93,6 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
     private AsyncTask<byte[], Void, Result> decodeTask;
     private boolean scanning = false;
 
-    
     private static final Pattern HTTP_URL_PATTERN = Pattern.compile("(https?://[^\\s\"'<>]+)", Pattern.CASE_INSENSITIVE);
     private static final Pattern HOST_LIKE_PATTERN = Pattern.compile("^([\\w.-]+\\.[a-z]{2,})(/.*)?$", Pattern.CASE_INSENSITIVE);
 
@@ -312,21 +311,26 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         }
         super.onActivityResult(requestCode, resultCode, data);
     }
-
     private void displayScanResult(String content) {
         resultLayout.removeAllViews();
         resultLayout.setVisibility(View.VISIBLE);
 
-        TextView resultText = new TextView(this);
-        resultText.setTextSize(18);
-        resultText.setTextColor(Color.BLACK);
-        resultText.setPadding(0, 8, 0, 8);
+        
+        final TextView urlView = new TextView(this);
+        urlView.setTextSize(18);
+        urlView.setTextColor(Color.BLACK);
+        urlView.setPadding(0, 8, 0, 4);
+
+    
+        final TextView titleView = new TextView(this);
+        titleView.setTextSize(16);
+        titleView.setTextColor(Color.parseColor("#333333")); // 少し薄めの黒
+        titleView.setPadding(0, 0, 0, 8);
 
         String raw = content != null ? content.trim() : "";
         String extracted = extractHttpUrl(raw);
 
         if (extracted == null) {
-        
             String decoded = decodeRepeatedly(raw, 5);
             if (!decoded.equals(raw)) {
                 extracted = extractHttpUrl(decoded);
@@ -337,15 +341,20 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             String normalized = normalizeToHttp(extracted);
             final String pure = sanitizeStripQueryAndFragment(normalized);
             if (pure != null) {
-                resultText.setText("URL: " + pure + "\nタイトルを取得中...");
-                new FetchTitleTask(resultText).execute(pure);
+                urlView.setText("URL: " + pure);
+                titleView.setText("タイトルを取得中...");
+                new FetchTitleTask(titleView).execute(pure);
 
-                resultText.setOnClickListener(v -> {
+        
+                View.OnClickListener openListener = v -> {
                     try {
                         Uri u = Uri.parse(pure);
                         String scheme = u.getScheme();
                         if (scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
                             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(pure));
+                        
+                            intent.setClassName(getPackageName(), "com.coara.browser.MainActivity");
+                            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
                             startActivity(intent);
                             finish();
                         } else {
@@ -355,31 +364,32 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                         Toast.makeText(this, "URL を開けませんでした", Toast.LENGTH_SHORT).show();
                         Log.e(TAG, "Failed to open pure url", e);
                     }
-                });
+                };
+
+                urlView.setOnClickListener(openListener);
+                titleView.setOnClickListener(openListener);
             } else {
-            
-                resultText.setText("テキスト: " + raw + "\n（有効な純粋URLに変換できませんでした）");
-                resultText.setOnClickListener(v -> {
-                    copyToClipboardAndNotify(raw);
-                });
+                urlView.setText("テキスト: " + raw + "\n（有効な純粋URLに変換できませんでした）");
+                titleView.setText("");
+                urlView.setOnClickListener(v -> copyToClipboardAndNotify(raw));
             }
         } else {
-    
-            resultText.setText("テキスト: " + raw);
-            resultText.setOnClickListener(v -> {
-                copyToClipboardAndNotify(raw);
-            });
+            urlView.setText("テキスト: " + raw);
+            titleView.setText("");
+            urlView.setOnClickListener(v -> copyToClipboardAndNotify(raw));
         }
 
-        resultText.setOnLongClickListener(v -> {
-            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            ClipData clip = ClipData.newPlainText("QR Content", content);
-            clipboard.setPrimaryClip(clip);
-            Toast.makeText(this, "内容をコピーしました", Toast.LENGTH_SHORT).show();
+        urlView.setOnLongClickListener(v -> {
+            copyToClipboardAndNotify(content);
+            return true;
+        });
+        titleView.setOnLongClickListener(v -> {
+            copyToClipboardAndNotify(content);
             return true;
         });
 
-        resultLayout.addView(resultText);
+        resultLayout.addView(urlView);
+        resultLayout.addView(titleView);
     }
 
     private String extractHttpUrl(String content) {
@@ -409,9 +419,17 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             return "https://" + trimmed;
         }
 
+    
+        try {
+            Uri u = Uri.parse(trimmed);
+            if (u != null) {
+                String p = u.getQueryParameter("url");
+                if (p != null && !p.trim().isEmpty()) return p.trim();
+            }
+        } catch (Exception ignored) {}
+
         return null;
     }
-
 
     private String normalizeToHttp(String candidate) {
         if (candidate == null) return null;
@@ -435,7 +453,6 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         return null;
     }
 
-
     private String sanitizeStripQueryAndFragment(String url) {
         if (url == null) return null;
         try {
@@ -444,27 +461,47 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             if (scheme == null) return null;
             if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return null;
 
-            Uri.Builder b = new Uri.Builder();
-            b.scheme(u.getScheme());
-
             String authority = u.getAuthority();
-            if (authority != null && !authority.isEmpty()) {
-                b.authority(authority);
-            } else {
+            if (authority == null || authority.isEmpty()) {
                 String host = u.getHost();
                 if (host == null || host.isEmpty()) return null;
-                if (u.getPort() != -1) {
-                    b.authority(host + ":" + u.getPort());
-                } else {
-                    b.authority(host);
+                if (u.getPort() != -1) authority = host + ":" + u.getPort();
+                else authority = host;
+            }
+
+    
+            String encodedPath = u.getEncodedPath();
+            StringBuilder cleaned = new StringBuilder();
+            if (encodedPath != null && !encodedPath.isEmpty()) {
+                String[] segments = encodedPath.split("/");
+                for (String seg : segments) {
+                    if (seg == null || seg.isEmpty()) continue;
+                    
+                    String decoded = seg;
+                    try {
+                        decoded = URLDecoder.decode(seg, "UTF-8");
+                    } catch (Exception ignored) {}
+
+            
+                    String low = decoded.toLowerCase();
+                    if (low.contains("http://") || low.contains("https://")) continue;
+                    if (decoded.contains(":") || decoded.contains("=") || decoded.contains("?") || decoded.contains("&")) continue;
+            
+                    if (seg.contains("%3A") || seg.contains("%2F") || seg.contains("%253A") || seg.contains("%252F")) continue;
+
+                
+                    cleaned.append("/").append(seg);
                 }
             }
 
-            String path = u.getPath();
-            if (path != null && !path.isEmpty()) {
-                b.path(path);
+        
+            Uri.Builder b = new Uri.Builder();
+            b.scheme(u.getScheme());
+            b.encodedAuthority(authority);
+            String cleanedPath = cleaned.toString();
+            if (!cleanedPath.isEmpty()) {
+                b.encodedPath(cleanedPath);
             }
-
             Uri out = b.build();
             return out.toString();
         } catch (Exception e) {
@@ -554,9 +591,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         @Override
         protected void onPostExecute(String title) {
             try {
-                String current = textView.getText().toString();
-                String urlLine = (current != null && current.startsWith("URL: ")) ? current.split("\n")[0].substring(5) : "";
-                textView.setText("URL: " + urlLine + "\nタイトル: " + title);
+                textView.setText("タイトル: " + title);
             } catch (Exception e) {
                 textView.setText("タイトル: " + title);
             }
