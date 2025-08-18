@@ -2,12 +2,15 @@ package com.coara.browser;
 
 import android.Manifest;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.hardware.Camera;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -17,6 +20,9 @@ import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.Base64;
 import android.util.Base64OutputStream;
+import android.util.Log;
+import android.view.SurfaceHolder;
+import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
@@ -30,11 +36,19 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.zxing.BarcodeFormat;
+import com.google.zxing.BinaryBitmap;
+import com.google.zxing.ChecksumException;
+import com.google.zxing.FormatException;
+import com.google.zxing.LuminanceSource;
+import com.google.zxing.MultiFormatReader;
+import com.google.zxing.NotFoundException;
+import com.google.zxing.PlanarYUVLuminanceSource;
+import com.google.zxing.Reader;
+import com.google.zxing.Result;
 import com.google.zxing.WriterException;
 import com.google.zxing.common.BitMatrix;
+import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeWriter;
-import com.google.zxing.integration.android.IntentIntegrator;
-import com.google.zxing.integration.android.IntentResult;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -47,12 +61,13 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-public class QrCodeActivity extends AppCompatActivity {
+public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.Callback, Camera.PreviewCallback {
 
     private static final int FILE_SELECT_REQUEST = 1;
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 101;
     private static final int MAX_QR_DATA_LENGTH = 2953;
+    private static final String TAG = "QrCodeActivity";
 
     private Button selectFileButton;
     private Button generateTextQrButton;
@@ -61,42 +76,44 @@ public class QrCodeActivity extends AppCompatActivity {
     private LinearLayoutCompat resultLayout;
     private volatile boolean isProcessing = false;
 
+    private SurfaceView surfaceView;
+    private SurfaceHolder surfaceHolder;
+    private Camera camera;
+    private boolean previewing = false;
+    private Reader reader = new MultiFormatReader();
+    private AsyncTask<byte[], Void, Result> decodeTask;
+    private boolean scanning = false;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
                 ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.WRITE_EXTERNAL_STORAGE}, PERMISSION_REQUEST_CODE);
             }
         }
 
-        
         LinearLayoutCompat layout = new LinearLayoutCompat(this);
         layout.setOrientation(LinearLayoutCompat.VERTICAL);
         int padding = (int) (16 * getResources().getDisplayMetrics().density);
         layout.setPadding(padding, padding, padding, padding);
 
-        
         selectFileButton = new Button(this);
         selectFileButton.setText("ファイルを選択してQR生成");
         selectFileButton.setOnClickListener(v -> selectFile());
         layout.addView(selectFileButton);
 
-    
         inputEditText = new EditText(this);
         inputEditText.setHint("文字列やURLを入力");
         layout.addView(inputEditText);
 
-        
         generateTextQrButton = new Button(this);
         generateTextQrButton.setText("QRコード保存");
         generateTextQrButton.setVisibility(View.GONE);
         generateTextQrButton.setOnClickListener(v -> generateTextQrCode());
         layout.addView(generateTextQrButton);
 
-        
         inputEditText.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
@@ -105,17 +122,25 @@ public class QrCodeActivity extends AppCompatActivity {
             }
         });
 
-    
         scanQrButton = new Button(this);
         scanQrButton.setText("QRコードをスキャン");
         scanQrButton.setOnClickListener(v -> checkCameraPermissionAndScan());
         layout.addView(scanQrButton);
 
-        
         resultLayout = new LinearLayoutCompat(this);
         resultLayout.setOrientation(LinearLayoutCompat.VERTICAL);
         resultLayout.setVisibility(View.GONE);
         layout.addView(resultLayout);
+
+        surfaceView = new SurfaceView(this);
+        surfaceView.setVisibility(View.GONE);
+        layout.addView(surfaceView, new LinearLayoutCompat.LayoutParams(
+                LinearLayoutCompat.LayoutParams.MATCH_PARENT,
+                LinearLayoutCompat.LayoutParams.MATCH_PARENT
+        ));
+
+        surfaceHolder = surfaceView.getHolder();
+        surfaceHolder.addCallback(this);
 
         setContentView(layout);
     }
@@ -135,14 +160,111 @@ public class QrCodeActivity extends AppCompatActivity {
     }
 
     private void startQrScan() {
-        IntentIntegrator integrator = new IntentIntegrator(this);
-        integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
-        integrator.setPrompt("QRコードをスキャン");
-        integrator.setCameraId(0); 
-        integrator.setBeepEnabled(false);
-        integrator.setBarcodeImageEnabled(false);
-        integrator.setOrientationLocked(false);
-        integrator.initiateScan();
+        scanning = true;
+        surfaceView.setVisibility(View.VISIBLE);
+        selectFileButton.setVisibility(View.GONE);
+        inputEditText.setVisibility(View.GONE);
+        generateTextQrButton.setVisibility(View.GONE);
+        scanQrButton.setVisibility(View.GONE);
+        resultLayout.setVisibility(View.GONE);
+    }
+
+    private void stopQrScan() {
+        scanning = false;
+        if (previewing) {
+            camera.stopPreview();
+            camera.setPreviewCallback(null);
+            camera.release();
+            camera = null;
+            previewing = false;
+        }
+        surfaceView.setVisibility(View.GONE);
+        selectFileButton.setVisibility(View.VISIBLE);
+        inputEditText.setVisibility(View.VISIBLE);
+        if (!inputEditText.getText().toString().trim().isEmpty()) {
+            generateTextQrButton.setVisibility(View.VISIBLE);
+        }
+        scanQrButton.setVisibility(View.VISIBLE);
+    }
+
+    @Override
+    public void surfaceCreated(SurfaceHolder holder) {
+        try {
+            camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_BACK);
+            camera.setPreviewDisplay(holder);
+            Camera.Parameters parameters = camera.getParameters();
+            parameters.setPreviewSize(640, 480); 
+            parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
+            camera.setParameters(parameters);
+            camera.setDisplayOrientation(90); 
+            camera.setPreviewCallback(this);
+            camera.startPreview();
+            previewing = true;
+        } catch (IOException e) {
+            Log.e(TAG, "Surface creation failed", e);
+        }
+    }
+
+    @Override
+    public void surfaceChanged(SurfaceHolder holder, int format, int width, int height) {
+        if (previewing) {
+            camera.stopPreview();
+            previewing = false;
+        }
+        if (camera != null) {
+            try {
+                camera.setPreviewDisplay(holder);
+                camera.startPreview();
+                previewing = true;
+            } catch (IOException e) {
+                Log.e(TAG, "Surface change failed", e);
+            }
+        }
+    }
+
+    @Override
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        if (camera != null) {
+            camera.stopPreview();
+            camera.setPreviewCallback(null);
+            camera.release();
+            camera = null;
+            previewing = false;
+        }
+    }
+
+    @Override
+    public void onPreviewFrame(final byte[] data, Camera camera) {
+        if (!scanning || decodeTask != null) return; 
+
+        Camera.Parameters parameters = camera.getParameters();
+        int width = parameters.getPreviewSize().width;
+        int height = parameters.getPreviewSize().height;
+
+        decodeTask = new AsyncTask<byte[], Void, Result>() {
+            @Override
+            protected Result doInBackground(byte[]... params) {
+                byte[] frameData = params[0];
+                LuminanceSource source = new PlanarYUVLuminanceSource(frameData, width, height, 0, 0, width, height, false);
+                BinaryBitmap bitmap = new BinaryBitmap(new HybridBinarizer(source));
+                try {
+                    return reader.decode(bitmap);
+                } catch (NotFoundException | ChecksumException | FormatException e) {
+                    return null;
+                } finally {
+                    reader.reset(); 
+                }
+            }
+
+            @Override
+            protected void onPostExecute(Result result) {
+                decodeTask = null;
+                if (result != null) {
+                    stopQrScan();
+                    displayScanResult(result.getText());
+                }
+            }
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, data); // Use thread pool for efficiency
     }
 
     @Override
@@ -174,38 +296,28 @@ public class QrCodeActivity extends AppCompatActivity {
                     }
                 }).start();
             }
-        } else {
-            IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
-            if (result != null && result.getContents() != null) {
-                displayScanResult(result.getContents());
-            } else {
-                Toast.makeText(this, "スキャンがキャンセルされました", Toast.LENGTH_SHORT).show();
-            }
         }
         super.onActivityResult(requestCode, resultCode, data);
     }
 
     private void displayScanResult(String content) {
-    
         resultLayout.removeAllViews();
         resultLayout.setVisibility(View.VISIBLE);
 
-        
         TextView resultText = new TextView(this);
         resultText.setText(isUrl(content) ? "URL: " + content : "テキスト: " + content);
-        resultText.setTextSize(14); 
+        resultText.setTextSize(14);
         resultText.setPadding(0, 8, 0, 8);
         resultText.setOnClickListener(v -> {
             Intent intent = new Intent(this, MainActivity.class);
             intent.putExtra("url", content);
             startActivity(intent);
-            finish(); 
+            finish();
         });
         resultLayout.addView(resultText);
     }
 
     private boolean isUrl(String content) {
-        
         return content != null && (content.startsWith("http://") || content.startsWith("https://"));
     }
 
@@ -221,7 +333,7 @@ public class QrCodeActivity extends AppCompatActivity {
             }
             return bitmap;
         } catch (WriterException e) {
-            return null; 
+            return null;
         }
     }
 
@@ -354,7 +466,11 @@ public class QrCodeActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        if (isProcessing) {
+        if (isProcessing || scanning) {
+            if (scanning) {
+                stopQrScan();
+                return;
+            }
             Toast.makeText(this, "変換中はバックキーが無効です", Toast.LENGTH_SHORT).show();
         } else {
             super.onBackPressed();
@@ -375,5 +491,13 @@ public class QrCodeActivity extends AppCompatActivity {
             }
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (scanning) {
+            stopQrScan();
+        }
     }
 }
