@@ -1,7 +1,8 @@
 package com.coara.browser;
 
 import android.Manifest;
-import android.content.ContentValues;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -51,12 +52,16 @@ import com.google.zxing.common.HybridBinarizer;
 import com.google.zxing.qrcode.QRCodeWriter;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -193,10 +198,10 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_BACK);
             camera.setPreviewDisplay(holder);
             Camera.Parameters parameters = camera.getParameters();
-            parameters.setPreviewSize(640, 480); 
+            parameters.setPreviewSize(640, 480);
             parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
             camera.setParameters(parameters);
-            camera.setDisplayOrientation(90); 
+            camera.setDisplayOrientation(90);
             camera.setPreviewCallback(this);
             camera.startPreview();
             previewing = true;
@@ -235,7 +240,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
 
     @Override
     public void onPreviewFrame(final byte[] data, Camera camera) {
-        if (!scanning || decodeTask != null) return; 
+        if (!scanning || decodeTask != null) return;
 
         Camera.Parameters parameters = camera.getParameters();
         int width = parameters.getPreviewSize().width;
@@ -252,7 +257,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                 } catch (NotFoundException | ChecksumException | FormatException e) {
                     return null;
                 } finally {
-                    reader.reset(); 
+                    reader.reset();
                 }
             }
 
@@ -264,7 +269,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                     displayScanResult(result.getText());
                 }
             }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, data); // Use thread pool for efficiency
+        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, data);
     }
 
     @Override
@@ -305,20 +310,95 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         resultLayout.setVisibility(View.VISIBLE);
 
         TextView resultText = new TextView(this);
-        resultText.setText(isUrl(content) ? "URL: " + content : "テキスト: " + content);
-        resultText.setTextSize(14);
+        resultText.setTextSize(18);
+        resultText.setTextColor(Color.BLACK);
         resultText.setPadding(0, 8, 0, 8);
+
+        if (isUrl(content)) {
+            resultText.setText("URL: " + content + "\nタイトルを取得中...");
+            new FetchTitleTask(resultText).execute(content);
+        } else {
+            resultText.setText("テキスト: " + content);
+        }
+
         resultText.setOnClickListener(v -> {
-            Intent intent = new Intent(this, MainActivity.class);
-            intent.putExtra("url", content);
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(content));
             startActivity(intent);
             finish();
         });
+
+        resultText.setOnLongClickListener(v -> {
+            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            ClipData clip = ClipData.newPlainText("QR Content", content);
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, "URLをコピーしました", Toast.LENGTH_SHORT).show();
+            return true;
+        });
+
         resultLayout.addView(resultText);
     }
 
     private boolean isUrl(String content) {
         return content != null && (content.startsWith("http://") || content.startsWith("https://"));
+    }
+
+    private class FetchTitleTask extends AsyncTask<String, Void, String> {
+        private TextView textView;
+
+        FetchTitleTask(TextView textView) {
+            this.textView = textView;
+        }
+
+        @Override
+        protected String doInBackground(String... urls) {
+            String urlString = urls[0];
+            String title = "タイトルが見つかりませんでした";
+            HttpURLConnection connection = null;
+            BufferedReader reader = null;
+            try {
+                URL url = new URL(urlString);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("GET");
+                connection.setConnectTimeout(5000);
+                connection.setReadTimeout(5000);
+                connection.connect();
+
+                InputStream stream = connection.getInputStream();
+                reader = new BufferedReader(new InputStreamReader(stream));
+                StringBuilder buffer = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    buffer.append(line.toLowerCase());
+                }
+                String html = buffer.toString();
+
+                int titleStart = html.indexOf("<title>");
+                if (titleStart != -1) {
+                    int titleEnd = html.indexOf("</title>", titleStart);
+                    if (titleEnd != -1) {
+                        title = html.substring(titleStart + 7, titleEnd).trim();
+                    }
+                }
+            } catch (IOException e) {
+                Log.e(TAG, "Title fetch failed", e);
+            } finally {
+                if (connection != null) {
+                    connection.disconnect();
+                }
+                if (reader != null) {
+                    try {
+                        reader.close();
+                    } catch (IOException ignored) {
+                    }
+                }
+            }
+            return title;
+        }
+
+        @Override
+        protected void onPostExecute(String title) {
+            textView.setText("URL: " + textView.getText().toString().split("\n")[0].substring(5) + "\nタイトル: " + title);
+        }
     }
 
     private Bitmap generateQrCodeBitmap(String text, int width, int height) {
