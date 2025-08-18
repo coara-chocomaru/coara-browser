@@ -33,6 +33,8 @@ import com.google.zxing.BarcodeFormat;
 import com.google.zxing.WriterException;
 import com.google.zxing.common.BitMatrix;
 import com.google.zxing.qrcode.QRCodeWriter;
+import com.google.zxing.integration.android.IntentIntegrator;
+import com.google.zxing.integration.android.IntentResult;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
@@ -50,7 +52,6 @@ public class QrCodeActivity extends AppCompatActivity {
     private static final int FILE_SELECT_REQUEST = 1;
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final int CAMERA_PERMISSION_REQUEST_CODE = 101;
-    private static final int QR_SCAN_REQUEST = 102;
     private static final int MAX_QR_DATA_LENGTH = 2953;
 
     private Button selectFileButton;
@@ -88,7 +89,7 @@ public class QrCodeActivity extends AppCompatActivity {
         inputEditText.setHint("文字列やURLを入力");
         layout.addView(inputEditText);
 
-    
+        
         generateTextQrButton = new Button(this);
         generateTextQrButton.setText("QRコード保存");
         generateTextQrButton.setVisibility(View.GONE);
@@ -134,16 +135,14 @@ public class QrCodeActivity extends AppCompatActivity {
     }
 
     private void startQrScan() {
-        try {
-            Intent intent = new Intent("com.google.zxing.client.android.SCAN");
-            intent.putExtra("SCAN_MODE", "QR_CODE_MODE");
-            startActivityForResult(intent, QR_SCAN_REQUEST);
-        } catch (Exception e) {
-            
-            Uri marketUri = Uri.parse("market://details?id=com.google.zxing.client.android");
-            Intent marketIntent = new Intent(Intent.ACTION_VIEW, marketUri);
-            startActivity(marketIntent);
-        }
+        IntentIntegrator integrator = new IntentIntegrator(this);
+        integrator.setDesiredBarcodeFormats(IntentIntegrator.QR_CODE);
+        integrator.setPrompt("QRコードをスキャン");
+        integrator.setCameraId(0); 
+        integrator.setBeepEnabled(false);
+        integrator.setBarcodeImageEnabled(false);
+        integrator.setOrientationLocked(false);
+        integrator.initiateScan();
     }
 
     @Override
@@ -175,10 +174,10 @@ public class QrCodeActivity extends AppCompatActivity {
                     }
                 }).start();
             }
-        } else if (requestCode == QR_SCAN_REQUEST) {
-            if (resultCode == RESULT_OK) {
-                String content = data.getStringExtra("SCAN_RESULT");
-                displayScanResult(content);
+        } else {
+            IntentResult result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data);
+            if (result != null && result.getContents() != null) {
+                displayScanResult(result.getContents());
             } else {
                 Toast.makeText(this, "スキャンがキャンセルされました", Toast.LENGTH_SHORT).show();
             }
@@ -187,7 +186,7 @@ public class QrCodeActivity extends AppCompatActivity {
     }
 
     private void displayScanResult(String content) {
-        
+    
         resultLayout.removeAllViews();
         resultLayout.setVisibility(View.VISIBLE);
 
