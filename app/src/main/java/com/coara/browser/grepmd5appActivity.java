@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.regex.Matcher;
@@ -144,29 +145,30 @@ public class grepmd5appActivity extends Activity {
     }
 
     private String grepFile(Uri uri, String keyword) {
-        if (lastGrepUri != null && lastGrepUri.equals(uri)
-                && lastGrepKeyword != null && lastGrepKeyword.equals(keyword)) {
+        if (lastGrepUri != null && lastGrepUri.equals(uri) && lastGrepKeyword != null && lastGrepKeyword.equals(keyword)) {
             return lastGrepResult;
         }
         StringBuilder result = new StringBuilder();
-        Pattern pattern = Pattern.compile(keyword, Pattern.CASE_INSENSITIVE);
-        try (BufferedReader reader = new BufferedReader(
-                new InputStreamReader(getContentResolver().openInputStream(uri)))) {
+        Pattern pattern = Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
+        try (InputStream is = getContentResolver().openInputStream(uri)) {
+            if (is == null) {
+                return "エラー: ファイルが開けません。";
+            }
+            BufferedReader reader = new BufferedReader(new InputStreamReader(is), 8192); 
             String line;
             while ((line = reader.readLine()) != null) {
-                String filteredLine = line.replaceAll("[^A-Za-z0-9 ]", "");
-                Matcher matcher = pattern.matcher(filteredLine);
+                Matcher matcher = pattern.matcher(line);
                 if (matcher.find()) {
-                    result.append(filteredLine.trim()).append("\n");
+                    result.append(line).append("\n\n"); 
                 }
             }
         } catch (IOException e) {
-            result.append("エラー: ").append(e.getMessage());
+            return "エラー: " + e.getMessage();
         }
         lastGrepUri = uri;
         lastGrepKeyword = keyword;
         lastGrepResult = result.toString();
-        return lastGrepResult;
+        return lastGrepResult.isEmpty() ? "マッチする行が見つかりませんでした。" : lastGrepResult;
     }
 
     private void checkMd5() {
@@ -191,26 +193,26 @@ public class grepmd5appActivity extends Activity {
     }
 
     private String getMd5Checksum(Uri uri) {
+        if (lastMd5Uri != null && lastMd5Uri.equals(uri) && lastMd5Result != null) {
+            return lastMd5Result;
+        }
         try (InputStream is = getContentResolver().openInputStream(uri)) {
             if (is == null) return "エラー: ファイルが開けません。";
-            if (lastMd5Uri != null && lastMd5Uri.equals(uri) && lastMd5Result != null) {
-                return lastMd5Result;
-            }
             MessageDigest digest = MessageDigest.getInstance("MD5");
-            byte[] buffer = new byte[4096];
+            byte[] buffer = new byte[8192]; 
             int bytesRead;
             while ((bytesRead = is.read(buffer)) != -1) {
                 digest.update(buffer, 0, bytesRead);
             }
             byte[] md5Bytes = digest.digest();
-            StringBuilder sb = new StringBuilder();
+            StringBuilder sb = new StringBuilder(32); 
             for (byte b : md5Bytes) {
                 sb.append(String.format("%02x", b));
             }
             lastMd5Uri = uri;
             lastMd5Result = sb.toString();
             return lastMd5Result;
-        } catch (Exception e) {
+        } catch (IOException | NoSuchAlgorithmException e) {
             return "エラー: " + e.getMessage();
         }
     }
