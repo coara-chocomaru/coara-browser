@@ -58,7 +58,6 @@ dependencies {
     implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
     implementation "io.noties.markwon:core:4.6.2"
     implementation 'com.google.zxing:core:3.5.3'
-    implementation 'com.google.zxing:android-integration:3.3.0'
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.2.0'
