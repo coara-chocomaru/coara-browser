@@ -6,6 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.ContentValues; 
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
