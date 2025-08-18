@@ -6,7 +6,7 @@ import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
-import android.content.ContentValues; 
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -63,9 +63,12 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLDecoder;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.Callback, Camera.PreviewCallback {
 
@@ -89,6 +92,9 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
     private Reader reader = new MultiFormatReader();
     private AsyncTask<byte[], Void, Result> decodeTask;
     private boolean scanning = false;
+
+    
+    private static final Pattern HTTP_URL_PATTERN = Pattern.compile("(https?://[^\\s\"'<>]+)", Pattern.CASE_INSENSITIVE);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -315,32 +321,143 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         resultText.setTextColor(Color.BLACK);
         resultText.setPadding(0, 8, 0, 8);
 
-        if (isUrl(content)) {
-            resultText.setText("URL: " + content + "\nタイトルを取得中...");
-            new FetchTitleTask(resultText).execute(content);
+        
+        final String httpUrl = extractHttpUrl(content);
+
+        if (httpUrl != null) {
+            resultText.setText("URL: " + httpUrl + "\nタイトルを取得中...");
+            new FetchTitleTask(resultText).execute(httpUrl);
         } else {
+            
             resultText.setText("テキスト: " + content);
         }
 
+        final String finalHttpUrl = httpUrl;
         resultText.setOnClickListener(v -> {
-            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(content));
-            startActivity(intent);
-            finish();
+            if (finalHttpUrl != null) {
+                
+                try {
+                    Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(finalHttpUrl));
+                    startActivity(intent);
+                    finish();
+                } catch (Exception e) {
+                    Toast.makeText(this, "URLを開けませんでした", Toast.LENGTH_SHORT).show();
+                    Log.e(TAG, "Failed to open URL", e);
+                }
+            } else {
+                
+                Toast.makeText(this, "有効な http:// または https:// のURLが見つかりません", Toast.LENGTH_LONG).show();
+            }
         });
 
         resultText.setOnLongClickListener(v -> {
             ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
             ClipData clip = ClipData.newPlainText("QR Content", content);
             clipboard.setPrimaryClip(clip);
-            Toast.makeText(this, "URLをコピーしました", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "内容をコピーしました", Toast.LENGTH_SHORT).show();
             return true;
         });
 
         resultLayout.addView(resultText);
     }
 
+
+    
+    private String extractHttpUrl(String content) {
+        if (content == null) return null;
+
+        String trimmed = content.trim();
+
+        
+        if (trimmed.regionMatches(true, 0, "http://", 0, 7) ||
+            trimmed.regionMatches(true, 0, "https://", 0, 8)) {
+            return trimmed;
+        }
+
+        
+        try {
+            Uri uri = Uri.parse(trimmed);
+            if (uri != null) {
+                String param = uri.getQueryParameter("url");
+                if (param != null && !param.trim().isEmpty()) {
+        
+                    String candidate = param.trim();
+                
+                    try {
+                        String dec = URLDecoder.decode(candidate, "UTF-8");
+                        if (!dec.equals(candidate)) candidate = dec;
+                    } catch (Exception ignored) {}
+
+                    String normalized = normalizeToHttp(candidate);
+                    if (normalized != null) return normalized;
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "URI parse failed for content: " + content, e);
+        }
+
+        
+        Matcher m = HTTP_URL_PATTERN.matcher(trimmed);
+        if (m.find()) {
+            String found = m.group(1);
+            String normalized = normalizeToHttp(found);
+            if (normalized != null) return normalized;
+        }
+
+        
+        String lower = trimmed.toLowerCase();
+        
+        if (lower.startsWith("//")) {
+            return "https:" + trimmed;
+        }
+        
+        if (lower.startsWith("www.")) {
+            return "https://" + trimmed;
+        }
+    
+        Pattern hostLike = Pattern.compile("^([\\w.-]+\\.[a-z]{2,})(/.*)?$", Pattern.CASE_INSENSITIVE);
+        Matcher mh = hostLike.matcher(trimmed);
+        if (mh.find()) {
+            return "https://" + trimmed;
+        }
+
+
+        return null;
+    }
+
+    private String normalizeToHttp(String candidate) {
+        if (candidate == null) return null;
+        String s = candidate.trim();
+
+        if (s.isEmpty()) return null;
+
+        String lower = s.toLowerCase();
+
+        if (lower.startsWith("http://") || lower.startsWith("https://")) {
+            return s;
+        }
+
+        if (lower.startsWith("//")) {
+            return "https:" + s;
+        }
+
+        if (lower.startsWith("www.")) {
+            return "https://" + s;
+        }
+
+        
+        Pattern hostLike = Pattern.compile("^([\\w.-]+\\.[a-z]{2,})(/.*)?$", Pattern.CASE_INSENSITIVE);
+        Matcher m = hostLike.matcher(s);
+        if (m.find()) {
+            return "https://" + s;
+        }
+
+        
+        return null;
+    }
+
     private boolean isUrl(String content) {
-        return content != null && (content.startsWith("http://") || content.startsWith("https://"));
+        return extractHttpUrl(content) != null;
     }
 
     private class FetchTitleTask extends AsyncTask<String, Void, String> {
@@ -360,6 +477,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                 URL url = new URL(urlString);
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setRequestMethod("GET");
+                connection.setInstanceFollowRedirects(true);
                 connection.setConnectTimeout(5000);
                 connection.setReadTimeout(5000);
                 connection.connect();
@@ -398,7 +516,17 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
 
         @Override
         protected void onPostExecute(String title) {
-            textView.setText("URL: " + textView.getText().toString().split("\n")[0].substring(5) + "\nタイトル: " + title);
+            
+            String current = textView.getText().toString();
+            String urlLine = null;
+            if (current != null) {
+                String[] lines = current.split("\n");
+                if (lines.length > 0) {
+                    urlLine = lines[0];
+                }
+            }
+            String urlDisplay = (urlLine != null && urlLine.startsWith("URL: ")) ? urlLine.substring(5) : "";
+            textView.setText("URL: " + urlDisplay + "\nタイトル: " + title);
         }
     }
 
