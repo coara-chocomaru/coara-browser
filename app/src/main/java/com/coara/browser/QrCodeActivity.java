@@ -3,6 +3,7 @@ package com.coara.browser;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -203,7 +204,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             camera = Camera.open(Camera.CameraInfo.CAMERA_FACING_BACK);
             camera.setPreviewDisplay(holder);
             Camera.Parameters parameters = camera.getParameters();
-            parameters.setPreviewSize(640, 480); // Optimized: Fixed small preview size to reduce memory and processing overhead
+            parameters.setPreviewSize(640, 480); 
             parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_VIDEO);
             camera.setParameters(parameters);
             camera.setDisplayOrientation(90);
@@ -251,7 +252,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         int width = parameters.getPreviewSize().width;
         int height = parameters.getPreviewSize().height;
 
-        
+    
         decodeTask = new AsyncTask<byte[], Void, Result>() {
             @Override
             protected Result doInBackground(byte[]... params) {
@@ -299,7 +300,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                         runOnUiThread(() -> {
                             Toast.makeText(this, saved ? "QRコード画像保存: " + savedFileName : "保存に失敗しました", Toast.LENGTH_LONG).show();
                         });
-                        qrBitmap.recycle(); // Optimized: Recycle bitmap to free memory immediately
+                        qrBitmap.recycle();
                     } else {
                         runOnUiThread(() -> Toast.makeText(this, "QRコード生成に失敗しました", Toast.LENGTH_LONG).show());
                     }
@@ -331,7 +332,8 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET); // Optimized: Flags to prevent history stacking and clear on reset
             
             Intent chooserIntent = Intent.createChooser(intent, "ブラウザを選択");
-            chooserIntent.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, new Intent().setPackage(getPackageName()).getComponentName());
+            ComponentName excludeComponent = new ComponentName(getPackageName(), "com.coara.browser.MainActivity");
+            chooserIntent.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, new ComponentName[]{excludeComponent});
             startActivity(chooserIntent);
             clearCacheAndFinish(); 
         });
@@ -377,7 +379,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                 StringBuilder buffer = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    buffer.append(line.toLowerCase(Locale.ROOT)); 
+                    buffer.append(line.toLowerCase(Locale.ROOT)); // Optimized: Use Locale.ROOT for consistent lowercase
                 }
                 String html = buffer.toString();
 
@@ -525,7 +527,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
             BufferedInputStream bis = new BufferedInputStream(inputStream);
             byteArrayOutputStream = new ByteArrayOutputStream();
             Base64OutputStream base64OutputStream = new Base64OutputStream(byteArrayOutputStream, Base64.NO_WRAP);
-            byte[] buffer = new byte[8192]; // Optimized: Larger buffer for faster I/O
+            byte[] buffer = new byte[8192]; 
             int bytesRead;
             while ((bytesRead = bis.read(buffer)) != -1) {
                 base64OutputStream.write(buffer, 0, bytesRead);
