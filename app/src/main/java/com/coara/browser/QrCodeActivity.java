@@ -20,7 +20,11 @@ import android.os.Environment;
 import android.provider.MediaStore;
 import android.provider.OpenableColumns;
 import android.text.Editable;
+import android.text.SpannableString;
+import android.text.Spanned;
 import android.text.TextWatcher;
+import android.text.style.AbsoluteSizeSpan;
+import android.text.style.ForegroundColorSpan;
 import android.util.Base64;
 import android.util.Base64OutputStream;
 import android.util.Log;
@@ -252,7 +256,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         int width = parameters.getPreviewSize().width;
         int height = parameters.getPreviewSize().height;
 
-    
+
         decodeTask = new AsyncTask<byte[], Void, Result>() {
             @Override
             protected Result doInBackground(byte[]... params) {
@@ -300,7 +304,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                         runOnUiThread(() -> {
                             Toast.makeText(this, saved ? "QRコード画像保存: " + savedFileName : "保存に失敗しました", Toast.LENGTH_LONG).show();
                         });
-                        qrBitmap.recycle();
+                        qrBitmap.recycle(); 
                     } else {
                         runOnUiThread(() -> Toast.makeText(this, "QRコード生成に失敗しました", Toast.LENGTH_LONG).show());
                     }
@@ -321,16 +325,19 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         resultText.setPadding(0, 8, 0, 8);
 
         if (isUrl(content)) {
-            resultText.setText("URL: " + content + "\nタイトルを取得中...");
-            new FetchTitleTask(resultText).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, content); // Optimized: Use thread pool for async title fetch
+            String loadingText = "URL: " + content + "\nタイトルを取得中...";
+            SpannableString spannableLoading = new SpannableString(loadingText);
+            applyUrlStyle(spannableLoading, content);
+            resultText.setText(spannableLoading);
+            new FetchTitleTask(resultText, content).executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, content); 
         } else {
             resultText.setText("テキスト: " + content);
         }
 
         resultText.setOnClickListener(v -> {
             Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(content));
-            intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET); // Optimized: Flags to prevent history stacking and clear on reset
-            
+            intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY | Intent.FLAG_ACTIVITY_CLEAR_WHEN_TASK_RESET); 
+        
             Intent chooserIntent = Intent.createChooser(intent, "ブラウザを選択");
             ComponentName excludeComponent = new ComponentName(getPackageName(), "com.coara.browser.MainActivity");
             chooserIntent.putExtra(Intent.EXTRA_EXCLUDE_COMPONENTS, new ComponentName[]{excludeComponent});
@@ -349,15 +356,26 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         resultLayout.addView(resultText);
     }
 
+    private void applyUrlStyle(SpannableString spannable, String content) {
+        int urlStart = spannable.toString().indexOf(content);
+        if (urlStart != -1) {
+            int urlEnd = urlStart + content.length();
+            spannable.setSpan(new ForegroundColorSpan(Color.GRAY), urlStart, urlEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            spannable.setSpan(new AbsoluteSizeSpan(14, true), urlStart, urlEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); // Smaller size, e.g., 14sp
+        }
+    }
+
     private boolean isUrl(String content) {
         return content != null && (content.startsWith("http://") || content.startsWith("https://"));
     }
 
     private class FetchTitleTask extends AsyncTask<String, Void, String> {
         private TextView textView;
+        private String content;
 
-        FetchTitleTask(TextView textView) {
+        FetchTitleTask(TextView textView, String content) {
             this.textView = textView;
+            this.content = content;
         }
 
         @Override
@@ -379,7 +397,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
                 StringBuilder buffer = new StringBuilder();
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    buffer.append(line.toLowerCase(Locale.ROOT)); // Optimized: Use Locale.ROOT for consistent lowercase
+                    buffer.append(line.toLowerCase(Locale.ROOT)); 
                 }
                 String html = buffer.toString();
 
@@ -408,7 +426,10 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
 
         @Override
         protected void onPostExecute(String title) {
-            textView.setText("URL: " + textView.getText().toString().split("\n")[0].substring(5) + "\nタイトル: " + title);
+            String fullText = "URL: " + content + "\nタイトル: " + title;
+            SpannableString spannable = new SpannableString(fullText);
+            applyUrlStyle(spannable, content);
+            textView.setText(spannable);
         }
     }
 
@@ -605,7 +626,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        executorService.shutdownNow(); 
+        executorService.shutdownNow();
         if (camera != null) {
             camera.release();
             camera = null;
