@@ -137,6 +137,9 @@
             android:authorities="com.coara.browser.androidx-startup"
             android:exported="false">
             <meta-data
+                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+                android:value="androidx.startup" />
+            <meta-data
                 android:name="androidx.profileinstaller.ProfileInstallerInitializer"
                 android:value="androidx.startup" />
             <meta-data
