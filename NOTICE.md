@@ -79,9 +79,9 @@
     - ライセンス: Apache License, Version 2.0  
     - 著作権: © The Android Open Source Project
 
-14. **androidx.startup**  
-    - アーティファクト: `androidx.emoji2:emoji2:1.4.0`  
-    - 公式サイト: [AndroidX Activity](https://developer.android.com/jetpack/androidx/releases/startup?hl=ja)  
+14. **Emoji2**  
+    - アーティファクト: `androidx.emoji2:emoji2:1.5.0`  
+    - 公式サイト: [AndroidX Activity](https://developer.android.com/jetpack/androidx/releases/emoji2?hl=ja)  
     - ライセンス: Apache License, Version 2.0  
     - 著作権: © The Android Open Source Project
           
