@@ -109,7 +109,7 @@ import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|365sns|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
     private static final String KEY_CURRENT_TAB_ID = "current_tab_id";
     private static final String KEY_DARK_MODE = "dark_mode";
@@ -158,7 +158,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(4); // Reduced pool size for better resource management
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(4); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -693,7 +693,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setLoadWithOverviewMode(true);
         settings.setUseWideViewPort(true);
         settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW); // Changed to ALWAYS_ALLOW for faster mixed content handling
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setDomStorageEnabled(true);
         settings.setGeolocationEnabled(false);
         settings.setTextZoom(100);
@@ -1478,6 +1478,7 @@ public class MainActivity extends AppCompatActivity {
         runOnUiThread(() -> {
             if (url.startsWith("https://m.youtube.com/watch") ||
                 url.startsWith("https://chatgpt.com/") ||
+                url.startsWith("https://365sns.f5.si/") ||
                 url.startsWith("https://m.youtube.com/shorts/")) {
                 swipeRefreshLayout.setEnabled(false);
                 urlEditText.setText(url);
@@ -1829,7 +1830,7 @@ private void saveScreenshot(Bitmap bitmap) {
             String fileName = timeStamp + ".png";
             File screenshotFile = new File(screenshotDir, fileName);
             try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 80, fos); // Reduced quality for faster compression
+                bitmap.compress(Bitmap.CompressFormat.PNG, 80, fos); 
                 fos.flush();
             }
             runOnUiThread(() ->
