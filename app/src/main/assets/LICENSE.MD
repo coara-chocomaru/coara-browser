@@ -68,16 +68,21 @@
     - ライセンス: Apache License, Version 2.0  
     - 著作権: © The Android Open Source Project
 
-14. **Android SDKライセンス**  
+14. **Emoji2**  
+    - アーティファクト: `androidx.emoji2:emoji2:1.5.0`  
+    - ライセンス: Apache License, Version 2.0  
+    - 著作権: © The Android Open Source Project
+
+15. **Android SDKライセンス**  
     - Android SDKに関する詳細なライセンス情報は(developer.android.com)をご覧下さい。
 
 ## 商標通知
 
-15. **Android™** は Google LLC の商標です。
+16. **Android™** は Google LLC の商標です。
 
 ---
 
-以上の15項目がライセンス情報です。  
+以上の16項目がライセンス情報です。  
 各ライブラリの詳細なライセンス情報および利用条件については、各ライブラリの配布物に含まれるファイルをご確認ください。
 
 ---
