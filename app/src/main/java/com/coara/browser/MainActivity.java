@@ -2263,47 +2263,59 @@ private void showHistoryDialog() {
         pref.edit().putString(KEY_BOOKMARKS, array.toString()).apply();
     }
     private void loadHistory() {
-        historyItems.clear();
-        String jsonStr = pref.getString(KEY_HISTORY, "[]");
+    historyItems.clear();
+    String jsonStr = pref.getString(KEY_HISTORY, "[]");
+    try {
+        JSONArray array = new JSONArray(jsonStr);
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject obj = array.getJSONObject(i);
+            String title = obj.getString("title");
+            String url = obj.getString("url");
+            historyItems.add(new HistoryItem(title, normalizeUrl(url)));  // hashを考慮した正規化追加
+        }
+    } catch (JSONException e) {
+        e.printStackTrace();
+    }
+}
+
+private void saveHistory() {
+    JSONArray array = new JSONArray();
+    for (HistoryItem item : historyItems) {
+        JSONObject obj = new JSONObject();
         try {
-            JSONArray array = new JSONArray(jsonStr);
-            for (int i = 0; i < array.length(); i++) {
-                JSONObject obj = array.getJSONObject(i);
-                String title = obj.getString("title");
-                String url = obj.getString("url");
-                historyItems.add(new HistoryItem(title, url));
-            }
+            obj.put("title", item.getTitle());
+            obj.put("url", item.getUrl());
         } catch (JSONException e) {
             e.printStackTrace();
         }
+        array.put(obj);
     }
+    pref.edit().putString(KEY_HISTORY, array.toString()).apply();
+}
 
-    private void saveHistory() {
-        JSONArray array = new JSONArray();
-        for (HistoryItem item : historyItems) {
-            JSONObject obj = new JSONObject();
-            try {
-                obj.put("title", item.getTitle());
-                obj.put("url", item.getUrl());
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-            array.put(obj);
-        }
-        pref.edit().putString(KEY_HISTORY, array.toString()).apply();
+private String normalizeUrl(String url) { 
+    try {
+        Uri uri = Uri.parse(url);
+        return uri.buildUpon().fragment(null).build().toString(); 
+    } catch (Exception e) {
+        return url;
     }
+}
 
-    private void addHistory(String url, String title) {
-        if (url == null || url.isEmpty() || url.equals("about:blank"))
-            return;
-        if (!historyItems.isEmpty() && historyItems.get(historyItems.size() - 1).getUrl().equals(url))
-            return;
+private void addHistory(String url, String title) {
+    if (url == null || url.isEmpty() || url.equals("about:blank"))
+        return;
+    String normalizedUrl = normalizeUrl(url);
+    if (!historyItems.isEmpty() && normalizeUrl(historyItems.get(historyItems.size() - 1).getUrl()).equals(normalizedUrl))
+        return;
+    backgroundExecutor.execute(() -> {  
         historyItems.add(new HistoryItem(title, url));
         if (historyItems.size() > MAX_HISTORY_SIZE) {
             historyItems.remove(0);
         }
         saveHistory();
-    }
+    });
+}
 
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
