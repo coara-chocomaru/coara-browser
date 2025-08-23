@@ -427,9 +427,6 @@ public class SecretActivity extends AppCompatActivity {
            }
          }
        });
-    }
-}
-
     private void clear0() {
         WebView webView = getCurrentWebView();
     if (webView != null) {
