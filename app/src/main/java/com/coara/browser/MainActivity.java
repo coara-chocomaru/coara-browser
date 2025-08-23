@@ -944,7 +944,6 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new OptimizedWebViewClient());
 
         webView.setWebChromeClient(new OptimizedWebChromeClient());
-}
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             if (url.startsWith("blob:")) {
