@@ -100,8 +100,8 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -127,7 +127,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String CHANNEL_ID = "download_channel";
     private static final String START_PAGE = "file:///android_asset/index.html";
-    private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "cache_sentinel.txt";
@@ -144,7 +143,6 @@ public class MainActivity extends AppCompatActivity {
     private PermissionRequest pendingPermissionRequest = null;
     private ActivityResultLauncher<String[]> permissionRequestLauncher;
 
-    private WebView webView;
     private TextInputEditText urlEditText;
     private ImageView faviconImageView;
     private MaterialButton btnGo;
@@ -482,6 +480,10 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         backgroundExecutor.shutdown();
+        for (WebView webView : webViews) {
+            webView.destroy();
+        }
+        webViews.clear();
     }
 
     private void saveTabsState() {
@@ -875,12 +877,13 @@ public class MainActivity extends AppCompatActivity {
                                 if (webViews.size() >= MAX_TABS) {
                                     Toast.makeText(MainActivity.this,
                                         "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-                                } else {
-                                    WebView newWebView = createNewWebView();
-                                    webViews.add(newWebView);
-                                    updateTabCount();
-                                    switchToTab(webViews.size() - 1);
-                                    newWebView.loadUrl(extra);
+                                    } else {
+                                        WebView newWebView = createNewWebView();
+                                        webViews.add(newWebView);
+                                        updateTabCount();
+                                        switchToTab(webViews.size() - 1);
+                                        newWebView.loadUrl(extra);
+                                    }
                                 }
                             }
                         }).show();
@@ -918,12 +921,13 @@ public class MainActivity extends AppCompatActivity {
                                 if (webViews.size() >= MAX_TABS) {
                                     Toast.makeText(MainActivity.this,
                                         "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-                                } else {
-                                    WebView newWebView = createNewWebView();
-                                    webViews.add(newWebView);
-                                    updateTabCount();
-                                    switchToTab(webViews.size() - 1);
-                                    newWebView.loadUrl(extra);
+                                    } else {
+                                        WebView newWebView = createNewWebView();
+                                        webViews.add(newWebView);
+                                        updateTabCount();
+                                        switchToTab(webViews.size() - 1);
+                                        newWebView.loadUrl(extra);
+                                    }
                                 }
                             } else if (which == 3 && !isDataUrlLocal) {
                                 if (extra != null && !extra.isEmpty()) {
@@ -937,250 +941,9 @@ public class MainActivity extends AppCompatActivity {
             return false;
         });
 
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return super.shouldInterceptRequest(view, request);
-            }
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.startsWith("tel:")) {
-                    startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("mailto:")) {
-                    startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("intent:")) {
-                    try {
-                        Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                        if (intent != null) {
-                            if (intent.resolveActivity(getPackageManager()) != null) {
-                                startActivity(intent);
-                            } else {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    view.loadUrl(fallbackUrl);
-                                }
-                            }
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-                return false;
-            }
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url.startsWith("tel:")) {
-                    startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("mailto:")) {
-                    startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("intent:")) {
-                    try {
-                        Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                        if (intent != null) {
-                            if (intent.resolveActivity(getPackageManager()) != null) {
-                                startActivity(intent);
-                            } else {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    view.loadUrl(fallbackUrl);
-                                }
-                            }
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-                return false;
-            }
-            @Override
-            public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                String lowerUrl = url.toLowerCase();
-                boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
-                if (isMatched) {
-                    view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
-                } else {
-                    view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-                }
-                urlEditText.setText(url);
-                super.onPageStarted(view, url, favicon);
-            }
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                applyCombinedOptimizations(view);
-                if (url.startsWith("https://m.youtube.com")) {
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        injectLazyLoading(view);
-                    }, 500);
-                }
-                if (url.equals(START_PAGE)) {
-        
-                  faviconImageView.setVisibility(View.GONE);
-                  urlEditText.setText("");
-               } else {
-                 faviconImageView.setVisibility(View.VISIBLE);
-              if (view == getCurrentWebView()) {
-                  urlEditText.setText(url);
-                 }
-               }
-                if (!isBackNavigation) {
-                    if (historyItems.size() > currentHistoryIndex + 1) {
-                        historyItems.subList(currentHistoryIndex + 1, historyItems.size()).clear();
-                    }
-                    if (historyItems.isEmpty() || !historyItems.get(historyItems.size() - 1).getUrl().equals(url)) {
-                        historyItems.add(new HistoryItem(view.getTitle(), url));
-                        if (historyItems.size() > MAX_HISTORY_SIZE) {
-                            historyItems.remove(0);
-                        }
-                        currentHistoryIndex = historyItems.size() - 1;
-                        saveHistory();
-                    }
-                } else {
-                    isBackNavigation = false;
-                }
-                if (swipeRefreshLayout.isRefreshing()) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
-                String jsOverrideHistory = "javascript:(function(){" +
-                        "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
-                        "var pushState=history.pushState;" +
-                        "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
-                        "var replaceState=history.replaceState;" +
-                        "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
-                        "window.addEventListener('popstate',function(){notifyUrlChange();});" +
-                        "notifyUrlChange();" +
-                        "})();"; 
-                view.loadUrl(jsOverrideHistory);
-            }
-            @Override
-            public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if (!basicAuthEnabled) {
-                    super.onReceivedHttpAuthRequest(view, handler, host, realm);
-                    return;
-                }
-                LinearLayout layout = new LinearLayout(MainActivity.this);
-                layout.setOrientation(LinearLayout.VERTICAL);
-                int padding = (int)(16 * getResources().getDisplayMetrics().density);
-                layout.setPadding(padding, padding, padding, padding);
-                final EditText usernameInput = new EditText(MainActivity.this);
-                usernameInput.setHint("ユーザー名");
-                usernameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
-                layout.addView(usernameInput);
-                final EditText passwordInput = new EditText(MainActivity.this);
-                passwordInput.setHint("パスワード");
-                passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                layout.addView(passwordInput);
-                new MaterialAlertDialogBuilder(MainActivity.this)
-                    .setTitle("Basic認証情報を入力")
-                    .setView(layout)
-                    .setPositiveButton("ログイン", (dialog, which) -> {
-                        String username = usernameInput.getText().toString().trim();
-                        String password = passwordInput.getText().toString().trim();
-                        if (!username.isEmpty() && !password.isEmpty()) {
-                            handler.proceed(username, password);
-                        } else {
-                            Toast.makeText(MainActivity.this, "ユーザー名とパスワードを入力してください", Toast.LENGTH_SHORT).show();
-                            handler.cancel();
-                        }
-                    })
-                    .setNegativeButton("キャンセル", (dialog, which) -> handler.cancel())
-                    .show();
-            }
-        });
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
-                                               FileChooserParams fileChooserParams) {
-                MainActivity.this.filePathCallback = filePathCallback;
-                try {
-                    fileChooserLauncher.launch(fileChooserParams.createIntent());
-                } catch (Exception e) {
-                    MainActivity.this.filePathCallback = null;
-                    Toast.makeText(MainActivity.this, "ファイル選択エラー", Toast.LENGTH_SHORT).show();
-                    return false;
-                }
-                return true;
-            }
-           @Override
-           public void onPermissionRequest(final PermissionRequest request) {
-           try {
-            String[] resources = request.getResources();
-            List<String> permissionsNeeded = new ArrayList<>();
+        webView.setWebViewClient(new OptimizedWebViewClient());
 
-            for (String resource : resources) {
-                if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
-                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
-                            != PackageManager.PERMISSION_GRANTED) {
-                        permissionsNeeded.add(Manifest.permission.CAMERA);
-                    }
-                } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
-                    if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
-                            != PackageManager.PERMISSION_GRANTED) {
-                        permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
-                    }
-                }
-            }
-            if (permissionsNeeded.isEmpty()) {
-                request.grant(resources);
-            } else {
-                pendingPermissionRequest = request;
-                permissionRequestLauncher.launch(permissionsNeeded.toArray(new String[0]));
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            request.deny();
-        }
-    }
-
-            @Override
-            public void onReceivedIcon(WebView view, Bitmap icon) {
-                if (view == getCurrentWebView()) {
-                    faviconImageView.setImageBitmap(icon);
-                }
-                webViewFavicons.put(view, icon);
-                String currentUrl = view.getUrl();
-                if (currentUrl != null) {
-                    faviconCache.put(currentUrl, icon);
-                    backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
-                }
-            }
-            @Override
-            public void onShowCustomView(View view, CustomViewCallback callback) {
-                if (customView != null) {
-                    callback.onCustomViewHidden();
-                    return;
-                }
-                customView = view;
-                customViewCallback = callback;
-                webViewContainer.setVisibility(View.GONE);
-                FrameLayout decor = (FrameLayout) getWindow().getDecorView();
-                decor.addView(customView, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-            }
-            @Override
-            public void onHideCustomView() {
-                if (customView == null) {
-                    return;
-                }
-                FrameLayout decor = (FrameLayout) getWindow().getDecorView();
-                decor.removeView(customView);
-                customView = null;
-                if (customViewCallback != null) {
-                    customViewCallback.onCustomViewHidden();
-                    customViewCallback = null;
-                }
-                webViewContainer.setVisibility(View.VISIBLE);
-                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-            }
-        });
+        webView.setWebChromeClient(new OptimizedWebChromeClient());
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             if (url.startsWith("blob:")) {
@@ -1195,11 +958,255 @@ public class MainActivity extends AppCompatActivity {
         return webView;
     }
 
+    private class OptimizedWebViewClient extends WebViewClient {
+        @Override
+        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+            return super.shouldInterceptRequest(view, request);
+        }
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+            String url = request.getUrl().toString();
+            if (url.startsWith("tel:")) {
+                startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
+                return true;
+            } else if (url.startsWith("mailto:")) {
+                startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
+                return true;
+            } else if (url.startsWith("intent:")) {
+                try {
+                    Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                    if (intent != null) {
+                        if (intent.resolveActivity(getPackageManager()) != null) {
+                            startActivity(intent);
+                        } else {
+                            String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                            if (fallbackUrl != null) {
+                                view.loadUrl(fallbackUrl);
+                            }
+                        }
+                        return true;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return false;
+        }
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+            if (url.startsWith("tel:")) {
+                startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
+                return true;
+            } else if (url.startsWith("mailto:")) {
+                startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
+                return true;
+            } else if (url.startsWith("intent:")) {
+                try {
+                    Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                    if (intent != null) {
+                        if (intent.resolveActivity(getPackageManager()) != null) {
+                            startActivity(intent);
+                        } else {
+                            String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                            if (fallbackUrl != null) {
+                                view.loadUrl(fallbackUrl);
+                            }
+                        }
+                        return true;
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            return false;
+        }
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            String lowerUrl = url.toLowerCase();
+            boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
+            if (isMatched) {
+                view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
+            } else {
+                view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+            }
+            urlEditText.setText(url);
+            super.onPageStarted(view, url, favicon);
+        }
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            applyCombinedOptimizations(view);
+            if (url.startsWith("https://m.youtube.com")) {
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    injectLazyLoading(view);
+                }, 500);
+            }
+            if (url.equals(START_PAGE)) {
+        
+                  faviconImageView.setVisibility(View.GONE);
+                  urlEditText.setText("");
+               } else {
+                 faviconImageView.setVisibility(View.VISIBLE);
+              if (view == getCurrentWebView()) {
+                  urlEditText.setText(url);
+                 }
+               }
+            if (!isBackNavigation) {
+                if (historyItems.size() > currentHistoryIndex + 1) {
+                    historyItems.subList(currentHistoryIndex + 1, historyItems.size()).clear();
+                }
+                if (historyItems.isEmpty() || !historyItems.get(historyItems.size() - 1).getUrl().equals(url)) {
+                    addHistory(url, view.getTitle());
+                    currentHistoryIndex = historyItems.size() - 1;
+                }
+            } else {
+                isBackNavigation = false;
+            }
+            if (swipeRefreshLayout.isRefreshing()) {
+                swipeRefreshLayout.setRefreshing(false);
+            }
+            String jsOverrideHistory = "javascript:(function(){" +
+                    "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
+                    "var pushState=history.pushState;" +
+                    "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
+                    "var replaceState=history.replaceState;" +
+                    "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
+                    "window.addEventListener('popstate',function(){notifyUrlChange();});" +
+                    "window.addEventListener('hashchange',function(){notifyUrlChange();});" +
+                    "notifyUrlChange();" +
+                    "})();"; 
+            view.evaluateJavascript(jsOverrideHistory, null);
+        }
+        @Override
+        public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+            if (!basicAuthEnabled) {
+                super.onReceivedHttpAuthRequest(view, handler, host, realm);
+                return;
+            }
+            LinearLayout layout = new LinearLayout(MainActivity.this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            int padding = (int)(16 * getResources().getDisplayMetrics().density);
+            layout.setPadding(padding, padding, padding, padding);
+            final EditText usernameInput = new EditText(MainActivity.this);
+            usernameInput.setHint("ユーザー名");
+            usernameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
+            layout.addView(usernameInput);
+            final EditText passwordInput = new EditText(MainActivity.this);
+            passwordInput.setHint("パスワード");
+            passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            layout.addView(passwordInput);
+            new MaterialAlertDialogBuilder(MainActivity.this)
+                .setTitle("Basic認証情報を入力")
+                .setView(layout)
+                .setPositiveButton("ログイン", (dialog, which) -> {
+                    String username = usernameInput.getText().toString().trim();
+                    String password = passwordInput.getText().toString().trim();
+                    if (!username.isEmpty() && !password.isEmpty()) {
+                        handler.proceed(username, password);
+                    } else {
+                        Toast.makeText(MainActivity.this, "ユーザー名とパスワードを入力してください", Toast.LENGTH_SHORT).show();
+                        handler.cancel();
+                    }
+                })
+                .setNegativeButton("キャンセル", (dialog, which) -> handler.cancel())
+                .show();
+        }
+    }
+
+    private class OptimizedWebChromeClient extends WebChromeClient {
+        @Override
+        public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
+                                           FileChooserParams fileChooserParams) {
+            MainActivity.this.filePathCallback = filePathCallback;
+            try {
+                fileChooserLauncher.launch(fileChooserParams.createIntent());
+            } catch (Exception e) {
+                MainActivity.this.filePathCallback = null;
+                Toast.makeText(MainActivity.this, "ファイル選択エラー", Toast.LENGTH_SHORT).show();
+                return false;
+            }
+            return true;
+        }
+       @Override
+       public void onPermissionRequest(final PermissionRequest request) {
+       try {
+        String[] resources = request.getResources();
+        List<String> permissionsNeeded = new ArrayList<>();
+
+        for (String resource : resources) {
+            if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.CAMERA)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    permissionsNeeded.add(Manifest.permission.CAMERA);
+                }
+            } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
+                }
+            }
+        }
+        if (permissionsNeeded.isEmpty()) {
+            request.grant(resources);
+        } else {
+            pendingPermissionRequest = request;
+            permissionRequestLauncher.launch(permissionsNeeded.toArray(new String[0]));
+        }
+    } catch (Exception e) {
+        e.printStackTrace();
+        request.deny();
+    }
+}
+
+        @Override
+        public void onReceivedIcon(WebView view, Bitmap icon) {
+            if (view == getCurrentWebView()) {
+                faviconImageView.setImageBitmap(icon);
+            }
+            webViewFavicons.put(view, icon);
+            String currentUrl = view.getUrl();
+            if (currentUrl != null) {
+                faviconCache.put(currentUrl, icon);
+                backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
+            }
+        }
+        @Override
+        public void onShowCustomView(View view, CustomViewCallback callback) {
+            if (customView != null) {
+                callback.onCustomViewHidden();
+                return;
+            }
+            customView = view;
+            customViewCallback = callback;
+            webViewContainer.setVisibility(View.GONE);
+            FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+            decor.addView(customView, new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        }
+        @Override
+        public void onHideCustomView() {
+            if (customView == null) {
+                return;
+            }
+            FrameLayout decor = (FrameLayout) getWindow().getDecorView();
+            decor.removeView(customView);
+            customView = null;
+            if (customViewCallback != null) {
+                customViewCallback.onCustomViewHidden();
+                customViewCallback = null;
+            }
+            webViewContainer.setVisibility(View.VISIBLE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        }
+    }
+
     private void closeTab(WebView webView) {
         int index = webViews.indexOf(webView);
         if (index != -1) {
             if (webViews.size() > 1) {
                 webViews.remove(index);
+                webView.destroy();
                 if (currentTabIndex > index) {
                     currentTabIndex--;
                 } else if (currentTabIndex >= webViews.size()) {
@@ -1476,14 +1483,18 @@ public class MainActivity extends AppCompatActivity {
     @JavascriptInterface
     public void onUrlChange(final String url) {
         runOnUiThread(() -> {
+            urlEditText.setText(url);
             if (url.startsWith("https://m.youtube.com/watch") ||
                 url.startsWith("https://chatgpt.com/") ||
                 url.startsWith("https://365sns.f5.si/") ||
                 url.startsWith("https://m.youtube.com/shorts/")) {
                 swipeRefreshLayout.setEnabled(false);
-                urlEditText.setText(url);
             } else {
                 swipeRefreshLayout.setEnabled(true);
+            }
+            if (historyItems.isEmpty() || !historyItems.get(historyItems.size() - 1).getUrl().equals(url)) {
+                addHistory(url, getCurrentWebView().getTitle());
+                currentHistoryIndex = historyItems.size() - 1;
             }
         });
     }
@@ -1840,6 +1851,8 @@ private void saveScreenshot(Bitmap bitmap) {
             runOnUiThread(() ->
                 Toast.makeText(MainActivity.this, "スクリーンショット保存中にエラー: " + e.getMessage(), Toast.LENGTH_LONG).show()
             );
+        } finally {
+            bitmap.recycle();
         }
     });
 }
@@ -2294,7 +2307,7 @@ private void showHistoryDialog() {
     }
 
     private void addHistory(String url, String title) {
-        if (url == null || url.isEmpty() || url.equals("about:blank"))
+        if (url == null || url.isEmpty() || url.equals("about:blank") || url.equals(START_PAGE))
             return;
         if (!historyItems.isEmpty() && historyItems.get(historyItems.size() - 1).getUrl().equals(url))
             return;
@@ -2457,7 +2470,8 @@ private void showHistoryDialog() {
                 });
                 tabHolder.closeButton.setOnClickListener(v -> {
                     if (tabs.size() > 1) {
-                        tabs.remove(position);
+                        WebView toRemove = tabs.remove(position);
+                        toRemove.destroy();
                         notifyItemRemoved(position);
                         if (currentTabIndex >= tabs.size()) {
                             currentTabIndex = tabs.size() - 1;
