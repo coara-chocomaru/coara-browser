@@ -423,10 +423,12 @@ public class SecretActivity extends AppCompatActivity {
             HistoryItem previousItem = historyItems.get(currentHistoryIndex);
             current.loadUrl(previousItem.getUrl());
         } else {
-            Toast.makeText(MainActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
+            Toast.makeText(SecretActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
            }
          }
        });
+    }
+
     private void clear0() {
         WebView webView = getCurrentWebView();
     if (webView != null) {
