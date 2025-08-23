@@ -156,7 +156,7 @@ public class SecretActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(4); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -251,14 +251,19 @@ public class SecretActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 32;
-        faviconCache = new LruCache<String, Bitmap>(cacheSize) {
-            @Override
-            protected int sizeOf(String key, Bitmap bitmap) {
-                return bitmap.getByteCount() / 1024;
-            }
-        };
-
+        final int cacheSize = maxMemory / 16; 
+             faviconCache = new LruCache<String, Bitmap>(cacheSize) {
+         @Override
+         protected int sizeOf(String key, Bitmap bitmap) {
+         return bitmap.getByteCount() / 1024;
+        }
+         @Override
+        protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
+           if (evicted && oldValue != null && !oldValue.isRecycled()) {
+            oldValue.recycle(); 
+        }
+    }
+};
         loadBookmarks();
         loadHistory();
         if (!historyItems.isEmpty()) {
@@ -399,25 +404,29 @@ public class SecretActivity extends AppCompatActivity {
         handleIntent(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
-            @Override
-            public void handleOnBackPressed() {
-                if (customView != null) {
-                    exitFullScreen();
-                    return;
-                }
-                WebView current = getCurrentWebView();
-                if (currentHistoryIndex > 0) {
-                    isBackNavigation = true;
-                    currentHistoryIndex--;
-                    HistoryItem previousItem = historyItems.get(currentHistoryIndex);
-                    current.loadUrl(previousItem.getUrl());
-                } else if (current != null && current.canGoBack()) {
-                    current.goBack();
-                } else {
-                    Toast.makeText(SecretActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
-                }
+       @Override
+        public void handleOnBackPressed() {
+        if (customView != null) {
+            exitFullScreen();
+            return;
+        }
+        WebView current = getCurrentWebView();
+        if (current != null && current.canGoBack()) {  
+            current.goBack();
+            isBackNavigation = true;
+            if (currentHistoryIndex > 0) {
+                currentHistoryIndex--; 
             }
-        });
+        } else if (currentHistoryIndex > 0) {
+            isBackNavigation = true;
+            currentHistoryIndex--;
+            HistoryItem previousItem = historyItems.get(currentHistoryIndex);
+            current.loadUrl(previousItem.getUrl());
+        } else {
+            Toast.makeText(MainActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
+           }
+         }
+       });
     }
     private void clear0() {
         WebView webView = getCurrentWebView();
@@ -1042,62 +1051,45 @@ public class SecretActivity extends AppCompatActivity {
                 super.onPageStarted(view, url, favicon);
             }
             @Override
-            public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                applyCombinedOptimizations(view);
-                if (url.startsWith("https://m.youtube.com")) {
-                    new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                        injectLazyLoading(view);
-                    }, 1000);
-                }
-                if (url.equals(START_PAGE)) {
-                  faviconImageView.setVisibility(View.GONE);
-                  urlEditText.setText("");
-               } else {
-                 faviconImageView.setVisibility(View.VISIBLE);
-              if (view == getCurrentWebView()) {
-                  urlEditText.setText(url);
-                 }
-               }
-                if (!isBackNavigation) {
-                    if (historyItems.size() > currentHistoryIndex + 1) {
-                        historyItems.subList(currentHistoryIndex + 1, historyItems.size()).clear();
-                    }
-                    if (historyItems.isEmpty() || !historyItems.get(historyItems.size() - 1).getUrl().equals(url)) {
-                        historyItems.add(new HistoryItem(view.getTitle(), url));
-                        if (historyItems.size() > MAX_HISTORY_SIZE) {
-                            historyItems.remove(0);
-                        }
-                        currentHistoryIndex = historyItems.size() - 1;
-                        view.clearHistory();
-                    }
-                } else {
-                    isBackNavigation = false;
-                }
-                if (swipeRefreshLayout.isRefreshing()) {
-                    swipeRefreshLayout.setRefreshing(false);
-                }
-                String jsOverrideHistory = "javascript:(function() {" +
-                        "function notifyUrlChange() {" +
-                        "   AndroidBridge.onUrlChange(location.href);" +
-                        "}" +
-                        "var pushState = history.pushState;" +
-                        "history.pushState = function() {" +
-                        "   pushState.apply(history, arguments);" +
-                        "   notifyUrlChange();" +
-                        "};" +
-                        "var replaceState = history.replaceState;" +
-                        "history.replaceState = function() {" +
-                        "   replaceState.apply(history, arguments);" +
-                        "   notifyUrlChange();" +
-                        "};" +
-                        "window.addEventListener('popstate', function() {" +
-                        "   notifyUrlChange();" +
-                        "});" +
-                        "notifyUrlChange();" +
-                        "})()";
-                view.loadUrl(jsOverrideHistory);
-            }
+             public void onPageFinished(WebView view, String url) {
+                    super.onPageFinished(view, url);
+                          applyCombinedOptimizations(view);
+           if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
+               view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  
+               new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  
+           }
+    if (url.equals(START_PAGE)) {
+        faviconImageView.setVisibility(View.GONE);
+        urlEditText.setText("");
+    } else {
+        faviconImageView.setVisibility(View.VISIBLE);
+        if (view == getCurrentWebView()) {
+            urlEditText.setText(url);
+        }
+    }
+    if (!isBackNavigation) {
+        if (historyItems.size() > currentHistoryIndex + 1) {
+            historyItems.subList(currentHistoryIndex + 1, historyItems.size()).clear();
+        }
+        addHistory(url, view.getTitle());  
+        currentHistoryIndex = historyItems.size() - 1;
+    } else {
+        isBackNavigation = false;
+    }
+    if (swipeRefreshLayout.isRefreshing()) {
+        swipeRefreshLayout.setRefreshing(false);
+    }
+    String jsOverrideHistory = "(function(){" +
+            "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
+            "var pushState=history.pushState;" +
+            "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
+            "var replaceState=history.replaceState;" +
+            "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
+            "window.addEventListener('popstate',function(){notifyUrlChange();});" +
+            "notifyUrlChange();" +
+            "})();"; 
+    view.evaluateJavascript(jsOverrideHistory, null); 
+}
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
                 if (!basicAuthEnabled) {
@@ -1516,18 +1508,20 @@ public class SecretActivity extends AppCompatActivity {
         current.loadUrl(url);
       }
     }
-    private class AndroidBridge {
+private class AndroidBridge {
     @JavascriptInterface
     public void onUrlChange(final String url) {
-        runOnUiThread(() -> {
+        new Handler(Looper.getMainLooper()).post(() -> { 
+            addHistory(url, getCurrentWebView().getTitle()); 
             if (url.startsWith("https://m.youtube.com/watch") ||
                 url.startsWith("https://chatgpt.com/") ||
+                url.startsWith("https://365sns.f5.si/") ||
                 url.startsWith("https://m.youtube.com/shorts/")) {
                 swipeRefreshLayout.setEnabled(false);
-                urlEditText.setText(url);
             } else {
                 swipeRefreshLayout.setEnabled(true);
             }
+            urlEditText.setText(url); 
         });
     }
 }
