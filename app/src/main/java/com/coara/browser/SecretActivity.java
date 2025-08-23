@@ -403,7 +403,7 @@ public class SecretActivity extends AppCompatActivity {
 
         handleIntent(getIntent());
 
-    getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
         @Override
         public void handleOnBackPressed() {
         if (customView != null) {
@@ -427,6 +427,9 @@ public class SecretActivity extends AppCompatActivity {
            }
          }
        });
+    }
+}
+
     private void clear0() {
         WebView webView = getCurrentWebView();
     if (webView != null) {
