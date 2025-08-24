@@ -256,7 +256,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
         Intent intent = new Intent(this, BrowserOptService.class);
         bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
-    }
+    
         createNotificationChannel();
 
         toolbar = findViewById(R.id.topAppBar);
@@ -515,9 +515,6 @@ public class MainActivity extends AppCompatActivity {
             unbindService(mConnection);
             mBound = false;
         }
-        super.onDestroy();
-        backgroundExecutor.shutdown();
-    }
         super.onDestroy();
         backgroundExecutor.shutdown();
     }
