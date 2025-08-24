@@ -103,6 +103,7 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
@@ -167,8 +168,7 @@ public class MainActivity extends AppCompatActivity {
     private int totalMatches = 0;
     private boolean isBackNavigation = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
-    private final List<HistoryItem> historyItems = new ArrayList<>();
-
+    private final List<HistoryItem> historyItems = Collections.synchronizedList(new ArrayList<>());
     private boolean darkModeEnabled = false;
     private boolean basicAuthEnabled = false;
     private boolean zoomEnabled = false;
@@ -274,6 +274,9 @@ public class MainActivity extends AppCompatActivity {
         if (!historyItems.isEmpty()) {
             currentHistoryIndex = historyItems.size() - 1;
         }
+         else {
+            currentHistoryIndex = -1;
+         }
         initializePersistentFavicons();
 
         urlEditText = findViewById(R.id.urlEditText);
@@ -2273,7 +2276,7 @@ private void showHistoryDialog() {
             JSONObject obj = array.getJSONObject(i);
             String title = obj.getString("title");
             String url = obj.getString("url");
-            historyItems.add(new HistoryItem(title, normalizeUrl(url)));  // hashを考慮した正規化追加
+            historyItems.add(new HistoryItem(title, url));
         }
     } catch (JSONException e) {
         e.printStackTrace();
@@ -2295,28 +2298,16 @@ private void saveHistory() {
     pref.edit().putString(KEY_HISTORY, array.toString()).apply();
 }
 
-private String normalizeUrl(String url) { 
-    try {
-        Uri uri = Uri.parse(url);
-        return uri.buildUpon().fragment(null).build().toString(); 
-    } catch (Exception e) {
-        return url;
-    }
-}
-
 private void addHistory(String url, String title) {
     if (url == null || url.isEmpty() || url.equals("about:blank"))
         return;
-    String normalizedUrl = normalizeUrl(url);
-    if (!historyItems.isEmpty() && normalizeUrl(historyItems.get(historyItems.size() - 1).getUrl()).equals(normalizedUrl))
+    if (!historyItems.isEmpty() && historyItems.get(historyItems.size() - 1).getUrl().equals(url))
         return;
-    backgroundExecutor.execute(() -> {  
-        historyItems.add(new HistoryItem(title, url));
-        if (historyItems.size() > MAX_HISTORY_SIZE) {
-            historyItems.remove(0);
-        }
-        saveHistory();
-    });
+    historyItems.add(new HistoryItem(title, url));
+    if (historyItems.size() > MAX_HISTORY_SIZE) {
+        historyItems.remove(0);
+    }
+    saveHistory();
 }
 
     private void createNotificationChannel() {
