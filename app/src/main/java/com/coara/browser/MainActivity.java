@@ -96,7 +96,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
-import java.net.HttpURLConnection;
+import java.nio.ByteBuffer;
+import java.net.HttpURLConnection;　
 import java.net.URL;
 import java.net.URLEncoder;
 import java.security.MessageDigest;
