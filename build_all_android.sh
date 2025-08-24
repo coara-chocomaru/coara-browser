@@ -17,7 +17,6 @@ OUTDIR="$PWD/prebuilt"
 ANDROID_API=${ANDROID_API:-21}
 NDK=${ANDROID_NDK_HOME:-${NDK:-}}
 
-
 : "${ABIS:=arm64-v8a armeabi-v7a}"
 
 if [ -z "$NDK" ]; then
@@ -31,7 +30,6 @@ if [ "$(uname -s)" = "Darwin" ]; then
 fi
 TOOLCHAIN_ROOT="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
 
-
 read -ra ABIS_ARR <<< "$ABIS"
 
 declare -A ABIMAP_TRIPLE
@@ -41,12 +39,10 @@ ABIMAP_OPENSSL["arm64-v8a"]="android-arm64"
 ABIMAP_TRIPLE["armeabi-v7a"]="armv7a-linux-androideabi"
 ABIMAP_OPENSSL["armeabi-v7a"]="android-arm"
 
-
 rm -rf "$WORKDIR"
 mkdir -p "$SRCDIR" "$BUILDDIR" "$OUTDIR"
 
 cd "$SRCDIR"
-
 
 echo "Downloading sources..."
 curl -L --retry 3 -O "$OPENSSL_URL"
@@ -58,7 +54,6 @@ tar xf "${OPENSSL_VER}.tar.gz"
 tar xf "${ZLIB_VER}.tar.gz"
 tar xf "${LIBPNG_VER}.tar.gz"
 
-
 for ABI in "${ABIS_ARR[@]}"; do
   echo "=== Building for $ABI ==="
   TARGET_TRIPLE=${ABIMAP_TRIPLE[$ABI]}
@@ -69,61 +64,59 @@ for ABI in "${ABIS_ARR[@]}"; do
   mkdir -p "$ABI_OUT/lib" "$ABI_OUT/include" "$BUILDDIR/$ABI"
 
   export PATH="$TOOLCHAIN_ROOT/bin:$PATH"
-  CC="${TARGET_TRIPLE}${API}-clang"
-  CXX="${TARGET_TRIPLE}${API}-clang++"
-  STRIP="${TOOLCHAIN_ROOT}/bin/llvm-strip"
+  export CC="${TARGET_TRIPLE}${API}-clang"
+  export CXX="${TARGET_TRIPLE}${API}-clang++"
+  export STRIP="${TOOLCHAIN_ROOT}/bin/llvm-strip"
 
   echo "Using CC=$CC CXX=$CXX"
 
 
   pushd "$SRCDIR/${ZLIB_VER}" > /dev/null
   make distclean || true
-  ./configure --static --prefix="$BUILDDIR/$ABI/zlib" CC="$CC"
-  make -j$(nproc)
-  make install
-  popd > /dev/null
-
-
-  pushd "$SRCDIR/${LIBPNG_VER}" > /dev/null
-  ./configure --host="$TARGET_TRIPLE" --prefix="$BUILDDIR/$ABI/libpng" \
-    CPPFLAGS="-I$BUILDDIR/$ABI/zlib/include" LDFLAGS="-L$BUILDDIR/$ABI/zlib/lib"
-  make -j$(nproc)
+  CC="$CC" ./configure --static --prefix="$BUILDDIR/$ABI/zlib"
+  make -j"$(nproc)"
   make install
   popd > /dev/null
 
   
+  pushd "$SRCDIR/${LIBPNG_VER}" > /dev/null
+  make distclean || true
+  ./configure --host="$TARGET_TRIPLE" --prefix="$BUILDDIR/$ABI/libpng" \
+    CPPFLAGS="-I$BUILDDIR/$ABI/zlib/include" \
+    LDFLAGS="-L$BUILDDIR/$ABI/zlib/lib"
+  make -j"$(nproc)"
+  make install
+  popd > /dev/null
+
   pushd "$SRCDIR/${OPENSSL_VER}" > /dev/null
   make clean || true
-  
   ./Configure "$OPENSSL_ARCH" no-shared -D__ANDROID_API__="$API"
-  make -j$(nproc)
+  make -j"$(nproc)"
   mkdir -p "$BUILDDIR/$ABI/openssl/lib" "$BUILDDIR/$ABI/openssl/include"
   cp libcrypto.a libssl.a "$BUILDDIR/$ABI/openssl/lib/" || true
   cp -R include/openssl "$BUILDDIR/$ABI/openssl/include/" || true
   popd > /dev/null
 
-  
+
   mkdir -p "$ABI_OUT/lib"
   pushd "$ABI_OUT/lib" > /dev/null
-  
+
   $CXX -shared -fPIC -Wl,-soname,libz.so \
     -Wl,--whole-archive "$BUILDDIR/$ABI/zlib/lib/libz.a" -Wl,--no-whole-archive \
     -o libz.so || true
-  $CXX -shared -fPIC -Wl,-soname,libpng.so \
-    -Wl,--whole-archive "$BUILDDIR/$ABI/libpng/lib/libpng.a" "$BUILDDIR/$ABI/zlib/lib/libz.a" -Wl,--no-whole-archive \
-    -o libpng.so || true
 
+  $CXX -shared -fPIC -Wl,-soname,libpng.so \
+    -Wl,--whole-archive "$BUILDDIR/$ABI/libpng/lib/libpng.a" "$BUILDDIR/$ABI/zlib/lib/libz.a" \
+    -Wl,--no-whole-archive -o libpng.so || true
 
   $CXX -shared -fPIC -Wl,-soname,libcrypto.so \
     -Wl,--whole-archive "$BUILDDIR/$ABI/openssl/lib/libcrypto.a" -Wl,--no-whole-archive \
     -o libcrypto.so -lz -ldl -llog || true
 
-  
   cp -r "$BUILDDIR/$ABI/openssl/include/openssl" "$ABI_OUT/include/" 2>/dev/null || true
   cp -r "$BUILDDIR/$ABI/libpng/include"/* "$ABI_OUT/include/" 2>/dev/null || true
   cp -r "$BUILDDIR/$ABI/zlib/include"/* "$ABI_OUT/include/" 2>/dev/null || true
 
-  
   $STRIP --strip-unneeded libcrypto.so 2>/dev/null || true
   $STRIP --strip-unneeded libpng.so 2>/dev/null || true
   $STRIP --strip-unneeded libz.so 2>/dev/null || true
