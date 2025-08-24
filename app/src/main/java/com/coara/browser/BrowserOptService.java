@@ -79,7 +79,7 @@ public class BrowserOptService extends Service {
                 .setContentTitle("BrowserOpt Service")
                 .setContentText("Running native optimizations")
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setSmallIcon(android.R.drawable.ic_menu_info_details) 
+                .setSmallIcon(android.R.drawable.ic_dialog_info) 
                 .build();
     }
 
