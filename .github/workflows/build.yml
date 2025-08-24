@@ -1,4 +1,4 @@
-name: Build
+name: Build APK (with native libs)
 
 on:
   push:
@@ -7,56 +7,120 @@ on:
   pull_request:
     branches:
       - main
-      
+
 permissions:
   contents: read
 
 jobs:
   build:
-    name: Build
+    name: Build (native -> apk)
     runs-on: ubuntu-latest
+    env:
+      PROJECT_DIR: ${{ github.workspace }}
+      APP_DIR: ${{ github.workspace }}/app
+      BUILD_SCRIPT: ${{ github.workspace }}/build_all.sh
+      NDK_VERSION: "r25c"
+      ANDROID_API: "24"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Setup Java
+      - name: Setup Java (Temurin)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: 21
+
+      - name: Make build scripts executable
+        run: |
+          chmod +x ./gradlew || true
+          chmod +x ${{ env.BUILD_SCRIPT }} || true
+
+      
+      - name: Install Android SDK commandline-tools & NDK
+        id: setup-android
+        run: |
+          set -e
           
-      - name: chmod +x
-        run: chmod +x ./gradlew
-        
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+          ANDROID_SDK_ROOT="$HOME/android-sdk"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT}"
+          export ANDROID_SDK_ROOT
 
-      - name: Set variables
+      
+          CMDLINE_TOOLS_ZIP="$HOME/commandlinetools.zip"
+          if [ ! -d "$ANDROID_SDK_ROOT/cmdline-tools/latest" ]; then
+            echo "Downloading Android commandline tools..."
+            
+            curl -fSL "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip" -o "$CMDLINE_TOOLS_ZIP" || \
+            (echo "Failed to download commandline-tools: please update URL or add commandline-tools to the runner" && exit 1)
+            unzip -q "$CMDLINE_TOOLS_ZIP" -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp"
+            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
+            rm -f "$CMDLINE_TOOLS_ZIP"
+          else
+            echo "commandline-tools already present"
+          fi
+
+          export PATH="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH"
+
+          
+          yes | sdkmanager --licenses >/dev/null || true
+
+          
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-${{ env.ANDROID_API }}" "build-tools;35.0.0" "cmake;3.22.1" || true
+
+          
+          sdkmanager --sdk_root="$ANDROID_SDK_ROOT" "ndk;${{ env.NDK_VERSION }}" || {
+            echo "sdkmanager failed to install ndk;${{ env.NDK_VERSION }}"
+            echo "List available packages with: sdkmanager --list --sdk_root=$ANDROID_SDK_ROOT"
+            exit 1
+          }
+
+          
+          NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* | grep "${{ env.NDK_VERSION }}" || true)
+          if [ -z "$NDK_DIR" ]; then
+            
+            NDK_DIR=$(ls -d "$ANDROID_SDK_ROOT/ndk/"* | head -n1)
+          fi
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$NDK_DIR" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
+          echo "PATH=$ANDROID_SDK_ROOT/cmdline-tools/latest/bin:$ANDROID_SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
+
+      - name: Show Android env
         run: |
-          {
-            echo "version=v$(grep versionName app/build.gradle | awk -F\" '{print $2}')"
-            echo "commit=$(echo ${{ github.sha }} | cut -c-7)"
-            echo "repo=$(echo ${GITHUB_REPOSITORY#$GITHUB_REPOSITORY_OWNER/})"
-            echo "timestamp=$(TZ='Asia/Tokyo' date +'%Y%m%d%H%M%S')"
-            echo "name=${repo}-${version}-${commit}-${timestamp}"
-          } >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "ANDROID_NDK_ROOT=${{ env.ANDROID_NDK_ROOT }}" || true
+          ls -la "$HOME/android-sdk" || true
+          echo "NDK installed at: ${{ env.ANDROID_NDK_ROOT }}" || true
 
-      - name: Show set variables
+      
+      - name: Build native libs (zlib/libpng/openssl)
+        env:
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
         run: |
-          echo "name=${{ env.repo }}-${{ env.version }}-${{ env.commit }}-${{ env.timestamp }}" >> $GITHUB_ENV
-          echo -e "version=${{ env.version }}"
-          echo -e "commit=${{ env.commit }}"
-          echo -e "repo=${{ env.repo }}"
-          echo -e "timestamp=${{ env.timestamp }}"
+          set -e
+          
+          echo "Running build_all.sh with NDK=${{ env.ANDROID_NDK_ROOT }} PROJECT_DIR=${{ env.APP_DIR }}"
+          ./build_all.sh "${{ env.ANDROID_NDK_ROOT }}" "${{ env.APP_DIR }}"
 
-      - name: Build
+      
+      - name: Build APK (gradle)
         run: |
           ./gradlew --no-daemon --stacktrace --warning-mode=all assembleRelease
-          mv -vf app/build/outputs/apk/release/app-release.apk "${{ env.name }}.apk"
+          
+          VERSION=$(grep versionName app/build.gradle | awk -F\" '{print $2}')
+          COMMIT=$(echo $GITHUB_SHA | cut -c-7)
+          TIMESTAMP=$(TZ='Asia/Tokyo' date +'%Y%m%d%H%M%S')
+          NAME="app-${VERSION}-${COMMIT}-${TIMESTAMP}.apk"
+          mv -vf app/build/outputs/apk/release/app-release.apk "${NAME}"
+          echo "APK produced: ${NAME}"
+          echo "APK_NAME=${NAME}" >> $GITHUB_ENV
 
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: "${{ env.name }}"
-          path: "${{ env.name }}.apk"
+          name: "${{ env.REPO_NAME || 'app' }}-${{ env.APP_NAME || 'artifact' }}-${{ github.run_number }}"
+          path: ${{ env.APK_NAME || env.APK_NAME }}
