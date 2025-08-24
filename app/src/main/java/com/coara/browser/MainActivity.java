@@ -182,7 +182,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean uaEnabled = false;
     private boolean deskuaEnabled = false;
     private boolean ct3uaEnabled = false;
-
+    private boolean hasSavedTabs = false; 
     private final Map<WebView, Bitmap> webViewFavicons = new HashMap<>();
     private LruCache<String, Bitmap> faviconCache;
     private final Map<WebView, String> originalUserAgents = new HashMap<>();
@@ -194,18 +194,24 @@ public class MainActivity extends AppCompatActivity {
     private boolean mBound = false;
 
     private final ServiceConnection mConnection = new ServiceConnection() {
-        @Override
-        public void onServiceConnected(ComponentName className, IBinder service) {
-            mService = IBrowserOpt.Stub.asInterface(service);
-            mBound = true;
+    @Override
+    public void onServiceConnected(ComponentName className, IBinder service) {
+        mService = IBrowserOpt.Stub.asInterface(service);
+        mBound = true;
+        if (hasSavedTabs) { 
+            loadTabsState();
+            hasSavedTabs = false;
+            updateTabCount(); 
         }
-
-        @Override
-        public void onServiceDisconnected(ComponentName arg0) {
-            mBound = false;
-            mService = null;
-        }
-    };
+    }
+    @Override
+    public void onServiceDisconnected(ComponentName arg0) {
+        mBound = false;
+        mService = null;
+        Intent intent = new Intent(MainActivity.this, BrowserOptService.class);
+        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
+    }
+};
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -313,7 +319,7 @@ public class MainActivity extends AppCompatActivity {
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
         if (pref.contains(KEY_TABS)) {
-            loadTabsState();
+            hasSavedTabs = true;
         } else {
             WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
