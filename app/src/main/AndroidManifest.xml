@@ -4,7 +4,7 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -65,12 +65,6 @@
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="true"/>
         </activity>
-              
-        <service
-              android:name=".BrowserOptService"
-              android:exported="false"
-              android:enabled="true"
-              android:process=":browseropt" /> 
         
         <activity
             android:name=".SecretActivity"
