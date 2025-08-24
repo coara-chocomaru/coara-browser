@@ -18,7 +18,7 @@
 -classobfuscationdictionary obfuscation-dictionary.txt
 -renamesourcefileattribute SourceFile
 -keepattributes Exceptions, InnerClasses, Signature, Deprecated, EnclosingMethod, Record, PermittedSubclasses, NestHost, NestMembers, Module, ModuleMainClass
--optimizationpasses 16
+-optimizationpasses 20
 -mergeinterfacesaggressively
 -adaptclassstrings
 -repackageclasses ''
