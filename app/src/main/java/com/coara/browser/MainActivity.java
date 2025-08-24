@@ -1848,30 +1848,44 @@ public class MainActivity extends AppCompatActivity {
     }
 }
 
-private void saveScreenshot(Bitmap bitmap) {
+private void saveScreenshot(Bitmap screenshot, String fileName) {
+    if (!mBound || mBrowserOpt == null) {
+    
+        try (FileOutputStream fos = new FileOutputStream(fileName)) {
+            screenshot.compress(Bitmap.CompressFormat.PNG, 100, fos);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return;
+    }
+
     backgroundExecutor.execute(() -> {
         try {
-            File screenshotDir = new File(Environment.getExternalStorageDirectory(), "DCIM/Screenshot");
-            if (!screenshotDir.exists()) {
-                screenshotDir.mkdirs();
+        
+            Bitmap copy = screenshot.copy(Bitmap.Config.ARGB_8888, false);
+            if (copy == null) {
+                throw new RuntimeException("Bitmap copy failed");
             }
-            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-            String fileName = timeStamp + ".png";
-            File screenshotFile = new File(screenshotDir, fileName);
-            try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 80, fos); 
-                fos.flush();
+
+        
+            ByteBuffer buffer = ByteBuffer.allocate(copy.getByteCount());
+            copy.copyPixelsToBuffer(buffer);
+
+            
+            byte[] bitmapData = buffer.array();
+
+            
+            mBrowserOpt.saveScreenshot(bitmapData, fileName);
+
+        
+            if (!copy.isRecycled()) {
+                copy.recycle();
             }
-            runOnUiThread(() ->
-                Toast.makeText(MainActivity.this, "スクリーンショットを保存しました: " + screenshotFile.getAbsolutePath(), Toast.LENGTH_LONG).show()
-            );
-        } catch (Exception e) {
-            runOnUiThread(() ->
-                Toast.makeText(MainActivity.this, "スクリーンショット保存中にエラー: " + e.getMessage(), Toast.LENGTH_LONG).show()
-            );
+        } catch (RemoteException | RuntimeException e) {
+            e.printStackTrace();
         }
-    });
-}
+      });
+   }
 
     private void updateDarkMode() {
         for (WebView webView : webViews) {
@@ -2103,7 +2117,7 @@ private void hideFindInPageBar() {
         }
     }
 }
-private void showHistoryDialog() {
+   private void showHistoryDialog() {
         RecyclerView recyclerView = new RecyclerView(this);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
@@ -2440,17 +2454,36 @@ private void addHistory(String url, String title) {
         }
         return;
     }
+
     backgroundExecutor.execute(() -> {
         try {
-            byte[] bitmapData = new byte[bitmap.getByteCount()];
-            bitmap.copy(Bitmap.Config.ARGB_8888, false).copyToBuffer(bitmapData, 0, bitmapData.length);
+            
+            Bitmap copy = bitmap.copy(Bitmap.Config.ARGB_8888, false);
+            if (copy == null) {
+                throw new RuntimeException("Bitmap copy failed");
+            }
+
+            
+            ByteBuffer buffer = ByteBuffer.allocate(copy.getByteCount());
+            copy.copyPixelsToBuffer(buffer);
+
+            
+            byte[] bitmapData = buffer.array();
+
+        
             mBrowserOpt.saveFavicon(url, bitmapData);
-        } catch (RemoteException e) {
+
+            
+            if (!copy.isRecycled()) {
+                copy.recycle();
+            }
+        } catch (RemoteException | RuntimeException e) {
             e.printStackTrace();
+        
             runOnUiThread(() -> Toast.makeText(MainActivity.this, "ファビコン保存失敗", Toast.LENGTH_SHORT).show());
         }
-      });
-    }
+    });
+}
     private void loadFaviconFromDisk(String url) {
         File faviconsDir = new File(getFilesDir(), "favicons");
         File file = new File(faviconsDir, getFaviconFilename(url));
