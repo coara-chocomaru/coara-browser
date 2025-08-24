@@ -65,7 +65,13 @@
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="true"/>
         </activity>
-
+              
+        <service
+              android:name=".BrowserOptService"
+              android:exported="false"
+              android:process=":browseropt"
+              android:foregroundServiceType="dataSync" /> 
+        
         <activity
             android:name=".SecretActivity"
             android:process=":Secret_webview"
