@@ -1,32 +1,44 @@
-plugins { 
+plugins {
     id 'com.android.application'
 }
 
 android {
-    compileSdk = 35 
-    buildToolsVersion '35.0.0'
-    ndkVersion '25.2.9519653'
-    namespace = 'com.coara.browser'
+    namespace = "com.coara.browser"
+    compileSdk = 35
+    ndkVersion = "25.2.9519653"
+
     defaultConfig {
+        applicationId "com.coara.browser"
         minSdk = 24
         targetSdk = 30
         versionCode = 203
         versionName = "4.1.32"
+
         multiDexEnabled = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+
+        externalNativeBuild {
+            ndkBuild {
+                arguments "NDK_APPLICATION_MK=src/main/jni/Application.mk"
+            }
+        }
+
+        ndk {
+            abiFilters "armeabi-v7a", "arm64-v8a"
+        }
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_21
-        targetCompatibility JavaVersion.VERSION_21
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
-    
+
     signingConfigs {
         release {
-            storeFile file('test.jks')
-            storePassword 'test1234'
-            keyAlias 'key0'
-            keyPassword 'test1234'
+            storeFile file("test.jks")
+            storePassword "test1234"
+            keyAlias "key0"
+            keyPassword "test1234"
         }
     }
 
@@ -43,40 +55,57 @@ android {
     }
 
     lint {
-        disable += ['ExpiredTargetSdkVersion', 'NewApi', 'Range', 'SetTextI18n', 'ScopedStorage', 'FieldCanBeLocal', 'GradleDependency']
+        disable += [
+            "ExpiredTargetSdkVersion",
+            "NewApi",
+            "Range",
+            "SetTextI18n",
+            "ScopedStorage",
+            "FieldCanBeLocal",
+            "GradleDependency"
+        ]
     }
+
     buildFeatures {
         aidl true
     }
+
     externalNativeBuild {
-        ndkBuild.path 'src/main/jni/Android.mk'
-    }
-    sourceSets {
-        main {
-            aidl.srcDirs = ['src/main/aidl']
+        ndkBuild {
+            path "src/main/jni/Android.mk"
         }
     }
+
+    sourceSets {
+        main {
+            aidl.srcDirs = ["src/main/aidl"]
+        }
+    }
+
     packagingOptions {
-        excludes += "DebugProbesKt.bin"
+        resources {
+            excludes += "DebugProbesKt.bin"
+        }
     }
 }
+
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ["-Xlint:deprecation", "-Xlint:unchecked"]
 }
 
 dependencies {
-    implementation 'androidx.startup:startup-runtime:1.2.0'
-    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
+    implementation "androidx.startup:startup-runtime:1.2.0"
+    implementation "androidx.profileinstaller:profileinstaller:1.4.1"
     implementation "io.noties.markwon:core:4.6.2"
-    implementation 'com.google.zxing:core:3.5.3'
+    implementation "com.google.zxing:core:3.5.3"
     implementation "androidx.emoji2:emoji2:1.5.0"
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.2.0'
-    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
-    implementation 'androidx.recyclerview:recyclerview:1.4.0'
-    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
-    implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'androidx.webkit:webkit:1.14.0'
-    implementation 'androidx.activity:activity:1.10.1'
+    implementation "androidx.appcompat:appcompat:1.7.0"
+    implementation "com.google.android.material:material:1.12.0"
+    implementation "androidx.constraintlayout:constraintlayout:2.2.0"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:1.2.0"
+    implementation "androidx.recyclerview:recyclerview:1.4.0"
+    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
+    implementation "androidx.cardview:cardview:1.0.0"
+    implementation "androidx.webkit:webkit:1.14.0"
+    implementation "androidx.activity:activity:1.10.1"
 }
