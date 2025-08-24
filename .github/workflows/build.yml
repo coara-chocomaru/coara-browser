@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+
 permissions:
   contents: read
 
@@ -37,7 +38,7 @@ jobs:
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: '25.2.9519653' 
+          ndk-version: '25.2.9519653'
 
       - name: Export NDK path
         run: |
@@ -45,140 +46,9 @@ jobs:
           echo "NDK=${{ steps.setup-ndk.outputs.ndk-path }}" >> $GITHUB_ENV
           echo "PATH=${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH" >> $GITHUB_ENV
 
-      - name: Create build_all_android.sh
-        run: |
-          cat > build_all_android.sh <<'EOF'
-
-#!/usr/bin/env bash
-
-set -euo pipefail
-
-OPENSSL_VER="openssl-3.1.6"
-ZLIB_VER="zlib-1.3.1"
-LIBPNG_VER="libpng-1.6.49"
-OPENSSL_URL="https://www.openssl.org/source/${OPENSSL_VER}.tar.gz"
-ZLIB_URL="https://zlib.net/${ZLIB_VER}.tar.gz"
-LIBPNG_URL="https://download.sourceforge.net/libpng/${LIBPNG_VER}.tar.gz"
-
-WORKDIR="$PWD/deps_build"
-SRCDIR="$WORKDIR/src"
-BUILDDIR="$WORKDIR/build"
-OUTDIR="$PWD/prebuilt"
-
-ANDROID_API=${ANDROID_API:-21}
-NDK=${ANDROID_NDK_HOME:-${NDK:-}}
-
-if [ -z "$NDK" ]; then
-  echo "ERROR: ANDROID_NDK_HOME or NDK must be set"
-  exit 1
-fi
-
-HOST_TAG=linux-x86_64
-TOOLCHAIN_ROOT="$NDK/toolchains/llvm/prebuilt/$HOST_TAG"
-
-ABIS=( $(echo "$ABIS") )
-declare -A ABIMAP_TRIPLE
-declare -A ABIMAP_OPENSSL
-ABIMAP_TRIPLE["arm64-v8a"]="aarch64-linux-android"
-ABIMAP_OPENSSL["arm64-v8a"]="android-arm64"
-ABIMAP_TRIPLE["armeabi-v7a"]="armv7a-linux-androideabi"
-ABIMAP_OPENSSL["armeabi-v7a"]="android-arm"
-
-rm -rf "$WORKDIR"
-mkdir -p "$SRCDIR" "$BUILDDIR" "$OUTDIR"
-cd "$SRCDIR"
-
-curl -L --retry 3 -O "$OPENSSL_URL"
-curl -L --retry 3 -O "$ZLIB_URL"
-curl -L --retry 3 -O "$LIBPNG_URL"
-
-tar xf "${OPENSSL_VER}.tar.gz"
-tar xf "${ZLIB_VER}.tar.gz"
-tar xf "${LIBPNG_VER}.tar.gz"
-
-for ABI in "${ABIS[@]}"; do
-  echo "=== Building for $ABI ==="
-  TARGET_TRIPLE=${ABIMAP_TRIPLE[$ABI]}
-  OPENSSL_ARCH=${ABIMAP_OPENSSL[$ABI]}
-  API=$ANDROID_API
-
-  ABI_OUT="$OUTDIR/$ABI"
-  mkdir -p "$ABI_OUT/lib" "$ABI_OUT/include" "$BUILDDIR/$ABI"
-
-  export PATH="$TOOLCHAIN_ROOT/bin:$PATH"
-  CC="${TARGET_TRIPLE}${API}-clang"
-  CXX="${TARGET_TRIPLE}${API}-clang++"
-  STRIP="${TOOLCHAIN_ROOT}/bin/llvm-strip"
-
-  
-  pushd "$SRCDIR/${ZLIB_VER}"
-  make distclean || true
-  ./configure --static --prefix="$BUILDDIR/$ABI/zlib" CC="$CC"
-  make -j$(nproc)
-  make install
-  popd
-
-  
-  pushd "$SRCDIR/${LIBPNG_VER}"
-  ./configure --host="$TARGET_TRIPLE" --prefix="$BUILDDIR/$ABI/libpng" \
-    CPPFLAGS="-I$BUILDDIR/$ABI/zlib/include" LDFLAGS="-L$BUILDDIR/$ABI/zlib/lib"
-  make -j$(nproc)
-  make install
-  popd
-
-  
-  pushd "$SRCDIR/${OPENSSL_VER}"
-  make clean || true
-  ./Configure $OPENSSL_ARCH no-shared -D__ANDROID_API__=$API
-  make -j$(nproc)
-  mkdir -p "$BUILDDIR/$ABI/openssl/lib" "$BUILDDIR/$ABI/openssl/include"
-  cp libcrypto.a libssl.a "$BUILDDIR/$ABI/openssl/lib/" || true
-  cp -R include/openssl "$BUILDDIR/$ABI/openssl/include/"
-  popd
-
-  pushd "$ABI_OUT/lib"
-  $CXX -shared -fPIC -Wl,-soname,libz.so \
-    -Wl,--whole-archive "$BUILDDIR/$ABI/zlib/lib/libz.a" -Wl,--no-whole-archive \
-    -o libz.so || true
-  $CXX -shared -fPIC -Wl,-soname,libpng.so \
-    -Wl,--whole-archive "$BUILDDIR/$ABI/libpng/lib/libpng.a" "$BUILDDIR/$ABI/zlib/lib/libz.a" -Wl,--no-whole-archive \
-    -o libpng.so || true
-  $CXX -shared -fPIC -Wl,-soname,libcrypto.so \
-    -Wl,--whole-archive "$BUILDDIR/$ABI/openssl/lib/libcrypto.a" -Wl,--no-whole-archive \
-    -o libcrypto.so -lz -ldl -llog || true
-
-  cp -r "$BUILDDIR/$ABI/openssl/include/openssl" "$ABI_OUT/include/" || true
-  cp -r "$BUILDDIR/$ABI/libpng/include"/* "$ABI_OUT/include/" 2>/dev/null || true
-  cp -r "$BUILDDIR/$ABI/zlib/include"/* "$ABI_OUT/include/" 2>/dev/null || true
-
-  $STRIP --strip-unneeded libcrypto.so || true
-  $STRIP --strip-unneeded libpng.so || true
-  $STRIP --strip-unneeded libz.so || true
-  popd
-
-  echo "Artifacts: $ABI_OUT"
-done
-
-
-for ABI in "${ABIS[@]}"; do
-  mkdir -p libs/$ABI
-  cp -v prebuilt/$ABI/lib/*.so libs/$ABI/ || true
-done
-
-if [ -f Android.mk ] || [ -f jni/Android.mk ]; then
-  if [ -x "$(command -v ndk-build)" ]; then
-    ndk-build NDK_PROJECT_PATH=. APP_ABI="${ABIS[*]}"
-  else
-    "$NDK/ndk-build" NDK_PROJECT_PATH=. APP_ABI="${ABIS[*]}"
-  fi
-fi
-
-echo "deps build finished."
-EOF
-          chmod +x build_all_android.sh
-
       - name: Run dependency build + ndk-build
         run: |
+          chmod +x ./build_all_android.sh
           ./build_all_android.sh
 
       - name: chmod +x gradlew
