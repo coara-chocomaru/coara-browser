@@ -5,6 +5,7 @@ plugins {
 android {
     namespace = "com.coara.browser"
     compileSdk = 35
+    buildToolsVersion '35.0.0'
     ndkVersion = "25.2.9519653"
 
     defaultConfig {
@@ -13,7 +14,6 @@ android {
         targetSdk = 30
         versionCode = 203
         versionName = "4.1.32"
-
         multiDexEnabled = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
 
@@ -29,8 +29,8 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
     }
 
     signingConfigs {
