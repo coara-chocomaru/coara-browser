@@ -1,44 +1,31 @@
-plugins {
+plugins { 
     id 'com.android.application'
 }
 
 android {
-    namespace = "com.coara.browser"
-    compileSdk = 35
-    buildToolsVersion '35.0.0'
-    ndkVersion = "21.4.7075529"
+    compileSdk = 35 
+    namespace = 'com.coara.browser'
 
     defaultConfig {
-        applicationId "com.coara.browser"
         minSdk = 24
         targetSdk = 30
         versionCode = 203
         versionName = "4.1.32"
         multiDexEnabled = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-
-        externalNativeBuild {
-            ndkBuild {
-                arguments "NDK_APPLICATION_MK=src/main/jni/Application.mk"
-            }
-        }
-
-        ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a"
-        }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
     }
-
+    
     signingConfigs {
         release {
-            storeFile file("test.jks")
-            storePassword "test1234"
-            keyAlias "key0"
-            keyPassword "test1234"
+            storeFile file('test.jks')
+            storePassword 'test1234'
+            keyAlias 'key0'
+            keyPassword 'test1234'
         }
     }
 
@@ -55,37 +42,10 @@ android {
     }
 
     lint {
-        disable += [
-            "ExpiredTargetSdkVersion",
-            "NewApi",
-            "Range",
-            "SetTextI18n",
-            "ScopedStorage",
-            "FieldCanBeLocal",
-            "GradleDependency"
-        ]
+        disable += ['ExpiredTargetSdkVersion', 'NewApi', 'Range', 'SetTextI18n', 'ScopedStorage', 'FieldCanBeLocal', 'GradleDependency']
     }
-
-    buildFeatures {
-        aidl true
-    }
-
-    externalNativeBuild {
-        ndkBuild {
-            path "src/main/jni/Android.mk"
-        }
-    }
-
-    sourceSets {
-        main {
-            aidl.srcDirs = ["src/main/aidl"]
-        }
-    }
-
     packagingOptions {
-        resources {
-            excludes += "DebugProbesKt.bin"
-        }
+        excludes += "DebugProbesKt.bin"
     }
 }
 
@@ -94,18 +54,18 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 dependencies {
-    implementation "androidx.startup:startup-runtime:1.2.0"
-    implementation "androidx.profileinstaller:profileinstaller:1.4.1"
+    implementation 'androidx.startup:startup-runtime:1.2.0'
+    implementation 'androidx.profileinstaller:profileinstaller:1.4.1'
     implementation "io.noties.markwon:core:4.6.2"
-    implementation "com.google.zxing:core:3.5.3"
+    implementation 'com.google.zxing:core:3.5.3'
     implementation "androidx.emoji2:emoji2:1.5.0"
-    implementation "androidx.appcompat:appcompat:1.7.0"
-    implementation "com.google.android.material:material:1.12.0"
-    implementation "androidx.constraintlayout:constraintlayout:2.2.0"
-    implementation "androidx.coordinatorlayout:coordinatorlayout:1.2.0"
-    implementation "androidx.recyclerview:recyclerview:1.4.0"
-    implementation "androidx.swiperefreshlayout:swiperefreshlayout:1.1.0"
-    implementation "androidx.cardview:cardview:1.0.0"
-    implementation "androidx.webkit:webkit:1.14.0"
-    implementation "androidx.activity:activity:1.10.1"
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.2.0'
+    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
+    implementation 'androidx.recyclerview:recyclerview:1.4.0'
+    implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+    implementation 'androidx.cardview:cardview:1.0.0'
+    implementation 'androidx.webkit:webkit:1.14.0'
+    implementation 'androidx.activity:activity:1.10.1'
 }
