@@ -38,7 +38,7 @@ jobs:
         id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
-          ndk-version: '25.2.9519653'
+          ndk-version: '25.0.8775105'
 
       - name: Export NDK path
         run: |
