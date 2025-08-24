@@ -13,16 +13,10 @@ LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include/png
 include $(PREBUILT_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
-LOCAL_MODULE := zlib
-LOCAL_SRC_FILES := libs/$(TARGET_ARCH_ABI)/libz.so
-LOCAL_EXPORT_C_INCLUDES := $(LOCAL_PATH)/include/zlib
-include $(PREBUILT_SHARED_LIBRARY)
-
-include $(CLEAR_VARS)
 LOCAL_MODULE := browseropt
 LOCAL_SRC_FILES := browseropt.cpp
-LOCAL_SHARED_LIBRARIES := crypto png zlib
-LOCAL_LDLIBS := -llog -landroid
+LOCAL_SHARED_LIBRARIES := crypto png
+LOCAL_LDLIBS := -llog -landroid -lz
 LOCAL_CFLAGS := -std=c++11 -fexceptions -frtti
 LOCAL_CPPFLAGS := -std=c++11 -fexceptions -frtti
 include $(BUILD_SHARED_LIBRARY)
