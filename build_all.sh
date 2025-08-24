@@ -1,28 +1,37 @@
 #!/usr/bin/env bash
+
 set -euo pipefail
 IFS=$'\n\t'
+
 
 ZLIB_VER="1.2.13"
 LIBPNG_VER="1.6.37"
 OPENSSL_VER="1.1.1u"
 
+
 ABIS=("armeabi-v7a" "arm64-v8a")
-ANDROID_API_DEFAULT=24
+
+
+ANDROID_API_DEFAULT="${ANDROID_API_DEFAULT:-24}"
 
 
 die(){ echo "ERROR: $*" >&2; exit 1; }
 info(){ echo "==> $*"; }
+
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 
 
-nproc_or_fallback(){
+nproc_fallback(){
   if command -v nproc >/dev/null 2>&1; then
     nproc
+  elif [[ "$(uname -s)" = "Darwin" ]]; then
+    sysctl -n hw.ncpu || echo 2
   else
-    
-    sysctl -n hw.ncpu 2>/dev/null || echo 2
+    echo 2
   fi
 }
+
+NPROC="$(nproc_fallback)"
 
 
 NDK_ARG="${1:-}"
@@ -51,31 +60,39 @@ export ANDROID_NDK="$ANDROID_NDK_ROOT"
 
 
 UNAME="$(uname -s)"
+UNAME_M="$(uname -m)"
 case "$UNAME" in
   Linux*)  HOST_TAG="linux-x86_64" ;;
   Darwin*)
-    
-    HOST_TAG="darwin-x86_64"
+  
+    if [[ "$UNAME_M" = "arm64" || "$UNAME_M" = "aarch64" ]]; then
+      HOST_TAG="darwin-arm64"
+    else
+      HOST_TAG="darwin-x86_64"
+    fi
     ;;
-  *) die "Unsupported host: $UNAME" ;;
+  *) die "Unsupported host: $UNAME/$UNAME_M" ;;
 esac
 
 TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/${HOST_TAG}/bin"
 [[ -d "$TOOLCHAIN_BIN" ]] || die "Toolchain bin not found: $TOOLCHAIN_BIN"
 export PATH="$TOOLCHAIN_BIN:$PATH"
 
+LLVM_AR="${TOOLCHAIN_BIN}/llvm-ar"
+LLVM_NM="${TOOLCHAIN_BIN}/llvm-nm"
+LLVM_RANLIB="${TOOLCHAIN_BIN}/llvm-ranlib"
+LLVM_STRIP="${TOOLCHAIN_BIN}/llvm-strip"
+LLD="${TOOLCHAIN_BIN}/ld.lld"
 
-REQ_CMDS=(curl tar cmake make perl sed awk xz unzip)
-for c in "${REQ_CMDS[@]}"; do
-  need_cmd "$c"
-done
 
-for t in llvm-ar llvm-nm llvm-ranlib llvm-strip ld.lld; do
-  if ! command -v "$t" >/dev/null 2>&1; then
-    info "Warning: $t not found in PATH. Make sure NDK prebuilt toolchain provides it."
+for c in curl tar cmake make perl sed awk xz unzip "${LLVM_AR}" "${LLVM_NM}" "${LLVM_RANLIB}" "${LLVM_STRIP}"; do
+
+  if [[ "$c" = /* ]]; then
+    [[ -x "$c" ]] || die "Required command not found or not executable: $c"
+  else
+    need_cmd "$c"
   fi
 done
-
 command -v git >/dev/null 2>&1 || info "git not found (optional)."
 
 
@@ -95,6 +112,7 @@ cd "$SRCDIR"
 download_and_extract() {
   local name="$1" ver="$2" dest="$3"
   local urls=()
+
   case "$name" in
     zlib)
       urls+=("https://zlib.net/zlib-$ver.tar.gz")
@@ -115,11 +133,11 @@ download_and_extract() {
   esac
 
   if [[ -d "$dest" ]]; then
-    info "$name already present: $dest"
+    info "$name already downloaded: $dest"
     return
   fi
 
-  local ok=0
+  local ok=0 f u
   for u in "${urls[@]}"; do
     info "Downloading $name $ver from: $u"
     f="$(basename "$u")"
@@ -132,6 +150,7 @@ download_and_extract() {
         *)              die "unknown archive: $f" ;;
       esac
       rm -f "$f"
+
       case "$name" in
         zlib)    mv zlib-$ver "$dest" 2>/dev/null || mv zlib-* "$dest" 2>/dev/null || true ;;
         libpng)  mv libpng-$ver "$dest" 2>/dev/null || mv libpng-* "$dest" 2>/dev/null || true ;;
@@ -180,10 +199,9 @@ for ABI in "${ABIS[@]}"; do
 
   CC="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang"
   CXX="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang++"
-  [[ -x "$CC" && -x "$CXX" ]] || die "clang for ${TRIPLE}${ANDROID_API} not found: CC=$CC CXX=$CXX"
+  [[ -x "$CC" && -x "$CXX" ]] || die "clang for ${TRIPLE}${ANDROID_API} not found: $CC $CXX"
 
   OUT="$BUILDDIR/$ABI"
-  rm -rf "$OUT"
   mkdir -p "$OUT"
   DIST_ABI="$DISTDIR/$ABI"
   mkdir -p "$DIST_ABI/lib" "$DIST_ABI/include"
@@ -197,13 +215,16 @@ for ABI in "${ABIS[@]}"; do
     -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ANDROID_ABI" \
     -DANDROID_PLATFORM="android-$ANDROID_API" \
-    -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$Z_BUILD" -- -j"$(nproc_or_fallback)"
+    -DCMAKE_BUILD_TYPE=Release \
+    -DZLIB_ENABLE_TESTS=OFF
+  cmake --build "$Z_BUILD" -- -j"$NPROC"
 
   ZLIB_A="$(find "$Z_BUILD" -maxdepth 3 -type f -name 'libz*.a' | head -n1 || true)"
   [[ -n "${ZLIB_A:-}" ]] || die "libz.a not found for $ABI"
   cp -av "$ZLIB_A" "$DIST_ABI/lib/libz.a"
-  cp -av "$ZLIB_SRC/zlib.h" "$DIST_ABI/include/"
+  
+  cp -av "$ZLIB_SRC/zlib.h" "$DIST_ABI/include/" || true
+
   if [[ -f "$Z_BUILD/zconf.h" ]]; then
     cp -av "$Z_BUILD/zconf.h" "$DIST_ABI/include/"
   else
@@ -227,11 +248,20 @@ for ABI in "${ABIS[@]}"; do
     -DZLIB_INCLUDE_DIR="$DIST_ABI/include" \
     -DCMAKE_C_FLAGS="-fPIC -I$DIST_ABI/include" \
     -DCMAKE_CXX_FLAGS="-fPIC -I$DIST_ABI/include"
-  cmake --build "$P_BUILD" -- -j"$(nproc_or_fallback)"
+  cmake --build "$P_BUILD" -- -j"$NPROC"
 
   PNG_A="$(find "$P_BUILD" -maxdepth 3 -type f -name 'libpng*.a' | head -n1 || true)"
-  [[ -n "${PNG_A:-}" ]] || die "libpng.a not found for $ABI"
+  [[ -n "${PNG_A:-}" ]] || die "libpng.a not found for $ABI (expected libpng16.a or similar)"
+  
   cp -av "$PNG_A" "$DIST_ABI/lib/"
+  
+  PNG_BASENAME="$(basename "$PNG_A")"
+  if [[ "$PNG_BASENAME" != "libpng.a" ]]; then
+    info "Creating compatibility copy: libpng.a -> $PNG_BASENAME"
+    cp -av "$PNG_A" "$DIST_ABI/lib/libpng.a"
+  fi
+
+  
   cp -av "$LIBPNG_SRC/png.h" "$DIST_ABI/include/"
   cp -av "$LIBPNG_SRC/pngconf.h" "$DIST_ABI/include/"
   find "$P_BUILD" -type f -name "pnglibconf.h" -exec cp -av {} "$DIST_ABI/include/" \; || true
@@ -242,66 +272,46 @@ for ABI in "${ABIS[@]}"; do
   rm -rf "$O_BUILD"; mkdir -p "$O_BUILD"
 
   pushd "$OPENSSL_SRC" >/dev/null
+
     make clean >/dev/null 2>&1 || true
 
     export CC="$CC"
     export CXX="$CXX"
-    export AR="$TOOLCHAIN_BIN/llvm-ar"
-    export NM="$TOOLCHAIN_BIN/llvm-nm"
-    export RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
-    export STRIP="$TOOLCHAIN_BIN/llvm-strip"
-    export LD="$TOOLCHAIN_BIN/ld.lld"
+    export AR="$LLVM_AR"
+    export NM="$LLVM_NM"
+    export RANLIB="$LLVM_RANLIB"
+    export STRIP="$LLVM_STRIP"
+    export LD="$LLD"
+
+    CFLAGS="-D__ANDROID_API__=$ANDROID_API"
 
     
-    API_DEF="-D__ANDROID_API__=${ANDROID_API}"
-
+    PROBE_OPTS=(no-shared no-tests no-ssl3 no-ssl2 no-comp no-engine no-async no-ui-console)
+    SUPPORTED=()
     
-    CANDIDATE_OPTS=( "no-shared" "no-tests" "no-ssl3" "no-ssl2" "no-comp" "no-engine" "no-async" "no-ui-console" )
-
-    info "Probing Configure --help to find supported options..."
-    
-    CONFIG_HELP="$(perl ./Configure --help 2>&1 || true)"
-
-    CONF_OPTS=()
-    for opt in "${CANDIDATE_OPTS[@]}"; do
-      if echo "$CONFIG_HELP" | grep -F -q "$opt"; then
-        info "Supported option: $opt"
-        CONF_OPTS+=("$opt")
+    HELP_TXT="$(perl ./Configure --help 2>&1 || true)"
+    for o in "${PROBE_OPTS[@]}"; do
+      if printf "%s" "$HELP_TXT" | grep -q -- "$o"; then
+        SUPPORTED+=("$o")
       else
-        info "Not supported (skipping): $opt"
+        info "Configure does not advertise option: $o (skipping)"
       fi
     done
 
     
-    if [[ ${#CONF_OPTS[@]} -eq 0 ]]; then
-      if echo "$CONFIG_HELP" | grep -F -q "no-shared"; then
-        CONF_OPTS=("no-shared")
-        info "No candidates matched, using fallback: no-shared"
-      else
-        info "No no-* options available according to Configure --help; running Configure without them"
-        CONF_OPTS=()
-      fi
-    fi
+    CONF_OPTS="${SUPPORTED[*]:-}"
+
+    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API} opts='${CONF_OPTS}'"
 
     
-    CONF_OPTS_STR="$(printf " %s" "${CONF_OPTS[@]}" | sed 's/^ //')"
-    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API} opts='${CONF_OPTS_STR}'"
+    perl Configure ${OPENSSL_TARGET} ${CONF_OPTS} ${CFLAGS} \
+      --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"
 
-    
-    if ! perl ./Configure "${OPENSSL_TARGET}" ${API_DEF} ${CONF_OPTS[@]+"${CONF_OPTS[@]}"} --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"; then
-      echo "---- Configure failed: printing snippets ----" >&2
-      [[ -f "configdata.pm" ]] && sed -n '1,200p' configdata.pm >&2 || true
-      [[ -f "config.log" ]] && sed -n '1,200p' config.log >&2 || true
-      echo "---- Configure --help snippet ----" >&2
-      echo "$CONFIG_HELP" | sed -n '1,200p' >&2 || true
-      die "OpenSSL Configure failed for ${OPENSSL_TARGET}"
-    fi
+  
+    make -j"$NPROC" build_generated libcrypto.a
 
-    
-    make -j"$(nproc_or_fallback)" build_generated libcrypto.a
-
-    
-    make install_dev >/dev/null || true
+  
+    make install_dev >/dev/null
 
     [[ -f "libcrypto.a" ]] || die "OpenSSL libcrypto.a not built for $ABI"
     cp -av "libcrypto.a" "$DIST_ABI/lib/"
@@ -316,15 +326,28 @@ for ABI in "${ABIS[@]}"; do
   info "Done ABI $ABI → $DIST_ABI"
 done
 
-
 info "Copying into Android project: $PROJECT_DIR"
+
 for ABI in "${ABIS[@]}"; do
   ABI_DIST="$DISTDIR/$ABI"
-  DEST_LIB_DIR="$PROJECT_DIR/src/main/jni/libs/$ABI"
+
+  
+  DEST_LIB_DIR1="$PROJECT_DIR/src/main/jniLibs/$ABI"
+  DEST_LIB_DIR2="$PROJECT_DIR/src/main/jni/libs/$ABI"
   DEST_INC_DIR="$PROJECT_DIR/src/main/jni/include"
-  mkdir -p "$DEST_LIB_DIR" "$DEST_INC_DIR"
-  cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR/" || true
-  cp -av "$ABI_DIST/include/"* "$DEST_INC_DIR/" || true
+
+  mkdir -p "$DEST_LIB_DIR1" "$DEST_LIB_DIR2" "$DEST_INC_DIR"
+
+  
+  if compgen -G "$ABI_DIST/lib/*.a" >/dev/null; then
+    cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR1/" || true
+    cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR2/" || true
+  fi
+
+  
+  if [[ -d "$ABI_DIST/include" ]]; then
+    cp -av "$ABI_DIST/include/"* "$DEST_INC_DIR/" || true
+  fi
 done
 
 info "All done. Dist: $DISTDIR"
