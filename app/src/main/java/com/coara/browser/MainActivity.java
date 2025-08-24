@@ -12,6 +12,10 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ActivityInfo;
+import android.content.ComponentName; 
+import android.content.ServiceConnection; 
+import android.os.IBinder; 
+import android.os.RemoteException;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -166,9 +170,11 @@ public class MainActivity extends AppCompatActivity {
     private int currentMatchIndex = 0;
     private int totalMatches = 0;
     private boolean isBackNavigation = false;
+    private IBrowserOpt mBrowserOpt;
+    private boolean mBound = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
     private final List<HistoryItem> historyItems = new ArrayList<>();
-
+    
     private boolean darkModeEnabled = false;
     private boolean basicAuthEnabled = false;
     private boolean zoomEnabled = false;
@@ -185,6 +191,19 @@ public class MainActivity extends AppCompatActivity {
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
     private WebView preloadedWebView = null;
     private View customView = null;
+    private final ServiceConnection mConnection = new ServiceConnection() {
+    @Override
+    public void onServiceConnected(ComponentName className, IBinder service) {
+        mBrowserOpt = IBrowserOpt.Stub.asInterface(service);
+        mBound = true;
+    }
+
+    @Override
+    public void onServiceDisconnected(ComponentName arg0) {
+        mBound = false;
+        mBrowserOpt = null;
+    }
+  };
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -233,6 +252,9 @@ public class MainActivity extends AppCompatActivity {
             WebView.setDataDirectorySuffix("MainActivity");
         }
         super.onCreate(savedInstanceState);
+        Intent intent = new Intent(this, BrowserOptService.class);
+        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
+
         setContentView(R.layout.activity_main);
 
         createNotificationChannel();
@@ -489,6 +511,10 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+         if (mBound) {
+         unbindService(mConnection);
+         mBound = false;
+         }
         super.onDestroy();
         backgroundExecutor.shutdown();
     }
