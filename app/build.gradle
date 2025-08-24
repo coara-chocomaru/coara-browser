@@ -4,6 +4,8 @@ plugins {
 
 android {
     compileSdk = 35 
+    buildToolsVersion '35.0.0'
+    ndkVersion '25.0.8775105'
     namespace = 'com.coara.browser'
 
     defaultConfig {
@@ -43,6 +45,18 @@ android {
 
     lint {
         disable += ['ExpiredTargetSdkVersion', 'NewApi', 'Range', 'SetTextI18n', 'ScopedStorage', 'FieldCanBeLocal', 'GradleDependency']
+    }
+    buildFeatures {
+        aidl true
+    }
+
+    externalNativeBuild {
+        ndkBuild.path 'src/main/jni/Android.mk'
+    }
+    sourceSets {
+        main {
+            aidl.srcDirs = ['src/main/aidl']
+        }
     }
     packagingOptions {
         excludes += "DebugProbesKt.bin"
