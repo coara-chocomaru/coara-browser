@@ -1871,6 +1871,7 @@ private void saveScreenshot(Bitmap bitmap) {
             );
         }
     });
+}
 
     private void updateDarkMode() {
         for (WebView webView : webViews) {
