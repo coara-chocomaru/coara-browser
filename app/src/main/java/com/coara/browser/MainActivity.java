@@ -2432,7 +2432,6 @@ private void saveFaviconToFile(String url, Bitmap bitmap) {
             ioE.printStackTrace();
         }
     }
-}
 
 backgroundExecutor.execute(() -> {
     Bitmap favicon = fetchFavicon(url);
