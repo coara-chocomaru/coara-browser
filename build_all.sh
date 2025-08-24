@@ -2,7 +2,6 @@
 set -euo pipefail
 IFS=$'\n\t'
 
-
 ZLIB_VER="1.2.13"
 LIBPNG_VER="1.6.37"
 OPENSSL_VER="1.1.1u"
@@ -14,6 +13,17 @@ ANDROID_API_DEFAULT=24
 die(){ echo "ERROR: $*" >&2; exit 1; }
 info(){ echo "==> $*"; }
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
+
+
+nproc_or_fallback(){
+  if command -v nproc >/dev/null 2>&1; then
+    nproc
+  else
+    
+    sysctl -n hw.ncpu 2>/dev/null || echo 2
+  fi
+}
+
 
 NDK_ARG="${1:-}"
 PROJECT_DIR_ARG="${2:-}"
@@ -39,11 +49,15 @@ export ANDROID_NDK_ROOT
 export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
 export ANDROID_NDK="$ANDROID_NDK_ROOT"
 
+
 UNAME="$(uname -s)"
 case "$UNAME" in
   Linux*)  HOST_TAG="linux-x86_64" ;;
-  Darwin*) HOST_TAG="darwin-x86_64" ;;
-  *)       die "Unsupported host: $UNAME" ;;
+  Darwin*)
+    
+    HOST_TAG="darwin-x86_64"
+    ;;
+  *) die "Unsupported host: $UNAME" ;;
 esac
 
 TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/${HOST_TAG}/bin"
@@ -51,9 +65,17 @@ TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/${HOST_TAG}/bin"
 export PATH="$TOOLCHAIN_BIN:$PATH"
 
 
-for c in curl tar cmake make perl sed awk xz unzip llvm-ar llvm-nm llvm-ranlib llvm-strip ld.lld; do
+REQ_CMDS=(curl tar cmake make perl sed awk xz unzip)
+for c in "${REQ_CMDS[@]}"; do
   need_cmd "$c"
 done
+
+for t in llvm-ar llvm-nm llvm-ranlib llvm-strip ld.lld; do
+  if ! command -v "$t" >/dev/null 2>&1; then
+    info "Warning: $t not found in PATH. Make sure NDK prebuilt toolchain provides it."
+  fi
+done
+
 command -v git >/dev/null 2>&1 || info "git not found (optional)."
 
 
@@ -93,7 +115,7 @@ download_and_extract() {
   esac
 
   if [[ -d "$dest" ]]; then
-    info "$name already downloaded: $dest"
+    info "$name already present: $dest"
     return
   fi
 
@@ -135,7 +157,7 @@ download_and_extract "openssl" "$OPENSSL_VER" "$OPENSSL_SRC"
 
 cd "$ROOT"
 
-# ---------------- build per ABI ----------------
+
 for ABI in "${ABIS[@]}"; do
   info "========== Build ABI: $ABI =========="
   ANDROID_API="$ANDROID_API_DEFAULT"
@@ -161,11 +183,12 @@ for ABI in "${ABIS[@]}"; do
   [[ -x "$CC" && -x "$CXX" ]] || die "clang for ${TRIPLE}${ANDROID_API} not found: CC=$CC CXX=$CXX"
 
   OUT="$BUILDDIR/$ABI"
+  rm -rf "$OUT"
   mkdir -p "$OUT"
   DIST_ABI="$DISTDIR/$ABI"
   mkdir -p "$DIST_ABI/lib" "$DIST_ABI/include"
 
-  # ---- zlib ----
+  
   info "[zlib] $ABI"
   Z_BUILD="$OUT/zlib"
   rm -rf "$Z_BUILD"; mkdir -p "$Z_BUILD"
@@ -175,9 +198,9 @@ for ABI in "${ABIS[@]}"; do
     -DANDROID_ABI="$ANDROID_ABI" \
     -DANDROID_PLATFORM="android-$ANDROID_API" \
     -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$Z_BUILD" -- -j"$(nproc)"
+  cmake --build "$Z_BUILD" -- -j"$(nproc_or_fallback)"
 
-  ZLIB_A="$(find "$Z_BUILD" -maxdepth 2 -type f -name 'libz*.a' | head -n1 || true)"
+  ZLIB_A="$(find "$Z_BUILD" -maxdepth 3 -type f -name 'libz*.a' | head -n1 || true)"
   [[ -n "${ZLIB_A:-}" ]] || die "libz.a not found for $ABI"
   cp -av "$ZLIB_A" "$DIST_ABI/lib/libz.a"
   cp -av "$ZLIB_SRC/zlib.h" "$DIST_ABI/include/"
@@ -188,7 +211,7 @@ for ABI in "${ABIS[@]}"; do
     [[ -f "$DIST_ABI/include/zconf.h" ]] || cp -av "$ZLIB_SRC/zconf.h" "$DIST_ABI/include/" || true
   fi
 
-  # ---- libpng ----
+  
   info "[libpng] $ABI"
   P_BUILD="$OUT/libpng"
   rm -rf "$P_BUILD"; mkdir -p "$P_BUILD"
@@ -204,16 +227,16 @@ for ABI in "${ABIS[@]}"; do
     -DZLIB_INCLUDE_DIR="$DIST_ABI/include" \
     -DCMAKE_C_FLAGS="-fPIC -I$DIST_ABI/include" \
     -DCMAKE_CXX_FLAGS="-fPIC -I$DIST_ABI/include"
-  cmake --build "$P_BUILD" -- -j"$(nproc)"
+  cmake --build "$P_BUILD" -- -j"$(nproc_or_fallback)"
 
-  PNG_A="$(find "$P_BUILD" -maxdepth 2 -type f -name 'libpng*.a' | head -n1 || true)"
+  PNG_A="$(find "$P_BUILD" -maxdepth 3 -type f -name 'libpng*.a' | head -n1 || true)"
   [[ -n "${PNG_A:-}" ]] || die "libpng.a not found for $ABI"
   cp -av "$PNG_A" "$DIST_ABI/lib/"
   cp -av "$LIBPNG_SRC/png.h" "$DIST_ABI/include/"
   cp -av "$LIBPNG_SRC/pngconf.h" "$DIST_ABI/include/"
   find "$P_BUILD" -type f -name "pnglibconf.h" -exec cp -av {} "$DIST_ABI/include/" \; || true
 
-  # ---- OpenSSL (libcrypto static) with dynamic option filtering ----
+  
   info "[OpenSSL(libcrypto static)] $ABI"
   O_BUILD="$OUT/openssl"
   rm -rf "$O_BUILD"; mkdir -p "$O_BUILD"
@@ -229,50 +252,53 @@ for ABI in "${ABIS[@]}"; do
     export STRIP="$TOOLCHAIN_BIN/llvm-strip"
     export LD="$TOOLCHAIN_BIN/ld.lld"
 
-  
+    
     API_DEF="-D__ANDROID_API__=${ANDROID_API}"
 
-  
+    
     CANDIDATE_OPTS=( "no-shared" "no-tests" "no-ssl3" "no-ssl2" "no-comp" "no-engine" "no-async" "no-ui-console" )
 
-    info "Probing supported Configure options..."
+    info "Probing Configure --help to find supported options..."
     
     CONFIG_HELP="$(perl ./Configure --help 2>&1 || true)"
 
-    
-    CONF_OPTS=""
+    CONF_OPTS=()
     for opt in "${CANDIDATE_OPTS[@]}"; do
       if echo "$CONFIG_HELP" | grep -F -q "$opt"; then
-        CONF_OPTS+=" $opt"
+        info "Supported option: $opt"
+        CONF_OPTS+=("$opt")
       else
-        info "Configure does not advertise option: $opt (skipping)"
+        info "Not supported (skipping): $opt"
       fi
     done
 
-  
-    if [[ -z "${CONF_OPTS// /}" ]]; then
+    
+    if [[ ${#CONF_OPTS[@]} -eq 0 ]]; then
       if echo "$CONFIG_HELP" | grep -F -q "no-shared"; then
-        CONF_OPTS=" no-shared"
+        CONF_OPTS=("no-shared")
+        info "No candidates matched, using fallback: no-shared"
       else
-        info "No candidate options recognized by Configure; will call Configure without 'no-*' options"
+        info "No no-* options available according to Configure --help; running Configure without them"
+        CONF_OPTS=()
       fi
     fi
 
-    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API} opts='${CONF_OPTS}'"
+    
+    CONF_OPTS_STR="$(printf " %s" "${CONF_OPTS[@]}" | sed 's/^ //')"
+    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API} opts='${CONF_OPTS_STR}'"
 
     
-    if ! perl ./Configure "${OPENSSL_TARGET}" ${API_DEF} ${CONF_OPTS} --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"; then
-      echo "---- Configure failed: show first 200 lines of configdata.pm and config.log (if present) ----" >&2
+    if ! perl ./Configure "${OPENSSL_TARGET}" ${API_DEF} ${CONF_OPTS[@]+"${CONF_OPTS[@]}"} --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"; then
+      echo "---- Configure failed: printing snippets ----" >&2
       [[ -f "configdata.pm" ]] && sed -n '1,200p' configdata.pm >&2 || true
       [[ -f "config.log" ]] && sed -n '1,200p' config.log >&2 || true
-    
-      echo "---- Configure --help output (snippet) ----" >&2
+      echo "---- Configure --help snippet ----" >&2
       echo "$CONFIG_HELP" | sed -n '1,200p' >&2 || true
       die "OpenSSL Configure failed for ${OPENSSL_TARGET}"
     fi
 
     
-    make -j"$(nproc)" build_generated libcrypto.a
+    make -j"$(nproc_or_fallback)" build_generated libcrypto.a
 
     
     make install_dev >/dev/null || true
