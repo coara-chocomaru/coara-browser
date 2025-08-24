@@ -1,4 +1,6 @@
 # CoaraBrowser(オススメしません)
+※開発終了しました。
+googleのwebviewの新しいverがインストールされてなければ動作しません。
 
 - Android の WebView を活用した
 - 軽量マルチタブ方式の Webview式 ブラウザです。
