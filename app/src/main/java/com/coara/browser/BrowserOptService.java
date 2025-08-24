@@ -19,8 +19,8 @@ public class BrowserOptService extends Service {
     static {
         System.loadLibrary("browseropt");
     }
-
-　　 private final IBrowserOpt.Stub mBinder = new IBrowserOpt.Stub() {
+    
+    private final IBrowserOpt.Stub mBinder = new IBrowserOpt.Stub() {
     @Override
     public void saveFavicon(String url, byte[] bitmapData) throws RemoteException {
         nativeSaveFavicon(url, bitmapData);
