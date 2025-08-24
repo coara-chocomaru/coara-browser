@@ -2404,45 +2404,72 @@ private void addHistory(String url, String title) {
 }
 
 private void saveFaviconToFile(String url, Bitmap bitmap) {
+    if (bitmap == null) return;
+
     File faviconsDir = new File(getFilesDir(), "favicons");
     if (!faviconsDir.exists()) {
         faviconsDir.mkdirs();
     }
+
+    
+    final int TARGET_W = 16;
+    final int TARGET_H = 16;
+    Bitmap bmp = bitmap;
+    boolean scaled = false;
+    if (bmp.getWidth() != TARGET_W || bmp.getHeight() != TARGET_H) {
+        bmp = Bitmap.createScaledBitmap(bmp, TARGET_W, TARGET_H, true);
+        scaled = true;
+    }
+
     try {
         if (mBound && mService != null) {
-            ByteBuffer buffer = ByteBuffer.allocate(bitmap.getByteCount());
-            bitmap.copy(Bitmap.Config.ARGB_8888, false);
-            bitmap.copy(Bitmap.Config.ARGB_8888, false).copyTo(buffer); 
-            byte[] bitmapData = buffer.array();
+            int w = bmp.getWidth();
+            int h = bmp.getHeight();
+            
+            int[] pixels = new int[w * h];
+            bmp.getPixels(pixels, 0, w, 0, 0, w, h);
+
+            
+            byte[] bitmapData = new byte[w * h * 4];
+            for (int i = 0; i < pixels.length; i++) {
+                int p = pixels[i];
+                int a = (p >> 24) & 0xFF;
+                int r = (p >> 16) & 0xFF;
+                int g = (p >> 8) & 0xFF;
+                int b = p & 0xFF;
+                int base = i * 4;
+                bitmapData[base]     = (byte) r;
+                bitmapData[base + 1] = (byte) g; 
+                bitmapData[base + 2] = (byte) b; 
+                bitmapData[base + 3] = (byte) a; 
+            }
+
+            
             mService.saveFavicon(url, bitmapData);
         } else {
             File file = new File(faviconsDir, getFaviconFilename(url));
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                bitmap.compress(Bitmap.CompressFormat.PNG, 50, fos);
+                bmp.compress(Bitmap.CompressFormat.PNG, 50, fos);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
     } catch (RemoteException e) {
         e.printStackTrace();
-    
+        
         File file = new File(faviconsDir, getFaviconFilename(url));
         try (FileOutputStream fos = new FileOutputStream(file)) {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 50, fos);
+            bmp.compress(Bitmap.CompressFormat.PNG, 50, fos);
         } catch (IOException ioE) {
             ioE.printStackTrace();
         }
+    } finally {
+        
+        if (scaled && bmp != null && bmp != bitmap) {
+            bmp.recycle();
+        }
     }
-
-backgroundExecutor.execute(() -> {
-    Bitmap favicon = fetchFavicon(url);
-    if (favicon != null) {
-        runOnUiThread(() -> faviconCache.put(url, favicon));
-        saveFaviconToFile(url, favicon);
-    }
-});
 }
-
 
     private String getFaviconFilename(String url) {
     try {
