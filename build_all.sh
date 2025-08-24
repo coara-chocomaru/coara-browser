@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-
-
 set -euo pipefail
 IFS=$'\n\t'
 
+
 ZLIB_VER="1.2.13"
 LIBPNG_VER="1.6.37"
-OPENSSL_VER="1.1.1u"     
+OPENSSL_VER="1.1.1u"
 
 
 ABIS=("armeabi-v7a" "arm64-v8a")
@@ -15,7 +14,6 @@ ANDROID_API_DEFAULT=24
 
 die(){ echo "ERROR: $*" >&2; exit 1; }
 info(){ echo "==> $*"; }
-
 need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
 
 
@@ -40,8 +38,9 @@ fi
 [[ -d "$PROJECT_DIR" ]]      || die "PROJECT_DIR not found: $PROJECT_DIR"
 
 export ANDROID_NDK_ROOT
-export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"  
-export ANDROID_NDK="$ANDROID_NDK_ROOT"       
+export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+export ANDROID_NDK="$ANDROID_NDK_ROOT"
+
 
 UNAME="$(uname -s)"
 case "$UNAME" in
@@ -55,17 +54,10 @@ TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/${HOST_TAG}/bin"
 export PATH="$TOOLCHAIN_BIN:$PATH"
 
 
-LLVM_AR="$TOOLCHAIN_BIN/llvm-ar"
-LLVM_NM="$TOOLCHAIN_BIN/llvm-nm"
-LLVM_RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
-LLVM_STRIP="$TOOLCHAIN_BIN/llvm-strip"
-LLD="$TOOLCHAIN_BIN/ld.lld"
-
-for c in curl tar cmake make perl sed awk xz unzip $LLVM_AR $LLVM_NM $LLVM_RANLIB $LLVM_STRIP; do
+for c in curl tar cmake make perl sed awk xz unzip llvm-ar llvm-nm llvm-ranlib llvm-strip ld.lld; do
   need_cmd "$c"
 done
 command -v git >/dev/null 2>&1 || info "git not found (optional)."
-
 
 ROOT="$(pwd)"
 SRCDIR="$ROOT/src"
@@ -79,10 +71,10 @@ info "Project: $PROJECT_DIR"
 
 cd "$SRCDIR"
 
+
 download_and_extract() {
   local name="$1" ver="$2" dest="$3"
   local urls=()
-
   case "$name" in
     zlib)
       urls+=("https://zlib.net/zlib-$ver.tar.gz")
@@ -167,12 +159,10 @@ for ABI in "${ABIS[@]}"; do
       ;;
   esac
 
-  
   CC="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang"
   CXX="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang++"
-  [[ -x "$CC" && -x "$CXX" ]] || die "clang for $TRIPLE$ANDROID_API not found"
+  [[ -x "$CC" && -x "$CXX" ]] || die "clang for ${TRIPLE}${ANDROID_API} not found: CC=$CC CXX=$CXX"
 
-  
   OUT="$BUILDDIR/$ABI"
   mkdir -p "$OUT"
   DIST_ABI="$DISTDIR/$ABI"
@@ -190,7 +180,6 @@ for ABI in "${ABIS[@]}"; do
     -DCMAKE_BUILD_TYPE=Release
   cmake --build "$Z_BUILD" -- -j"$(nproc)"
 
-  
   ZLIB_A="$(find "$Z_BUILD" -maxdepth 2 -type f -name 'libz*.a' | head -n1 || true)"
   [[ -n "${ZLIB_A:-}" ]] || die "libz.a not found for $ABI"
   cp -av "$ZLIB_A" "$DIST_ABI/lib/libz.a"
@@ -226,12 +215,10 @@ for ABI in "${ABIS[@]}"; do
   cp -av "$PNG_A" "$DIST_ABI/lib/"
   cp -av "$LIBPNG_SRC/png.h" "$DIST_ABI/include/"
   cp -av "$LIBPNG_SRC/pngconf.h" "$DIST_ABI/include/"
-
   find "$P_BUILD" -type f -name "pnglibconf.h" -exec cp -av {} "$DIST_ABI/include/" \; || true
 
   
   info "[OpenSSL(libcrypto static)] $ABI"
-  
   O_BUILD="$OUT/openssl"
   rm -rf "$O_BUILD"; mkdir -p "$O_BUILD"
 
@@ -242,28 +229,33 @@ for ABI in "${ABIS[@]}"; do
     
     export CC="$CC"
     export CXX="$CXX"
-    export AR="$LLVM_AR"
-    export NM="$LLVM_NM"
-    export RANLIB="$LLVM_RANLIB"
-    export STRIP="$LLVM_STRIP"
-    export LD="$LLD"            
-
-    
-    CFLAGS="-D__ANDROID_API__=$ANDROID_API"
-    
-    CONF_OPTS="no-shared no-ssl no-dso no-hw no-engine no-async no-ui-console"
-
-    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API}"
-    
-    perl Configure ${OPENSSL_TARGET} ${CONF_OPTS} ${CFLAGS} \
-      --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"
+    export AR="$TOOLCHAIN_BIN/llvm-ar"
+    export NM="$TOOLCHAIN_BIN/llvm-nm"
+    export RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
+    export STRIP="$TOOLCHAIN_BIN/llvm-strip"
+    export LD="$TOOLCHAIN_BIN/ld.lld"
 
   
+    CFLAGS="-D__ANDROID_API__=$ANDROID_API"
+
+    
+    CONF_OPTS="no-shared no-tests no-ssl3 no-ssl2 no-comp no-engine"
+
+    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API} opts='${CONF_OPTS}'"
+
+    
+    if ! perl ./Configure "${OPENSSL_TARGET}" -D__ANDROID_API__="${ANDROID_API}" ${CONF_OPTS} --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"; then
+      echo "---- Configure failed: show configdata.pm (if present) and config.log ----" >&2
+      [[ -f "configdata.pm" ]] && sed -n '1,200p' configdata.pm >&2 || true
+      [[ -f "config.log" ]] && sed -n '1,200p' config.log >&2 || true
+      die "OpenSSL Configure failed for ${OPENSSL_TARGET}"
+    fi
+
+    
     make -j"$(nproc)" build_generated libcrypto.a
 
-
-    make install_dev >/dev/null
-
+    
+    make install_dev >/dev/null || true
 
     [[ -f "libcrypto.a" ]] || die "OpenSSL libcrypto.a not built for $ABI"
     cp -av "libcrypto.a" "$DIST_ABI/lib/"
@@ -271,7 +263,6 @@ for ABI in "${ABIS[@]}"; do
     if [[ -d "$O_BUILD/prefix/include/openssl" ]]; then
       cp -av "$O_BUILD/prefix/include/openssl/"* "$DIST_ABI/include/openssl/"
     else
-
       cp -av "include/openssl/"* "$DIST_ABI/include/openssl/" || true
     fi
   popd >/dev/null
@@ -287,7 +278,6 @@ for ABI in "${ABIS[@]}"; do
   DEST_INC_DIR="$PROJECT_DIR/src/main/jni/include"
   mkdir -p "$DEST_LIB_DIR" "$DEST_INC_DIR"
   cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR/" || true
-  
   cp -av "$ABI_DIST/include/"* "$DEST_INC_DIR/" || true
 done
 
