@@ -7,7 +7,6 @@ android {
     buildToolsVersion '35.0.0'
     ndkVersion '25.0.8775105'
     namespace = 'com.coara.browser'
-
     defaultConfig {
         minSdk = 24
         targetSdk = 30
@@ -49,7 +48,6 @@ android {
     buildFeatures {
         aidl true
     }
-
     externalNativeBuild {
         ndkBuild.path 'src/main/jni/Android.mk'
     }
@@ -62,7 +60,6 @@ android {
         excludes += "DebugProbesKt.bin"
     }
 }
-
 tasks.withType(JavaCompile).configureEach {
     options.compilerArgs += ["-Xlint:deprecation", "-Xlint:unchecked"]
 }
