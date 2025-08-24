@@ -2440,6 +2440,9 @@ backgroundExecutor.execute(() -> {
         saveFaviconToFile(url, favicon);
     }
 });
+}
+
+
     private String getFaviconFilename(String url) {
     try {
         if (mBound && mService != null) {
