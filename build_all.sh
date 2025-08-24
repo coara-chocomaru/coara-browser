@@ -1,265 +1,294 @@
 #!/usr/bin/env bash
 
+
 set -euo pipefail
 IFS=$'\n\t'
 
 ZLIB_VER="1.2.13"
 LIBPNG_VER="1.6.37"
-OPENSSL_VER="1.1.1u"
+OPENSSL_VER="1.1.1u"     
 
-DEFAULT_ABIS=("armeabi-v7a" "arm64-v8a")
 
-function die {
-  echo "ERROR: $*" >&2
-  exit 1
-}
+ABIS=("armeabi-v7a" "arm64-v8a")
+ANDROID_API_DEFAULT=24
 
-function info {
-  echo "==> $*"
-}
 
-function check_cmd {
-  command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"
-}
+die(){ echo "ERROR: $*" >&2; exit 1; }
+info(){ echo "==> $*"; }
+
+need_cmd(){ command -v "$1" >/dev/null 2>&1 || die "Required command not found: $1"; }
+
 
 NDK_ARG="${1:-}"
 PROJECT_DIR_ARG="${2:-}"
 
-if [ -n "$NDK_ARG" ]; then
+if [[ -n "$NDK_ARG" ]]; then
   ANDROID_NDK_ROOT="$NDK_ARG"
-elif [ -n "${ANDROID_NDK_ROOT:-}" ]; then
-  ANDROID_NDK_ROOT="${ANDROID_NDK_ROOT}"
+elif [[ -n "${ANDROID_NDK_ROOT:-}" ]]; then
+  : 
 else
   die "NDK path not provided. Usage: $0 /path/to/android-ndk /path/to/android-project"
 fi
 
-if [ -n "$PROJECT_DIR_ARG" ]; then
+if [[ -n "$PROJECT_DIR_ARG" ]]; then
   PROJECT_DIR="$PROJECT_DIR_ARG"
 else
   PROJECT_DIR="$(pwd)"
 fi
 
-[ -d "$ANDROID_NDK_ROOT" ] || die "ANDROID_NDK_ROOT directory not found: $ANDROID_NDK_ROOT"
-[ -d "$PROJECT_DIR" ] || die "PROJECT_DIR not found: $PROJECT_DIR"
+[[ -d "$ANDROID_NDK_ROOT" ]] || die "ANDROID_NDK_ROOT not found: $ANDROID_NDK_ROOT"
+[[ -d "$PROJECT_DIR" ]]      || die "PROJECT_DIR not found: $PROJECT_DIR"
+
+export ANDROID_NDK_ROOT
+export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"  
+export ANDROID_NDK="$ANDROID_NDK_ROOT"       
 
 UNAME="$(uname -s)"
 case "$UNAME" in
-  Linux*)   HOST_TAG="linux-x86_64" ;;
-  Darwin*)  HOST_TAG="darwin-x86_64" ;;
-  *)        die "Unsupported host OS: $UNAME" ;;
+  Linux*)  HOST_TAG="linux-x86_64" ;;
+  Darwin*) HOST_TAG="darwin-x86_64" ;;
+  *)       die "Unsupported host: $UNAME" ;;
 esac
 
 TOOLCHAIN_BIN="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/${HOST_TAG}/bin"
-[ -d "$TOOLCHAIN_BIN" ] || die "NDK toolchain bin not found at: $TOOLCHAIN_BIN"
+[[ -d "$TOOLCHAIN_BIN" ]] || die "Toolchain bin not found: $TOOLCHAIN_BIN"
 export PATH="$TOOLCHAIN_BIN:$PATH"
 
-for cmd in curl tar cmake make perl sed awk xz unzip; do
-  check_cmd "$cmd"
+
+LLVM_AR="$TOOLCHAIN_BIN/llvm-ar"
+LLVM_NM="$TOOLCHAIN_BIN/llvm-nm"
+LLVM_RANLIB="$TOOLCHAIN_BIN/llvm-ranlib"
+LLVM_STRIP="$TOOLCHAIN_BIN/llvm-strip"
+LLD="$TOOLCHAIN_BIN/ld.lld"
+
+for c in curl tar cmake make perl sed awk xz unzip $LLVM_AR $LLVM_NM $LLVM_RANLIB $LLVM_STRIP; do
+  need_cmd "$c"
 done
+command -v git >/dev/null 2>&1 || info "git not found (optional)."
 
-command -v git >/dev/null 2>&1 || echo "git not found (optional)."
 
-WD="$(pwd)"
-SRCDIR="$WD/src"
-BUILD_DIR_BASE="$WD/build"
-DIST="$WD/dist"
-ABIS=("${DEFAULT_ABIS[@]}")
-
-mkdir -p "$SRCDIR" "$BUILD_DIR_BASE" "$DIST"
+ROOT="$(pwd)"
+SRCDIR="$ROOT/src"
+BUILDDIR="$ROOT/build"
+DISTDIR="$ROOT/dist"
+mkdir -p "$SRCDIR" "$BUILDDIR" "$DISTDIR"
 
 info "NDK: $ANDROID_NDK_ROOT"
-info "Project dir: $PROJECT_DIR"
-info "Toolchain bin: $TOOLCHAIN_BIN"
+info "Toolchain: $TOOLCHAIN_BIN"
+info "Project: $PROJECT_DIR"
 
 cd "$SRCDIR"
 
 download_and_extract() {
-  local primary="$1"
-  local desired_dir="$2"
-  local pkg="$3"
-  local ver="${4:-}"
-  local archive=""
-  local success=false
-  local candidates=()
+  local name="$1" ver="$2" dest="$3"
+  local urls=()
 
-  case "$pkg" in
+  case "$name" in
     zlib)
-      candidates+=("https://zlib.net/zlib-$ver.tar.gz")
-      candidates+=("https://zlib.net/zlib-$ver.tar.xz")
-      candidates+=("https://zlib.net/current/zlib.tar.gz")
-      candidates+=("https://github.com/madler/zlib/releases/download/v$ver/zlib-$ver.tar.gz")
-      candidates+=("https://github.com/madler/zlib/archive/refs/tags/v$ver.tar.gz")
+      urls+=("https://zlib.net/zlib-$ver.tar.gz")
+      urls+=("https://github.com/madler/zlib/archive/refs/tags/v$ver.tar.gz")
       ;;
     libpng)
-      candidates+=("https://download.sourceforge.net/libpng/libpng-$ver.tar.gz")
-      candidates+=("https://sourceforge.net/projects/libpng/files/libpng16/$ver/libpng-$ver.tar.xz/download")
-      candidates+=("https://github.com/glennrp/libpng/releases/download/v$ver/libpng-$ver.tar.gz")
-      candidates+=("https://github.com/glennrp/libpng/archive/refs/tags/v$ver.tar.gz")
+      urls+=("https://download.sourceforge.net/libpng/libpng-$ver.tar.gz")
+      urls+=("https://github.com/glennrp/libpng/archive/refs/tags/v$ver.tar.gz")
       ;;
     openssl)
-      candidates+=("https://www.openssl.org/source/openssl-$ver.tar.gz")
-      candidates+=("https://www.openssl.org/source/openssl-$ver.tar.xz")
-      candidates+=("https://www.openssl.org/source/old/1.1.1/openssl-$ver.tar.gz")
-      candidates+=("https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_$ver.tar.gz")
+      urls+=("https://www.openssl.org/source/openssl-$ver.tar.gz")
+      urls+=("https://www.openssl.org/source/old/1.1.1/openssl-$ver.tar.gz")
+      urls+=("https://github.com/openssl/openssl/archive/refs/tags/OpenSSL_$ver.tar.gz")
       ;;
     *)
-      candidates+=("$primary")
+      die "unknown package: $name"
       ;;
   esac
 
-  if [ -n "$primary" ]; then
-    candidates+=("$primary")
+  if [[ -d "$dest" ]]; then
+    info "$name already downloaded: $dest"
+    return
   fi
 
-  for cand in "${candidates[@]}"; do
-    info "Trying download: $cand"
-    archive="$(basename "$cand")"
-    if curl -fSL --retry 3 --retry-delay 2 -o "$archive" "$cand"; then
-      info "Downloaded $archive"
-      case "$archive" in
-        *.tar.gz|*.tgz) tar xzf "$archive" || (info "tar xzf failed" && rm -f "$archive" && continue) ;;
-        *.tar.xz)       tar xJf "$archive" || (info "tar xJf failed" && rm -f "$archive" && continue) ;;
-        *.zip)          unzip -q "$archive" || (info "unzip failed" && rm -f "$archive" && continue) ;;
-        *)
-          if file "$archive" | grep -q gzip; then
-            tar xzf "$archive" || (info "tar xzf failed" && rm -f "$archive" && continue)
-          elif file "$archive" | grep -q 'XZ compressed'; then
-            tar xJf "$archive" || (info "tar xJf failed" && rm -f "$archive" && continue)
-          else
-            info "Unknown archive type for $archive, skipping"; rm -f "$archive" || true; continue
-          fi
-          ;;
+  local ok=0
+  for u in "${urls[@]}"; do
+    info "Downloading $name $ver from: $u"
+    f="$(basename "$u")"
+    if curl -fSL --retry 3 --retry-delay 2 -o "$f" "$u"; then
+      info "Extracting: $f"
+      case "$f" in
+        *.tar.gz|*.tgz) tar xzf "$f" ;;
+        *.tar.xz)       tar xJf "$f" ;;
+        *.zip)          unzip -q "$f" ;;
+        *)              die "unknown archive: $f" ;;
       esac
-      if [ -n "$desired_dir" ]; then
-        if [ ! -d "$desired_dir" ]; then
-          found="$(ls -d ./* 2>/dev/null | grep -E "/(${pkg}|${pkg}[-_0-9v]+)" | head -n1 || true)"
-          if [ -z "$found" ]; then found="$(for d in */ ; do echo "$d"; done | head -n1 || true)"; fi
-          if [ -n "$found" ]; then
-            found="${found%/}"
-            if [ "$found" != "$desired_dir" ]; then mv -v "$found" "$desired_dir" 2>/dev/null || true; fi
-          fi
-        fi
-      fi
-      rm -f "$archive" || true
-      success=true
+      rm -f "$f"
+      
+      case "$name" in
+        zlib)    mv zlib-$ver "$dest" 2>/dev/null || mv zlib-* "$dest" 2>/dev/null || true ;;
+        libpng)  mv libpng-$ver "$dest" 2>/dev/null || mv libpng-* "$dest" 2>/dev/null || true ;;
+        openssl) mv openssl-$ver "$dest" 2>/dev/null || mv openssl-* "$dest" 2>/dev/null || true ;;
+      esac
+      [[ -d "$dest" ]] || die "failed to extract $name $ver"
+      ok=1
       break
     else
-      info "Download failed for $cand"; rm -f "$archive" || true
+      info "Download failed: $u"
     fi
   done
-
-  if [ "$success" != true ]; then
-    die "Failed to download and extract $pkg (version $ver)."
-  fi
-  if [ -n "$desired_dir" ] && [ ! -d "$desired_dir" ]; then
-    maybe="$(ls -d ${pkg}* ${pkg}*${ver}* 2>/dev/null | head -n1 || true)"
-    if [ -n "$maybe" ] && [ -d "$maybe" ]; then mv -v "$maybe" "$desired_dir" || true; fi
-  fi
-  info "Extraction for $pkg done -> ${desired_dir}"
+  [[ $ok -eq 1 ]] || die "All mirrors failed for $name $ver"
 }
 
-ZLIB_SRCDIR="$SRCDIR/zlib-$ZLIB_VER"
-[ -d "$ZLIB_SRCDIR" ] || download_and_extract "" "$ZLIB_SRCDIR" "zlib" "$ZLIB_VER"
+ZLIB_SRC="$SRCDIR/zlib-$ZLIB_VER"
+LIBPNG_SRC="$SRCDIR/libpng-$LIBPNG_VER"
+OPENSSL_SRC="$SRCDIR/openssl-$OPENSSL_VER"
 
-LIBPNG_SRCDIR="$SRCDIR/libpng-$LIBPNG_VER"
-[ -d "$LIBPNG_SRCDIR" ] || download_and_extract "" "$LIBPNG_SRCDIR" "libpng" "$LIBPNG_VER"
+download_and_extract "zlib" "$ZLIB_VER" "$ZLIB_SRC"
+download_and_extract "libpng" "$LIBPNG_VER" "$LIBPNG_SRC"
+download_and_extract "openssl" "$OPENSSL_VER" "$OPENSSL_SRC"
 
-OPENSSL_SRCDIR="$SRCDIR/openssl-$OPENSSL_VER"
-[ -d "$OPENSSL_SRCDIR" ] || download_and_extract "" "$OPENSSL_SRCDIR" "openssl" "$OPENSSL_VER"
+cd "$ROOT"
 
-cd "$WD"
 
 for ABI in "${ABIS[@]}"; do
-  info "-------- Building for ABI: $ABI --------"
+  info "========== Build ABI: $ABI =========="
+  ANDROID_API="$ANDROID_API_DEFAULT"
 
   case "$ABI" in
-    armeabi-v7a) ANDROID_API=24; ANDROID_ABI="armeabi-v7a"; OPENSSL_TARGET="android-arm" ;;
-    arm64-v8a)   ANDROID_API=24; ANDROID_ABI="arm64-v8a";   OPENSSL_TARGET="android-arm64" ;;
-    *) die "Unsupported ABI: $ABI" ;;
+    armeabi-v7a)
+      ANDROID_ABI="armeabi-v7a"
+      OPENSSL_TARGET="android-arm"
+      TRIPLE="armv7a-linux-androideabi"
+      ;;
+    arm64-v8a)
+      ANDROID_ABI="arm64-v8a"
+      OPENSSL_TARGET="android-arm64"
+      TRIPLE="aarch64-linux-android"
+      ;;
+    *)
+      die "Unsupported ABI: $ABI"
+      ;;
   esac
 
-  BUILD_DIR="$BUILD_DIR_BASE/$ABI"
-  mkdir -p "$BUILD_DIR"; cd "$BUILD_DIR"
+  
+  CC="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang"
+  CXX="${TOOLCHAIN_BIN}/${TRIPLE}${ANDROID_API}-clang++"
+  [[ -x "$CC" && -x "$CXX" ]] || die "clang for $TRIPLE$ANDROID_API not found"
 
-  ABI_DIST="$DIST/$ABI"
-  mkdir -p "$ABI_DIST/lib" "$ABI_DIST/include"
+  
+  OUT="$BUILDDIR/$ABI"
+  mkdir -p "$OUT"
+  DIST_ABI="$DISTDIR/$ABI"
+  mkdir -p "$DIST_ABI/lib" "$DIST_ABI/include"
 
+  
+  info "[zlib] $ABI"
+  Z_BUILD="$OUT/zlib"
+  rm -rf "$Z_BUILD"; mkdir -p "$Z_BUILD"
 
-  info "[zlib] building for $ABI"
-  ZLIB_BUILD="$BUILD_DIR/zlib"
-  rm -rf "$ZLIB_BUILD"; mkdir -p "$ZLIB_BUILD"
-
-  cmake -S "$ZLIB_SRCDIR" -B "$ZLIB_BUILD" \
+  cmake -S "$ZLIB_SRC" -B "$Z_BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ANDROID_ABI" \
     -DANDROID_PLATFORM="android-$ANDROID_API" \
     -DCMAKE_BUILD_TYPE=Release
-  cmake --build "$ZLIB_BUILD" -- -j$(nproc)
-
-  cp -av $(find "$ZLIB_BUILD" -type f -name "libz*.a" | head -n1) "$ABI_DIST/lib/" || true
+  cmake --build "$Z_BUILD" -- -j"$(nproc)"
 
   
-  if [ -f "$ZLIB_BUILD/zlib.h" ]; then cp -av "$ZLIB_BUILD/zlib.h" "$ABI_DIST/include/"; else cp -av "$ZLIB_SRCDIR/zlib.h" "$ABI_DIST/include/"; fi
-  if [ -f "$ZLIB_BUILD/zconf.h" ]; then cp -av "$ZLIB_BUILD/zconf.h" "$ABI_DIST/include/"; else
-    found="$(find "$ZLIB_BUILD" -name zconf.h | head -n1 || true)"
-    [ -n "$found" ] && cp -av "$found" "$ABI_DIST/include/" || cp -av "$ZLIB_SRCDIR/zconf.h" "$ABI_DIST/include/" || true
+  ZLIB_A="$(find "$Z_BUILD" -maxdepth 2 -type f -name 'libz*.a' | head -n1 || true)"
+  [[ -n "${ZLIB_A:-}" ]] || die "libz.a not found for $ABI"
+  cp -av "$ZLIB_A" "$DIST_ABI/lib/libz.a"
+  cp -av "$ZLIB_SRC/zlib.h" "$DIST_ABI/include/"
+  
+  if [[ -f "$Z_BUILD/zconf.h" ]]; then
+    cp -av "$Z_BUILD/zconf.h" "$DIST_ABI/include/"
+  else
+    find "$Z_BUILD" -type f -name zconf.h -exec cp -av {} "$DIST_ABI/include/" \; || true
+    [[ -f "$DIST_ABI/include/zconf.h" ]] || cp -av "$ZLIB_SRC/zconf.h" "$DIST_ABI/include/" || true
   fi
 
+  
+  info "[libpng] $ABI"
+  P_BUILD="$OUT/libpng"
+  rm -rf "$P_BUILD"; mkdir -p "$P_BUILD"
 
-  info "[libpng] building for $ABI (static libpng.a)"
-  LIBPNG_BUILD="$BUILD_DIR/libpng"
-  rm -rf "$LIBPNG_BUILD"; mkdir -p "$LIBPNG_BUILD"
-
-  cmake -S "$LIBPNG_SRCDIR" -B "$LIBPNG_BUILD" \
+  cmake -S "$LIBPNG_SRC" -B "$P_BUILD" \
     -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
     -DANDROID_ABI="$ANDROID_ABI" \
     -DANDROID_PLATFORM="android-$ANDROID_API" \
     -DCMAKE_BUILD_TYPE=Release \
-    -DZLIB_LIBRARY="$ABI_DIST/lib/libz.a" \
-    -DZLIB_INCLUDE_DIR="$ABI_DIST/include" \
     -DPNG_SHARED=OFF \
     -DHAVE_LD_VERSION_SCRIPT=OFF \
-    -DCMAKE_C_FLAGS="-fPIC -I${ABI_DIST}/include" \
-    -DCMAKE_CXX_FLAGS="-fPIC -I${ABI_DIST}/include"
-  cmake --build "$LIBPNG_BUILD" -- -j$(nproc)
+    -DZLIB_LIBRARY="$DIST_ABI/lib/libz.a" \
+    -DZLIB_INCLUDE_DIR="$DIST_ABI/include" \
+    -DCMAKE_C_FLAGS="-fPIC -I$DIST_ABI/include" \
+    -DCMAKE_CXX_FLAGS="-fPIC -I$DIST_ABI/include"
+  cmake --build "$P_BUILD" -- -j"$(nproc)"
 
-  cp -av $(find "$LIBPNG_BUILD" -type f -name "libpng*.a" | head -n1) "$ABI_DIST/lib/" || true
-  cp -av "$LIBPNG_SRCDIR/png.h" "$ABI_DIST/include/" || true
-  cp -av "$LIBPNG_SRCDIR/pngconf.h" "$ABI_DIST/include/" || true
-  find "$LIBPNG_BUILD" -type f -name "pnglibconf.h" -exec cp -av {} "$ABI_DIST/include/" \; || true
+  PNG_A="$(find "$P_BUILD" -maxdepth 2 -type f -name 'libpng*.a' | head -n1 || true)"
+  [[ -n "${PNG_A:-}" ]] || die "libpng.a not found for $ABI"
+  cp -av "$PNG_A" "$DIST_ABI/lib/"
+  cp -av "$LIBPNG_SRC/png.h" "$DIST_ABI/include/"
+  cp -av "$LIBPNG_SRC/pngconf.h" "$DIST_ABI/include/"
+
+  find "$P_BUILD" -type f -name "pnglibconf.h" -exec cp -av {} "$DIST_ABI/include/" \; || true
 
   
-  info "[OpenSSL] building for $ABI"
-  OPENSSL_BUILD="$BUILD_DIR/openssl-build"
-  rm -rf "$OPENSSL_BUILD"; mkdir -p "$OPENSSL_BUILD"
+  info "[OpenSSL(libcrypto static)] $ABI"
+  
+  O_BUILD="$OUT/openssl"
+  rm -rf "$O_BUILD"; mkdir -p "$O_BUILD"
 
-  case "$ABI" in
-    armeabi-v7a) export CC="armv7a-linux-androideabi${ANDROID_API}-clang" ;;
-    arm64-v8a)   export CC="aarch64-linux-android${ANDROID_API}-clang" ;;
-  esac
-  cd "$OPENSSL_SRCDIR"
-  [ -f Makefile ] && make clean || true
-  ./Configure ${OPENSSL_TARGET} shared -D__ANDROID_API__=${ANDROID_API}
-  make -j$(nproc)
+  pushd "$OPENSSL_SRC" >/dev/null
+    
+    make clean >/dev/null 2>&1 || true
 
-  cp -av $(find . -type f -name "libcrypto*.a" | head -n1) "$ABI_DIST/lib/" || true
-  cp -av $(find . -type f -name "libssl*.a" | head -n1) "$ABI_DIST/lib/" || true
-  mkdir -p "$ABI_DIST/include/openssl"
-  cp -av include/openssl/* "$ABI_DIST/include/openssl/" || true
+    
+    export CC="$CC"
+    export CXX="$CXX"
+    export AR="$LLVM_AR"
+    export NM="$LLVM_NM"
+    export RANLIB="$LLVM_RANLIB"
+    export STRIP="$LLVM_STRIP"
+    export LD="$LLD"            
 
-  cd "$BUILD_DIR"
-  info "Completed ABI: $ABI. Dist at $ABI_DIST"
+    
+    CFLAGS="-D__ANDROID_API__=$ANDROID_API"
+    
+    CONF_OPTS="no-shared no-ssl no-dso no-hw no-engine no-async no-ui-console"
+
+    info "Configure: target=${OPENSSL_TARGET} API=${ANDROID_API}"
+    
+    perl Configure ${OPENSSL_TARGET} ${CONF_OPTS} ${CFLAGS} \
+      --prefix="$O_BUILD/prefix" --openssldir="$O_BUILD/ssl"
+
+  
+    make -j"$(nproc)" build_generated libcrypto.a
+
+
+    make install_dev >/dev/null
+
+
+    [[ -f "libcrypto.a" ]] || die "OpenSSL libcrypto.a not built for $ABI"
+    cp -av "libcrypto.a" "$DIST_ABI/lib/"
+    mkdir -p "$DIST_ABI/include/openssl"
+    if [[ -d "$O_BUILD/prefix/include/openssl" ]]; then
+      cp -av "$O_BUILD/prefix/include/openssl/"* "$DIST_ABI/include/openssl/"
+    else
+
+      cp -av "include/openssl/"* "$DIST_ABI/include/openssl/" || true
+    fi
+  popd >/dev/null
+
+  info "Done ABI $ABI → $DIST_ABI"
 done
 
 
-info "Copying built artifacts into Android project (project: $PROJECT_DIR)"
+info "Copying into Android project: $PROJECT_DIR"
 for ABI in "${ABIS[@]}"; do
-  ABI_DIST="$DIST/$ABI"
+  ABI_DIST="$DISTDIR/$ABI"
   DEST_LIB_DIR="$PROJECT_DIR/src/main/jni/libs/$ABI"
-  DEST_INCLUDE_DIR="$PROJECT_DIR/src/main/jni/include"
-  mkdir -p "$DEST_LIB_DIR" "$DEST_INCLUDE_DIR"
-  [ -d "$ABI_DIST/lib" ] && cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR/" || true
-  [ -d "$ABI_DIST/include" ] && cp -av "$ABI_DIST/include/"* "$DEST_INCLUDE_DIR/" || true
+  DEST_INC_DIR="$PROJECT_DIR/src/main/jni/include"
+  mkdir -p "$DEST_LIB_DIR" "$DEST_INC_DIR"
+  cp -av "$ABI_DIST/lib/"* "$DEST_LIB_DIR/" || true
+  
+  cp -av "$ABI_DIST/include/"* "$DEST_INC_DIR/" || true
 done
 
-info "All done. Dist directory: $DIST"
+info "All done. Dist: $DISTDIR"
