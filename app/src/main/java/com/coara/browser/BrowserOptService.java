@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.IBinder;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import android.os.RemoteException;
 
 public class BrowserOptService extends Service {
 
@@ -19,28 +20,22 @@ public class BrowserOptService extends Service {
         System.loadLibrary("browseropt");
     }
 
-    private final IBrowserOpt.Stub mBinder = new IBrowserOpt.Stub() {
-        @Override
-        public void saveFavicon(String url, byte[] bitmapData) {
-            nativeSaveFavicon(url, bitmapData);
-        }
+　　 private final IBrowserOpt.Stub mBinder = new IBrowserOpt.Stub() {
+    @Override
+    public void saveFavicon(String url, byte[] bitmapData) throws RemoteException {
+        nativeSaveFavicon(url, bitmapData);
+    }
 
-        @Override
-        public byte[] computeMD5(String input) {
-            return nativeComputeMD5(input);
-        }
+    @Override
+    public byte[] computeMD5(String input) throws RemoteException {
+        return nativeComputeMD5(input);
+    }
 
-        @Override
-        public void saveScreenshot(byte[] bitmapData, String fileName) {
-            nativeSaveScreenshot(bitmapData, fileName);
-        }
-
-        @Override
-        public void handleBlobDownload(String url, String mimeType, String fileName) {
-            nativeHandleBlobDownload(url, mimeType, fileName);
-        }
-    };
-
+    @Override
+    public void saveScreenshot(byte[] bitmapData, String fileName) throws RemoteException {
+        nativeSaveScreenshot(bitmapData, fileName);
+    }
+ };
     @Override
     public void onCreate() {
         super.onCreate();
@@ -86,5 +81,4 @@ public class BrowserOptService extends Service {
     private native void nativeSaveFavicon(String url, byte[] bitmapData);
     private native byte[] nativeComputeMD5(String input);
     private native void nativeSaveScreenshot(byte[] bitmapData, String fileName);
-    private native void nativeHandleBlobDownload(String url, String mimeType, String fileName);
 }
