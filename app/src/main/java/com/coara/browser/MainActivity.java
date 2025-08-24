@@ -450,7 +450,7 @@ public class MainActivity extends AppCompatActivity {
            }
          }
      });
-    
+    }
     private void saveBundleToFile(Bundle bundle, String fileName) {
         File file = new File(getFilesDir(), fileName);
         Parcel parcel = Parcel.obtain();
@@ -2441,7 +2441,6 @@ backgroundExecutor.execute(() -> {
         saveFaviconToFile(url, favicon);
     }
 });
-
     private String getFaviconFilename(String url) {
     try {
         if (mBound && mService != null) {
