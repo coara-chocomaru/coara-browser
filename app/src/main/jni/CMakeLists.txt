@@ -1,26 +1,18 @@
 cmake_minimum_required(VERSION 3.10.2)
 project(browseropt)
 
-find_package(OpenSSL REQUIRED)
-find_package(PNG REQUIRED) 
-find_package(ZLIB REQUIRED) 
-
 add_library(browseropt SHARED browseropt.cpp)
 
-target_include_directories(browseropt PRIVATE
-    ${OPENSSL_INCLUDE_DIR}
-    ${PNG_INCLUDE_DIRS}
-    ${ZLIB_INCLUDE_DIRS}
-)
+target_include_directories(browseropt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+
+find_library(log-lib log)
+find_library(android-lib android)
 
 target_link_libraries(browseropt
-    android 
-    log
-    ${OPENSSL_LIBRARIES}
-    ${PNG_LIBRARIES}
-    ${ZLIB_LIBRARIES}
+    ${log-lib}
+    ${android-lib}
 )
 
-
 target_compile_options(browseropt PRIVATE -O3 -march=armv8-a+simd -fPIC -Wall -Wextra -Wno-unused-parameter)
-target_compile_definitions(browseropt PRIVATE -fno-exceptions -fno-rtti)
+target_compile_options(browseropt PRIVATE -fno-exceptions -fno-rtti)
