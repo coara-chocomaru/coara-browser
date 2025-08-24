@@ -1848,44 +1848,29 @@ public class MainActivity extends AppCompatActivity {
     }
 }
 
-private void saveScreenshot(Bitmap screenshot, String fileName) {
-    if (!mBound || mBrowserOpt == null) {
-    
-        try (FileOutputStream fos = new FileOutputStream(fileName)) {
-            screenshot.compress(Bitmap.CompressFormat.PNG, 100, fos);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        return;
-    }
-
+private void saveScreenshot(Bitmap bitmap) {
     backgroundExecutor.execute(() -> {
         try {
-        
-            Bitmap copy = screenshot.copy(Bitmap.Config.ARGB_8888, false);
-            if (copy == null) {
-                throw new RuntimeException("Bitmap copy failed");
+            File screenshotDir = new File(Environment.getExternalStorageDirectory(), "DCIM/Screenshot");
+            if (!screenshotDir.exists()) {
+                screenshotDir.mkdirs();
             }
-
-        
-            ByteBuffer buffer = ByteBuffer.allocate(copy.getByteCount());
-            copy.copyPixelsToBuffer(buffer);
-
-            
-            byte[] bitmapData = buffer.array();
-
-            
-            mBrowserOpt.saveScreenshot(bitmapData, fileName);
-
-        
-            if (!copy.isRecycled()) {
-                copy.recycle();
+            String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+            String fileName = timeStamp + ".png";
+            File screenshotFile = new File(screenshotDir, fileName);
+            try (FileOutputStream fos = new FileOutputStream(screenshotFile)) {
+                bitmap.compress(Bitmap.CompressFormat.PNG, 80, fos); 
+                fos.flush();
             }
-        } catch (RemoteException | RuntimeException e) {
-            e.printStackTrace();
+            runOnUiThread(() ->
+                Toast.makeText(MainActivity.this, "スクリーンショットを保存しました: " + screenshotFile.getAbsolutePath(), Toast.LENGTH_LONG).show()
+            );
+        } catch (Exception e) {
+            runOnUiThread(() ->
+                Toast.makeText(MainActivity.this, "スクリーンショット保存中にエラー: " + e.getMessage(), Toast.LENGTH_LONG).show()
+            );
         }
-      });
-   }
+    });
 
     private void updateDarkMode() {
         for (WebView webView : webViews) {
