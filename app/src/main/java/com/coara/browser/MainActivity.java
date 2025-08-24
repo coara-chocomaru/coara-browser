@@ -12,10 +12,6 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ActivityInfo;
-import android.content.ComponentName;
-import android.content.ServiceConnection;
-import android.os.IBinder;
-import android.os.RemoteException;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
@@ -87,7 +83,6 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.util.Collections;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -97,7 +92,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Method;
-import java.nio.ByteBuffer;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
@@ -173,7 +167,8 @@ public class MainActivity extends AppCompatActivity {
     private int totalMatches = 0;
     private boolean isBackNavigation = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
-    private final List<HistoryItem> historyItems = Collections.synchronizedList(new ArrayList<>());
+    private final List<HistoryItem> historyItems = new ArrayList<>();
+
     private boolean darkModeEnabled = false;
     private boolean basicAuthEnabled = false;
     private boolean zoomEnabled = false;
@@ -182,7 +177,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean uaEnabled = false;
     private boolean deskuaEnabled = false;
     private boolean ct3uaEnabled = false;
-    private boolean hasSavedTabs = false; 
+
     private final Map<WebView, Bitmap> webViewFavicons = new HashMap<>();
     private LruCache<String, Bitmap> faviconCache;
     private final Map<WebView, String> originalUserAgents = new HashMap<>();
@@ -190,28 +185,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
     private WebView preloadedWebView = null;
     private View customView = null;
-    private IBrowserOpt mService;
-    private boolean mBound = false;
-
-    private final ServiceConnection mConnection = new ServiceConnection() {
-    @Override
-    public void onServiceConnected(ComponentName className, IBinder service) {
-        mService = IBrowserOpt.Stub.asInterface(service);
-        mBound = true;
-        if (hasSavedTabs) { 
-            loadTabsState();
-            hasSavedTabs = false;
-            updateTabCount(); 
-        }
-    }
-    @Override
-    public void onServiceDisconnected(ComponentName arg0) {
-        mBound = false;
-        mService = null;
-        Intent intent = new Intent(MainActivity.this, BrowserOptService.class);
-        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
-    }
-};
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -261,9 +234,7 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-        Intent intent = new Intent(this, BrowserOptService.class);
-        bindService(intent, mConnection, Context.BIND_AUTO_CREATE);
-    
+
         createNotificationChannel();
 
         toolbar = findViewById(R.id.topAppBar);
@@ -303,10 +274,7 @@ public class MainActivity extends AppCompatActivity {
         if (!historyItems.isEmpty()) {
             currentHistoryIndex = historyItems.size() - 1;
         }
-        else {
-             currentHistoryIndex = -1;
-         }
-         initializePersistentFavicons();
+        initializePersistentFavicons();
 
         urlEditText = findViewById(R.id.urlEditText);
         urlEditText.setImeOptions(EditorInfo.IME_ACTION_GO);
@@ -319,7 +287,7 @@ public class MainActivity extends AppCompatActivity {
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
         if (pref.contains(KEY_TABS)) {
-            hasSavedTabs = true;
+            loadTabsState();
         } else {
             WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
@@ -521,10 +489,6 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        if (mBound) {
-            unbindService(mConnection);
-            mBound = false;
-        }
         super.onDestroy();
         backgroundExecutor.shutdown();
     }
@@ -2309,7 +2273,7 @@ private void showHistoryDialog() {
             JSONObject obj = array.getJSONObject(i);
             String title = obj.getString("title");
             String url = obj.getString("url");
-            historyItems.add(new HistoryItem(title, url));
+            historyItems.add(new HistoryItem(title, normalizeUrl(url)));  // hashを考慮した正規化追加
         }
     } catch (JSONException e) {
         e.printStackTrace();
@@ -2331,16 +2295,28 @@ private void saveHistory() {
     pref.edit().putString(KEY_HISTORY, array.toString()).apply();
 }
 
+private String normalizeUrl(String url) { 
+    try {
+        Uri uri = Uri.parse(url);
+        return uri.buildUpon().fragment(null).build().toString(); 
+    } catch (Exception e) {
+        return url;
+    }
+}
+
 private void addHistory(String url, String title) {
     if (url == null || url.isEmpty() || url.equals("about:blank"))
         return;
-    if (!historyItems.isEmpty() && historyItems.get(historyItems.size() - 1).getUrl().equals(url))
+    String normalizedUrl = normalizeUrl(url);
+    if (!historyItems.isEmpty() && normalizeUrl(historyItems.get(historyItems.size() - 1).getUrl()).equals(normalizedUrl))
         return;
-    historyItems.add(new HistoryItem(title, url));
-    if (historyItems.size() > MAX_HISTORY_SIZE) {
-        historyItems.remove(0);
-    }
-    saveHistory();
+    backgroundExecutor.execute(() -> {  
+        historyItems.add(new HistoryItem(title, url));
+        if (historyItems.size() > MAX_HISTORY_SIZE) {
+            historyItems.remove(0);
+        }
+        saveHistory();
+    });
 }
 
     private void createNotificationChannel() {
@@ -2379,105 +2355,29 @@ private void addHistory(String url, String title) {
     }
 
     private Bitmap fetchFavicon(String bookmarkUrl) {
-    try {
-        URL urlObj = new URL(bookmarkUrl);
-        String protocol = urlObj.getProtocol();
-        String host = urlObj.getHost();
-        String faviconUrl = protocol + "://" + host + "/favicon.ico";
-        HttpURLConnection connection = (HttpURLConnection) new URL(faviconUrl).openConnection();
-        connection.setConnectTimeout(3000);
-        connection.setReadTimeout(3000);
-        connection.setRequestMethod("GET");
-        connection.connect();
-        if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
-            try (InputStream is = connection.getInputStream()) {
-                return BitmapFactory.decodeStream(is);
+        try {
+            URL urlObj = new URL(bookmarkUrl);
+            String protocol = urlObj.getProtocol();
+            String host = urlObj.getHost();
+            String faviconUrl = protocol + "://" + host + "/favicon.ico";
+            HttpURLConnection connection = (HttpURLConnection) new URL(faviconUrl).openConnection();
+            connection.setConnectTimeout(3000);
+            connection.setReadTimeout(3000);
+            connection.setRequestMethod("GET");
+            connection.connect();
+            if (connection.getResponseCode() == HttpURLConnection.HTTP_OK) {
+                try (InputStream is = connection.getInputStream()) {
+                    return BitmapFactory.decodeStream(is);
+                }
             }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
-    } catch (Exception e) {
-        e.printStackTrace();
+        return null;
     }
-    return null;
-}
-
-private void saveFaviconToFile(String url, Bitmap bitmap) {
-    if (bitmap == null) return;
-
-    File faviconsDir = new File(getFilesDir(), "favicons");
-    if (!faviconsDir.exists()) {
-        faviconsDir.mkdirs();
-    }
-
-    
-    final int TARGET_W = 16;
-    final int TARGET_H = 16;
-    Bitmap bmp = bitmap;
-    boolean scaled = false;
-    if (bmp.getWidth() != TARGET_W || bmp.getHeight() != TARGET_H) {
-        bmp = Bitmap.createScaledBitmap(bmp, TARGET_W, TARGET_H, true);
-        scaled = true;
-    }
-
-    try {
-        if (mBound && mService != null) {
-            int w = bmp.getWidth();
-            int h = bmp.getHeight();
-            
-            int[] pixels = new int[w * h];
-            bmp.getPixels(pixels, 0, w, 0, 0, w, h);
-
-            
-            byte[] bitmapData = new byte[w * h * 4];
-            for (int i = 0; i < pixels.length; i++) {
-                int p = pixels[i];
-                int a = (p >> 24) & 0xFF;
-                int r = (p >> 16) & 0xFF;
-                int g = (p >> 8) & 0xFF;
-                int b = p & 0xFF;
-                int base = i * 4;
-                bitmapData[base]     = (byte) r;
-                bitmapData[base + 1] = (byte) g; 
-                bitmapData[base + 2] = (byte) b; 
-                bitmapData[base + 3] = (byte) a; 
-            }
-
-            
-            mService.saveFavicon(url, bitmapData);
-        } else {
-            File file = new File(faviconsDir, getFaviconFilename(url));
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                bmp.compress(Bitmap.CompressFormat.PNG, 50, fos);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
-    } catch (RemoteException e) {
-        e.printStackTrace();
-        
-        File file = new File(faviconsDir, getFaviconFilename(url));
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            bmp.compress(Bitmap.CompressFormat.PNG, 50, fos);
-        } catch (IOException ioE) {
-            ioE.printStackTrace();
-        }
-    } finally {
-        
-        if (scaled && bmp != null && bmp != bitmap) {
-            bmp.recycle();
-        }
-    }
-}
 
     private String getFaviconFilename(String url) {
-    try {
-        if (mBound && mService != null) {
-            byte[] hashBytes = mService.computeMD5(url);
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hashBytes) {
-                sb.append(String.format("%02x", b & 0xff)); 
-            }
-            return sb.toString() + ".png";
-        } else {
+        try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] hash = digest.digest(url.getBytes("UTF-8"));
             StringBuilder sb = new StringBuilder();
@@ -2485,11 +2385,22 @@ private void saveFaviconToFile(String url, Bitmap bitmap) {
                 sb.append(String.format("%02x", b));
             }
             return sb.toString() + ".png";
+        } catch (Exception e) {
+            return Integer.toString(url.hashCode()) + ".png";
         }
-    } catch (Exception e) { 
-        return Integer.toString(url.hashCode()) + ".png";
-      }
-   }
+    }
+    private void saveFaviconToFile(String url, Bitmap bitmap) {
+        File faviconsDir = new File(getFilesDir(), "favicons");
+        if (!faviconsDir.exists()) {
+            faviconsDir.mkdirs();
+        }
+        File file = new File(faviconsDir, getFaviconFilename(url));
+        try (FileOutputStream fos = new FileOutputStream(file)) {
+            bitmap.compress(Bitmap.CompressFormat.PNG, 50, fos);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
     private void loadFaviconFromDisk(String url) {
         File faviconsDir = new File(getFilesDir(), "favicons");
         File file = new File(faviconsDir, getFaviconFilename(url));
