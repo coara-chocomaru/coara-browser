@@ -70,7 +70,7 @@ for ABI in "${ABIS_ARR[@]}"; do
 
   echo "Using CC=$CC CXX=$CXX"
 
-
+  
   pushd "$SRCDIR/${ZLIB_VER}" > /dev/null
   make distclean || true
   CC="$CC" ./configure --static --prefix="$BUILDDIR/$ABI/zlib"
@@ -88,16 +88,25 @@ for ABI in "${ABIS_ARR[@]}"; do
   make install
   popd > /dev/null
 
+  
   pushd "$SRCDIR/${OPENSSL_VER}" > /dev/null
   make clean || true
-  ./Configure "$OPENSSL_ARCH" no-shared -D__ANDROID_API__="$API"
+
+  export ANDROID_NDK="$NDK"
+  export ANDROID_API
+  export CC CXX
+
+  ./Configure "$OPENSSL_ARCH" no-shared -D__ANDROID_API__="$API" \
+    --with-zlib-include="$BUILDDIR/$ABI/zlib/include" \
+    --with-zlib-lib="$BUILDDIR/$ABI/zlib/lib"
+
   make -j"$(nproc)"
   mkdir -p "$BUILDDIR/$ABI/openssl/lib" "$BUILDDIR/$ABI/openssl/include"
   cp libcrypto.a libssl.a "$BUILDDIR/$ABI/openssl/lib/" || true
   cp -R include/openssl "$BUILDDIR/$ABI/openssl/include/" || true
   popd > /dev/null
 
-
+  
   mkdir -p "$ABI_OUT/lib"
   pushd "$ABI_OUT/lib" > /dev/null
 
