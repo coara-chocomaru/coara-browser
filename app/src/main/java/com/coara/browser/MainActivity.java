@@ -2403,6 +2403,7 @@ private void addHistory(String url, String title) {
     }
 
     private String getFaviconFilename(String url) {
+    if (!mBound || mBrowserOpt == null) {
         try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] hash = digest.digest(url.getBytes("UTF-8"));
@@ -2415,7 +2416,17 @@ private void addHistory(String url, String title) {
             return Integer.toString(url.hashCode()) + ".png";
         }
     }
+    try {
+        byte[] hashBytes = mBrowserOpt.computeMD5(url);
+        String hash = new String(hashBytes, "UTF-8");
+        return hash + ".png";
+    } catch (RemoteException e) {
+        e.printStackTrace();
+        return Integer.toString(url.hashCode()) + ".png";
+    }
+}
     private void saveFaviconToFile(String url, Bitmap bitmap) {
+    if (!mBound || mBrowserOpt == null) {
         File faviconsDir = new File(getFilesDir(), "favicons");
         if (!faviconsDir.exists()) {
             faviconsDir.mkdirs();
@@ -2426,6 +2437,18 @@ private void addHistory(String url, String title) {
         } catch (IOException e) {
             e.printStackTrace();
         }
+        return;
+    }
+    backgroundExecutor.execute(() -> {
+        try {
+            byte[] bitmapData = new byte[bitmap.getByteCount()];
+            bitmap.copy(Bitmap.Config.ARGB_8888, false).copyToBuffer(bitmapData, 0, bitmapData.length);
+            mBrowserOpt.saveFavicon(url, bitmapData);
+        } catch (RemoteException e) {
+            e.printStackTrace();
+            runOnUiThread(() -> Toast.makeText(MainActivity.this, "ファビコン保存失敗", Toast.LENGTH_SHORT).show());
+        }
+      });
     }
     private void loadFaviconFromDisk(String url) {
         File faviconsDir = new File(getFilesDir(), "favicons");
