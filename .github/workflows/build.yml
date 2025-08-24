@@ -19,7 +19,7 @@ jobs:
       PROJECT_DIR: ${{ github.workspace }}
       APP_DIR: ${{ github.workspace }}/app
       BUILD_SCRIPT: ${{ github.workspace }}/build_all.sh
-      NDK_VERSION: "r25c"
+      NDK_VERSION: "25.2.9519653"
       ANDROID_API: "24"
 
     steps:
