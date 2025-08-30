@@ -1215,7 +1215,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 webView.loadUrl(START_PAGE);
             }
-        }
+        });
     }
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
