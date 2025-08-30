@@ -49,7 +49,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private SharedPreferences pref;
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
     private static final String KEY_DOWNLOAD_HISTORY = "download_history";
-
+    private static final String CHANNEL_ID = "download_channel";
     private DownloadManager downloadManager;
     private Handler updateHandler = new Handler(Looper.getMainLooper());
     private ExecutorService executor = Executors.newSingleThreadExecutor();
