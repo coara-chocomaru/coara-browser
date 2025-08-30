@@ -9,7 +9,6 @@ import android.database.Cursor;
 import android.graphics.Paint;
 import android.net.Uri;
 import android.os.Bundle;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.webkit.URLUtil;
@@ -21,9 +20,6 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.ProgressBar;
-import android.app.NotificationManager;
-import android.app.NotificationChannel;
-
 
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -52,7 +48,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private SharedPreferences pref;
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
     private static final String KEY_DOWNLOAD_HISTORY = "download_history";
-    private static final String CHANNEL_ID = "download_channel";
+
     private DownloadManager downloadManager;
     private Handler updateHandler = new Handler(Looper.getMainLooper());
     private ExecutorService executor = Executors.newSingleThreadExecutor();

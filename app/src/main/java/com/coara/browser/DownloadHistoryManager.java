@@ -7,7 +7,6 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.os.SystemClock;
 import android.widget.Toast;
-import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONException;
