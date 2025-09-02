@@ -84,16 +84,22 @@
     - 公式サイト: [AndroidX Activity](https://developer.android.com/jetpack/androidx/releases/emoji2?hl=ja)  
     - ライセンス: Apache License, Version 2.0  
     - 著作権: © The Android Open Source Project
+
+15. **androidx.core:core**  
+    - アーティファクト: `androidx.core:core:1.2.0`  
+    - 公式サイト: [androidx.core:core](https://developer.android.com/jetpack/androidx/releases/core?hl=ja)  
+    - ライセンス: Apache License, Version 2.0  
+    - 著作権: © The Android Open Source Project
           
-15. **Android SDKライセンス**  
+16. **Android SDKライセンス**  
     - Android SDKに関する詳細なライセンス情報は下記を参照してください。  
     - [Android SDKライセンス情報](https://developer.android.com/license)
 
 ## 商標通知
-16. **Android™** はGoogle LLCの商標です。  
+17. **Android™** はGoogle LLCの商標です。  
 
 ---  
-- 以上の16項目が基本的なライセンス情報です  
+- 以上の17項目が基本的なライセンス情報です  
 - 各ライブラリの詳細なライセンス情報、及び利用条件については  
 - 公式サイトや各ライブラリの配布物に含まれるファイルをご確認ください。  
 ---  
