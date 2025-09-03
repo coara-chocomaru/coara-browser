@@ -15,7 +15,6 @@ import android.os.Looper;
 import android.text.Editable;
 import android.text.Spannable;
 import android.text.TextWatcher;
-import android.text.method.ScrollingMovementMethod;
 import android.text.style.BackgroundColorSpan;
 import android.text.style.ForegroundColorSpan;
 import android.view.View;
@@ -109,8 +108,6 @@ public class htmlview extends AppCompatActivity {
         closeSearchButton = findViewById(R.id.closeSearchButton);
 
         htmlEditText.setLayerType(View.LAYER_TYPE_HARDWARE, null);
-        htmlEditText.setMovementMethod(new ScrollingMovementMethod());
-        htmlEditText.setKeyListener(null);
         htmlEditText.setTextIsSelectable(true);
 
         loadButton.setOnClickListener(v -> {
