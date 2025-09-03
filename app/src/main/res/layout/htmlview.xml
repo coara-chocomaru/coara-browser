@@ -1,4 +1,3 @@
-<?xml version="1.0" encoding="utf-8"?>
 <RelativeLayout 
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"    
@@ -20,7 +19,12 @@
             android:layout_weight="1"
             android:hint="URLを入力"
             android:textSize="18sp"
-            android:minWidth="200dp" />
+            android:inputType="textUri"
+            android:singleLine="true"
+            android:imeOptions="actionGo"
+            android:minWidth="200dp"
+            android:textIsSelectable="true"
+            android:longClickable="true" />
 
         <Button
            android:id="@+id/loadButton"
@@ -32,17 +36,18 @@
            android:minHeight="32dp"
            android:text="読み込み" />
 
-<Button
-    android:id="@+id/loadFromStorageButton"
-    android:layout_width="wrap_content"
-    android:layout_height="wrap_content"
-    android:text="ファイル選択"
-    android:textSize="13sp"
-    android:padding="4dp"
-    android:minWidth="48dp"
-    android:minHeight="32dp"
-    android:layout_marginStart="2dp"/>
+        <Button
+            android:id="@+id/loadFromStorageButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="ファイル選択"
+            android:textSize="13sp"
+            android:padding="4dp"
+            android:minWidth="48dp"
+            android:minHeight="32dp"
+            android:layout_marginStart="2dp"/>
     </LinearLayout>
+
 
     <Button
         android:id="@+id/searchButton"
@@ -53,6 +58,7 @@
         android:layout_below="@id/topLayout"
         android:layout_margin="4dp"/>
 
+    
     <RelativeLayout
         android:id="@+id/searchOverlay"
         android:layout_width="match_parent"
@@ -65,7 +71,10 @@
             android:id="@+id/searchQueryEditText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#00FFFF" />
+            android:textColor="#00FFFF"
+            android:hint="検索語を入力"
+            android:textIsSelectable="true"
+            android:longClickable="true" />
 
         <Button
             android:id="@+id/searchPrevButton"
@@ -93,31 +102,34 @@
             android:textColor="#FFFFFF"
             android:layout_alignParentEnd="true"
             android:layout_below="@id/searchQueryEditText"
-            android:layout_marginTop="8dp"/>
+            android:layout_marginTop="8dp"
+            android:textIsSelectable="true"
+            android:longClickable="true"/>
 
         <Button
-    android:id="@+id/closeSearchButton"
-    android:layout_width="32dp"
-    android:layout_height="32dp"
-    android:text="X"
-    android:textSize="16sp"
-    android:gravity="center"
-    android:padding="0dp"
-    android:background="?android:attr/selectableItemBackground"
-    android:layout_alignParentEnd="true"
-    android:layout_alignParentTop="true"
-    android:layout_marginEnd="4dp"
-    android:layout_marginTop="4dp"/>
+            android:id="@+id/closeSearchButton"
+            android:layout_width="32dp"
+            android:layout_height="32dp"
+            android:text="X"
+            android:textSize="16sp"
+            android:gravity="center"
+            android:padding="0dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentTop="true"
+            android:layout_marginEnd="4dp"
+            android:layout_marginTop="4dp"/>
     </RelativeLayout>
+
 
     <ScrollView
         android:id="@+id/scrollView"
         android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
+        android:layout_height="match_parent"
         android:layout_below="@id/searchButton"
         android:layout_above="@id/bottomLayout"
-        android:padding="8dp">
+        android:padding="8dp"
+        android:overScrollMode="always">
 
         <EditText
             android:id="@+id/htmlEditText"
@@ -126,17 +138,23 @@
             android:background="#F5F5F5"
             android:textSize="13sp"
             android:scrollbars="vertical"
-            android:inputType="textMultiLine"
+            android:inputType="textMultiLine|textNoSuggestions"
             android:textIsSelectable="true"
-            android:focusable="true" />
+            android:focusable="true"
+            android:focusableInTouchMode="true"
+            android:gravity="top|start"
+            android:padding="8dp"
+            android:longClickable="true" />
     </ScrollView>
 
+    
     <LinearLayout
         android:id="@+id/bottomLayout"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_alignParentBottom="true"
         android:orientation="horizontal"
+        android:textIsSelectable="true"
         android:padding="8dp"
         android:gravity="center">
 
@@ -153,6 +171,7 @@
             android:text="保存"
             android:layout_marginStart="16dp"/>
     </LinearLayout>
+
 
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/revertFab"
