@@ -111,6 +111,7 @@ public class htmlview extends AppCompatActivity {
         htmlEditText.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         htmlEditText.setMovementMethod(new ScrollingMovementMethod());
         htmlEditText.setKeyListener(null);
+        htmlEditText.setTextIsSelectable(true);
 
         loadButton.setOnClickListener(v -> {
             String urlStr = urlInput.getText().toString().trim();
