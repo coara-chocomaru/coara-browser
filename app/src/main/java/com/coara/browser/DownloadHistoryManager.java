@@ -49,7 +49,7 @@ public class DownloadHistoryManager {
     builder.setProgress(0, 0, true); 
     notificationManager.notify((int) downloadId, builder.build());
 }
-
+}
     public static void monitorDownloadProgress(Context context, long downloadId, DownloadManager dm) {
     new Thread(() -> {
         long startTime = SystemClock.elapsedRealtime();
