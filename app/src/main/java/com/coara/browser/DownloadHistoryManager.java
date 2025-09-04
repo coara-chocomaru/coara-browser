@@ -45,7 +45,7 @@ public class DownloadHistoryManager {
     }
     builder.setContentTitle("ダウンロード開始");
     builder.setContentText(fileName);
-    builder.setSmallIcon(android.R.drawable.stat_sys_download); 
+    builder.setSmallIcon(R.drawable.ic_download2); 
     builder.setProgress(0, 0, true); 
     notificationManager.notify((int) downloadId, builder.build());
 }
@@ -73,7 +73,7 @@ public class DownloadHistoryManager {
                         }
                         builder.setContentTitle("ダウンロード中");
                         builder.setContentText(fileName);
-                        builder.setSmallIcon(android.R.drawable.stat_sys_download);
+                        builder.setSmallIcon(R.drawable.ic_download2);
                         if (bytesTotal > 0) {
                             int progress = (int) ((bytesDownloaded * 100L) / bytesTotal);
                             builder.setProgress(100, progress, false);
