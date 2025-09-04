@@ -1025,44 +1025,41 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public void onPageFinished(WebView view, String url) {
-                   super.onPageFinished(view, url);
-                         applyCombinedOptimizations(view);
-                     if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-                         view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-                         new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
-                        }
-                     if (url.equals(START_PAGE)) {
-                         faviconImageView.setVisibility(View.GONE);
-                         urlEditText.setText("");
-                        } else {
-                        faviconImageView.setVisibility(View.VISIBLE);
-                        if (view == getCurrentWebView()) {
-                        urlEditText.setText(url);
-                        }
-                       }
-                     if (!isBackNavigation) {
-                     if (historyItems.size() > currentHistoryIndex + 1) {
-                        historyItems.subList(currentHistoryIndex + 1, historyItems.size()).clear();
-                     }
-                        addHistory(url, view.getTitle()); 
-                        currentHistoryIndex = historyItems.size() - 1;
-                     } else {
-                        isBackNavigation = false;
-                      }
-                    if (swipeRefreshLayout.isRefreshing()) {
-                        swipeRefreshLayout.setRefreshing(false);
-                       }
-                      String jsOverrideHistory = "(function(){" +
-                      "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
-                      "var pushState=history.pushState;" +
-                      "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
-                      "var replaceState=history.replaceState;" +
-                      "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
-                      "window.addEventListener('popstate',function(){notifyUrlChange();});" +
-                      "notifyUrlChange();" +
-                      "})();"; 
-                       view.evaluateJavascript(jsOverrideHistory, null); 
-                      }
+            super.onPageFinished(view, url);
+                  applyCombinedOptimizations(view);
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            }
+            if (url.equals(START_PAGE)) {
+             faviconImageView.setVisibility(View.GONE);
+             urlEditText.setText("");
+            } else {
+            faviconImageView.setVisibility(View.VISIBLE);
+            if (view == getCurrentWebView()) {
+            urlEditText.setText(url);
+            }
+           }
+            if (!isBackNavigation) {
+            addHistory(url, view.getTitle()); 
+            currentHistoryIndex = historyItems.size() - 1;
+           } else {
+            isBackNavigation = false;
+           }
+            if (swipeRefreshLayout.isRefreshing()) {
+              swipeRefreshLayout.setRefreshing(false);
+            }
+          String jsOverrideHistory = "(function(){" +
+          "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
+          "var pushState=history.pushState;" +
+          "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
+          "var replaceState=history.replaceState;" +
+          "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
+          "window.addEventListener('popstate',function(){notifyUrlChange();});" +
+          "notifyUrlChange();" +
+          "})();"; 
+           view.evaluateJavascript(jsOverrideHistory, null); 
+          　}
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
                 if (!basicAuthEnabled) {
