@@ -51,6 +51,7 @@ public class DownloadHistoryManager {
         builder.setSmallIcon(R.drawable.ic_download2);
         builder.setProgress(0, 0, true);
         notificationManager.notify((int) downloadId, builder.build());
+        break;
     }
 
     public static void monitorDownloadProgress(Context context, long downloadId, DownloadManager dm) {
@@ -131,6 +132,7 @@ public class DownloadHistoryManager {
                     builder.setContentText(fileName);
                     builder.setProgress(0, 0, true);
                     notificationManager.notify((int) downloadId, builder.build());
+                    break;
                 }
 
                 if (bytesDownloaded > 0) {
@@ -166,6 +168,7 @@ public class DownloadHistoryManager {
             builder.setSmallIcon(R.drawable.ic_download2);
             builder.setProgress(0, 0, false);
             notificationManager.notify((int) downloadId, builder.build());
+            break;
         }
     }).start();
 }
