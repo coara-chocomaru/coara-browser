@@ -1249,7 +1249,7 @@ public class SecretActivity extends AppCompatActivity {
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-       ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+       ContextCompat.checkSelfPermission(SecretActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
        != PackageManager.PERMISSION_GRANTED) {
         if (permissionLauncher != null) {
             permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
@@ -1275,11 +1275,11 @@ public class SecretActivity extends AppCompatActivity {
         long downloadId = dm.enqueue(request);
         String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 .getAbsolutePath() + "/" + fileName;
-        DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
-        DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
-        Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
+        DownloadHistoryManager.addDownloadHistory(SecretActivity.this, downloadId, fileName, filePath);
+        DownloadHistoryManager.monitorDownloadProgress(SecretActivity.this, downloadId, dm);
+        Toast.makeText(SecretActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
     } catch (Exception e) {
-        Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
+        Toast.makeText(SecretActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
     }
    }
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
