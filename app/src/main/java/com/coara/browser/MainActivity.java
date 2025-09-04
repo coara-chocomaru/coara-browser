@@ -1220,40 +1220,40 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-       ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-       != PackageManager.PERMISSION_GRANTED) {
-        if (permissionLauncher != null) {
-            permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+           ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+           != PackageManager.PERMISSION_GRANTED) {
+            if (permissionLauncher != null) {
+                permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            }
+            return;
         }
-        return;
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+        if (mimeType != null) {
+            request.setMimeType(mimeType);
+        }
+        String cookies = CookieManager.getInstance().getCookie(url);
+        request.addRequestHeader("cookie", cookies);
+        if (userAgent != null) {
+            request.addRequestHeader("User-Agent", userAgent);
+        }
+        request.setDescription("Downloading file...");
+        String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+        request.setTitle(fileName);
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        try {
+            long downloadId = dm.enqueue(request);
+            String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    .getAbsolutePath() + "/" + fileName;
+            DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
+            DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
+            Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
+        } catch (Exception e) {
+            Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
+        }
     }
-    DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-    if (mimeType != null) {
-        request.setMimeType(mimeType);
-    }
-    String cookies = CookieManager.getInstance().getCookie(url);
-    request.addRequestHeader("cookie", cookies);
-    if (userAgent != null) {
-        request.addRequestHeader("User-Agent", userAgent);
-    }
-    request.setDescription("Downloading file...");
-    String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
-    request.setTitle(fileName);
-    request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_HIDDEN);
-    request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-    DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-    try {
-        long downloadId = dm.enqueue(request);
-        String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                .getAbsolutePath() + "/" + fileName;
-        DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
-        DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
-        Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
-      } catch (Exception e) {
-        Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
-      }
-   }
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         String js = "javascript:(function(){" +
                 "fetch('" + url + "').then(function(response){return response.blob();}).then(function(blob){" +
