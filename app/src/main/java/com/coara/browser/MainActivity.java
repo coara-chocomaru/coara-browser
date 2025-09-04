@@ -1217,69 +1217,38 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+           ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+           != PackageManager.PERMISSION_GRANTED) {
+            if (permissionLauncher != null) {
+                permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            }
+            return;
+        }
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+        if (mimeType != null) {
+            request.setMimeType(mimeType);
+        }
+        String cookies = CookieManager.getInstance().getCookie(url);
+        request.addRequestHeader("cookie", cookies);
+        if (userAgent != null) {
+            request.addRequestHeader("User-Agent", userAgent);
+        }
+        request.setDescription("Downloading file...");
         String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
-        String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath() + "/" + fileName;
-
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-                if (permissionLauncher != null) {
-                    permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-                }
-                return;
-            }
+        request.setTitle(fileName);
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        try {
+            long downloadId = dm.enqueue(request);
+            String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                    .getAbsolutePath() + "/" + fileName;
+            DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
+            DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
             Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
-            new Thread(() -> {
-                try {
-                    URL u = new URL(url);
-                    HttpURLConnection conn = (HttpURLConnection) u.openConnection();
-                    conn.setRequestMethod("GET");
-                    String cookies = CookieManager.getInstance().getCookie(url);
-                    conn.setRequestProperty("cookie", cookies);
-                    if (userAgent != null) {
-                        conn.setRequestProperty("User-Agent", userAgent);
-                    }
-                    conn.connect();
-                    if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
-                        InputStream is = conn.getInputStream();
-                        FileOutputStream fos = new FileOutputStream(filePath);
-                        byte[] buffer = new byte[4096];
-                        int len;
-                        while ((len = is.read(buffer)) != -1) {
-                            fos.write(buffer, 0, len);
-                        }
-                        fos.close();
-                        is.close();
-                        DownloadHistoryManager.addDownloadHistory(MainActivity.this, 0, fileName, filePath);
-                    } else {
-                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show());
-                    }
-                } catch (Exception e) {
-                    runOnUiThread(() -> Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show());
-                }
-            }).start();
-        } else {
-            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-            if (mimeType != null) {
-                request.setMimeType(mimeType);
-            }
-            String cookies = CookieManager.getInstance().getCookie(url);
-            request.addRequestHeader("cookie", cookies);
-            if (userAgent != null) {
-                request.addRequestHeader("User-Agent", userAgent);
-            }
-            request.setDescription("Downloading file...");
-            request.setTitle(fileName);
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            try {
-                long downloadId = dm.enqueue(request);
-                DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
-                DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
-                Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
-            } catch (Exception e) {
-                Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
-            }
+        } catch (Exception e) {
+            Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
         }
     }
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
