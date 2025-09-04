@@ -54,7 +54,6 @@ public class DownloadHistoryManager {
     }
 
     public static void monitorDownloadProgress(Context context, long downloadId, DownloadManager dm) {
-    public static void monitorDownloadProgress(Context context, long downloadId, DownloadManager dm) {
     new Thread(() -> {
         long startTime = SystemClock.elapsedRealtime();
         NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
