@@ -10,6 +10,9 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.os.Build;
 import android.os.SystemClock;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
+import android.os.VibratorManager;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -84,6 +87,22 @@ public class DownloadHistoryManager {
                         }
 
                         if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            Vibrator vibrator;
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                VibratorManager vibratorManager = (VibratorManager) context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                                vibrator = vibratorManager.getDefaultVibrator();
+                            } else {
+                                vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+                            }
+                            if (vibrator.hasVibrator()) {
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    VibrationEffect effect = VibrationEffect.createOneShot(100, VibrationEffect.DEFAULT_AMPLITUDE);
+                                    vibrator.vibrate(effect);
+                                } else {
+                                    vibrator.vibrate(100);
+                                }
+                            }
+
                             Notification.Builder builder;
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                                 builder = new Notification.Builder(context, CHANNEL_ID);
