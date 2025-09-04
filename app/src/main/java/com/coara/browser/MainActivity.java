@@ -1234,9 +1234,9 @@ public class MainActivity extends AppCompatActivity {
                     HttpURLConnection conn = (HttpURLConnection) u.openConnection();
                     conn.setRequestMethod("GET");
                     String cookies = CookieManager.getInstance().getCookie(url);
-                    conn.addRequestHeader("cookie", cookies);
+                    conn.setRequestProperty("cookie", cookies);
                     if (userAgent != null) {
-                        conn.addRequestHeader("User-Agent", userAgent);
+                        conn.setRequestProperty("User-Agent", userAgent);
                     }
                     conn.connect();
                     if (conn.getResponseCode() == HttpURLConnection.HTTP_OK) {
