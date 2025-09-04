@@ -553,7 +553,7 @@ public class SecretActivity extends AppCompatActivity {
             } else {
                 Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
                 if (state != null) {
-                    WebView restored = webView.restoreState(state);  // 戻り値をチェック
+                    WebView restored = webView.restoreState(state);
                     if (restored == null) {
                         webView.loadUrl(url);
                     }
@@ -561,7 +561,6 @@ public class SecretActivity extends AppCompatActivity {
                     webView.loadUrl(url);
                 }
             }
-        }
         nextTabId = maxId + 1;
         if (webViews.isEmpty()) {
             WebView initialWebView = createNewWebView();
