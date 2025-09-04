@@ -235,8 +235,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        createNotificationChannel();
-
         toolbar = findViewById(R.id.topAppBar);
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
