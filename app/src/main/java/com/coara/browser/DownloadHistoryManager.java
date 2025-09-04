@@ -135,7 +135,7 @@ public class DownloadHistoryManager {
                 }
 
                 if (bytesDownloaded > 0) {
-                    startTime = SystemClock.elapsedRealtime(); // 進捗があればタイマーをリセット
+                    startTime = SystemClock.elapsedRealtime();
                 }
             } catch (Exception e) {
                 e.printStackTrace();
