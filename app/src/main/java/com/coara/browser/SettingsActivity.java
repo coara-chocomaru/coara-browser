@@ -43,7 +43,7 @@ public class SettingsActivity extends AppCompatActivity {
         settingsList.add(new SettingItem("アプリ情報", "アプリの情報", this::openAppInfo));
         settingsList.add(new SettingItem("端末情報", "デバイスの基本情報を表示", this::showDeviceInfo));
         settingsList.add(new SettingItem("アプリバージョン", getAppVersion(), null));
-        settingsList.add(new SettingItem("ライセンス", "利用規約を表示", this::showLicense));
+        settingsList.add(new SettingItem("ライセンス", "ライセンス情報を表示", this::showLicense));
 
         adapter = new SettingsAdapter(settingsList);
         recyclerView.setAdapter(adapter);
@@ -164,3 +164,4 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
+
