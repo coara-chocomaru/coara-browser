@@ -230,8 +230,6 @@ public class SecretActivity extends AppCompatActivity {
     super.onCreate(savedInstanceState);
     setContentView(R.layout.secret_main);
 
-    createNotificationChannel();
-
     toolbar = findViewById(R.id.topAppBar);
     setSupportActionBar(toolbar);
     if (getSupportActionBar() != null) {
