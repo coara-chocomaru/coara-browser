@@ -539,32 +539,72 @@ public class MainActivity extends AppCompatActivity {
                 .apply();
     }
     private void loadTabsState() {
-        String tabsJsonStr = pref.getString(KEY_TABS, "[]");
-        int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
-        try {
-            JSONArray tabsArray = new JSONArray(tabsJsonStr);
-            webViews.clear();
-            webViewContainer.removeAllViews();
-            int maxId = 0;
-            for (int i = 0; i < tabsArray.length(); i++) {
-                JSONObject tabObj = tabsArray.getJSONObject(i);
-                int id = tabObj.getInt("id");
-                String url = tabObj.getString("url");
-                WebView webView = createNewWebView();
-                webView.setTag(id);
-                webViews.add(webView);
-                if (id > maxId) maxId = id;
-                if (id == currentTabId) {
-                    webView.loadUrl(url);
-                } else {
-                    Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                    if (state != null) {
-                        webView.restoreState(state);
-                    } else {
+    String tabsJsonStr = pref.getString(KEY_TABS, "[]");
+    int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
+    try {
+        JSONArray tabsArray = new JSONArray(tabsJsonStr);
+        webViews.clear();
+        webViewContainer.removeAllViews();
+        int maxId = 0;
+        for (int i = 0; i < tabsArray.length(); i++) {
+            JSONObject tabObj = tabsArray.getJSONObject(i);
+            int id = tabObj.getInt("id");
+            String url = tabObj.getString("url");
+            WebView webView = createNewWebView();
+            webView.setTag(id);
+            webViews.add(webView);
+            if (id > maxId) maxId = id;
+            if (id == currentTabId) {
+                webView.loadUrl(url);
+            } else {
+                Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
+                if (state != null) {
+                    WebView restored = webView.restoreState(state); 
+                    if (restored == null) {
                         webView.loadUrl(url);
                     }
+                } else {
+                    webView.loadUrl(url);
                 }
             }
+        }
+        nextTabId = maxId + 1;
+        if (webViews.isEmpty()) {
+            WebView initialWebView = createNewWebView();
+            initialWebView.setTag(nextTabId);
+            nextTabId++;
+            webViews.add(initialWebView);
+            currentTabIndex = 0;
+            webViewContainer.addView(initialWebView);
+            initialWebView.loadUrl(START_PAGE);
+        } else {
+            boolean found = false;
+            for (int i = 0; i < webViews.size(); i++) {
+                if ((int) webViews.get(i).getTag() == currentTabId) {
+                    currentTabIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                currentTabIndex = 0;
+            }
+            webViewContainer.addView(getCurrentWebView());
+        }
+    } catch (JSONException e) {
+        e.printStackTrace();
+        WebView initialWebView = createNewWebView();
+        initialWebView.setTag(nextTabId);
+        nextTabId++;
+        webViews.clear();
+        webViews.add(initialWebView);
+        currentTabIndex = 0;
+        webViewContainer.removeAllViews();
+        webViewContainer.addView(initialWebView);
+        initialWebView.loadUrl(START_PAGE);
+    }
+    updateTabCount();
+}
             nextTabId = maxId + 1;
             if (webViews.isEmpty()) {
                 WebView initialWebView = createNewWebView();
