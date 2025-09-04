@@ -599,43 +599,6 @@ public class SecretActivity extends AppCompatActivity {
     }
     updateTabCount();
 }
-            nextTabId = maxId + 1;
-            if (webViews.isEmpty()) {
-                WebView initialWebView = createNewWebView();
-                initialWebView.setTag(nextTabId);
-                nextTabId++;
-                webViews.add(initialWebView);
-                currentTabIndex = 0;
-                webViewContainer.addView(initialWebView);
-                initialWebView.loadUrl(START_PAGE);
-            } else {
-                boolean found = false;
-                for (int i = 0; i < webViews.size(); i++) {
-                    if ((int) webViews.get(i).getTag() == currentTabId) {
-                        currentTabIndex = i;
-                        found = true;
-                        break;
-                    }
-                }
-                if (!found) {
-                    currentTabIndex = 0;
-                }
-                webViewContainer.addView(getCurrentWebView());
-            }
-        } catch (JSONException e) {
-            e.printStackTrace();
-            WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId);
-            nextTabId++;
-            webViews.clear();
-            webViews.add(initialWebView);
-            currentTabIndex = 0;
-            webViewContainer.removeAllViews();
-            webViewContainer.addView(initialWebView);
-            initialWebView.loadUrl(START_PAGE);
-        }
-        updateTabCount();
-    }
     private void updateTabCount() {
         if (tabCountTextView != null) {
             tabCountTextView.setText(String.valueOf(webViews.size()));
