@@ -1058,8 +1058,8 @@ public class MainActivity extends AppCompatActivity {
           "window.addEventListener('popstate',function(){notifyUrlChange();});" +
           "notifyUrlChange();" +
           "})();"; 
-           view.evaluateJavascript(jsOverrideHistory, null); 
-          　}
+            view.evaluateJavascript(jsOverrideHistory, null); 
+            }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
                 if (!basicAuthEnabled) {
