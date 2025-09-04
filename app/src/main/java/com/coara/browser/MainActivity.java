@@ -127,7 +127,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_BOOKMARKS = "bookmarks";
     private static final String KEY_HISTORY = "history";
     private static final String APPEND_STR = " CoaraBrowser";
-    private static final String CHANNEL_ID = "download_channel";
     private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
@@ -2310,21 +2309,6 @@ private void addHistory(String url, String title) {
     }
     saveHistory();
 }
-
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            CharSequence name = "Downloads";
-            String description = "Download notifications";
-            int importance = NotificationManager.IMPORTANCE_LOW;
-            NotificationChannel channel = new NotificationChannel(CHANNEL_ID, name, importance);
-            channel.setDescription(description);
-            NotificationManager notificationManager = getSystemService(NotificationManager.class);
-            if (notificationManager != null) {
-                notificationManager.createNotificationChannel(channel);
-            }
-        }
-    }
-
     public void exitFullScreen() {
         if (customView != null) {
             FrameLayout decor = (FrameLayout)getWindow().getDecorView();
