@@ -559,7 +559,7 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
                 if (state != null) {
-                    WebView restored = webView.restoreState(state); 
+                    WebBackForwardList restored = webView.restoreState(state);
                     if (restored == null) {
                         webView.loadUrl(url);
                     }
