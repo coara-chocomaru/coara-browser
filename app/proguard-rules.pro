@@ -37,7 +37,7 @@
 -adaptresourcefilecontents **.xml
 -adaptresourcefilenames **.png,**/*.png
 -classobfuscationdictionary obfuscation-dictionary.txt
--optimizationpasses 25
+-optimizationpasses 30
 -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
 -mergeinterfacesaggressively
 -allowaccessmodification
