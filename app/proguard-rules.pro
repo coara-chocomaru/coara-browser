@@ -1,11 +1,18 @@
 -keep class android.** { *; }
 -keep interface android.** { *; }
+-keep class androidx.** { *; }
+-keep interface androidx.** { *; }
+-keep class com.google.android.material.** { *; }
+-keep interface com.google.android.material.** { *; }
 -dontwarn java.lang.**
+-dontwarn android.**
+-dontwarn androidx.**
+-dontwarn com.google.android.material.**
 -dontusemixedcaseclassnames
--keep class com.coara.browser.MainActivity {
-    public static void main(java.lang.String[]);
-}
+-keep class com.coara.browser.MainActivity { *; }
+-keep class com.coara.browser.** { *; }
 -keepattributes *Annotation*
+-keepattributes Exceptions,InnerClasses,Signature,Deprecated,EnclosingMethod,Record,PermittedSubclasses,NestHost,NestMembers,Module,ModuleMainClass,SourceFile,LineNumberTable
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
     public static *** v(...);
@@ -14,21 +21,28 @@
     public static *** e(...);
 }
 -adaptresourcefilecontents **.xml
--adaptresourcefilenames **.png
+-adaptresourcefilenames **.png,**/*.png
 -classobfuscationdictionary obfuscation-dictionary.txt
 -renamesourcefileattribute SourceFile
--keepattributes Exceptions, InnerClasses, Signature, Deprecated, EnclosingMethod, Record, PermittedSubclasses, NestHost, NestMembers, Module, ModuleMainClass
--optimizationpasses 25
+-optimizationpasses 30
+-optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
 -mergeinterfacesaggressively
+-allowaccessmodification
 -adaptclassstrings
 -repackageclasses ''
+-repackageclassmembers ''
+-dontpreverify
+-dontoptimize
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
 -keepclassmembers class * extends android.webkit.WebViewClient {
-    public void *(android.webkit.WebView, java.lang.String);
-    public void *(android.webkit.WebView, android.webkit.WebResourceRequest);
-    public boolean *(android.webkit.WebView, android.webkit.WebResourceRequest);
+    <methods>;
+    <fields>;
+}
+-keepclassmembers class * extends android.webkit.WebChromeClient {
+    <methods>;
+    <fields>;
 }
 -keepclassmembers class * {
     void addTextChangedListener(android.text.TextWatcher);
@@ -40,10 +54,107 @@
 -keep class **$$Lambda$* { *; }
 -keepclassmembers class * implements android.os.Parcelable {
     public static final android.os.Parcelable$Creator CREATOR;
+    <fields>;
+    <methods>;
+}
+-keepclassmembers class * implements java.io.Serializable {
+    <fields>;
+    <methods>;
 }
 -keepclassmembers class * {
     public void set*(...);
     public void get*(...);
+    public void *(...);
+    public boolean *(...);
 }
--allowaccessmodification
--dontpreverify
+-keep class * implements android.view.View.OnClickListener { <methods>; }
+-keep class * implements android.widget.AdapterView.OnItemClickListener { <methods>; }
+-keep class * implements android.text.TextWatcher { <methods>; }
+-keep class * implements android.view.View.OnLongClickListener { <methods>; }
+-keep class * implements androidx.recyclerview.widget.RecyclerView$OnClickListener { <methods>; }
+-keep class * extends androidx.appcompat.app.AppCompatActivity { <methods>; }
+-keep class * extends android.webkit.WebView { <methods>; <fields>; }
+-keep class * extends android.app.Activity { <methods>; }
+-keep class * extends androidx.fragment.app.Fragment { <methods>; }
+-keep class * implements android.content.DialogInterface$OnClickListener { <methods>; }
+-keep class * implements android.content.DialogInterface$OnDismissListener { <methods>; }
+-keep class * implements java.lang.Runnable { <methods>; }
+-keep class * implements android.os.Handler$Callback { <methods>; }
+-keep class * implements androidx.activity.result.ActivityResultCallback { <methods>; }
+-keep class * implements android.webkit.ValueCallback { <methods>; }
+-keep class * implements android.webkit.WebViewClient { <methods>; }
+-keep class * implements android.webkit.WebChromeClient { <methods>; }
+-keep class * implements android.webkit.DownloadListener { <methods>; }
+-keep class * implements android.webkit.WebView$FindListener { <methods>; }
+-keep class * implements android.webkit.PermissionRequest { <methods>; }
+-keep class * implements android.webkit.HttpAuthHandler { <methods>; }
+-keep class * implements android.webkit.JsPromptResult { <methods>; }
+-keep class * implements android.webkit.ConsoleMessage { <methods>; }
+-keep class com.coara.browser.MainActivity$AndroidBridge { *; }
+-keep class com.coara.browser.MainActivity$BlobDownloadInterface { *; }
+-keep class com.coara.browser.MainActivity$Bookmark { *; }
+-keep class com.coara.browser.MainActivity$HistoryItem { *; }
+-keep class com.coara.browser.MainActivity$TabAdapter { *; }
+-keep class com.coara.browser.MainActivity$TabAdapter$TabViewHolder { *; }
+-keep class com.coara.browser.MainActivity$TabAdapter$AddTabViewHolder { *; }
+-keep class com.coara.browser.MainActivity$HistoryAdapter { *; }
+-keep class com.coara.browser.MainActivity$HistoryAdapter$HistoryViewHolder { *; }
+-keep class com.coara.browser.MainActivity$BookmarkAdapter { *; }
+-keep class com.coara.browser.MainActivity$BookmarkAdapter$BookmarkViewHolder { *; }
+-keepclasseswithmembernames class * {
+    native <methods>;
+}
+-keepclasseswithmembers class * {
+    public <init>(android.content.Context, android.util.AttributeSet);
+}
+-keepclasseswithmembers class * {
+    public <init>(android.content.Context, android.util.AttributeSet, int);
+}
+-keepclassmembers enum * {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+-keep class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator * CREATOR;
+}
+-keepclassmembers class **$* {
+    <fields>;
+}
+-keepnames class * implements java.io.Serializable
+-keepclassmembers class * implements java.io.Serializable {
+    static final long serialVersionUID;
+    private static final java.io.ObjectStreamField[] serialPersistentFields;
+    private void writeObject(java.io.ObjectOutputStream);
+    private void readObject(java.io.ObjectInputStream);
+    java.lang.Object writeReplace();
+    java.lang.Object readResolve();
+}
+-keepclassmembers class * {
+    public void *(android.view.View);
+}
+-keepclassmembers class * extends java.lang.Enum {
+    public static **[] values();
+    public static ** valueOf(java.lang.String);
+}
+-keepclassmembers class * implements java.io.Serializable {
+    private static final long serialVersionUID;
+    private void writeObject(...);
+    private void readObject(...);
+    private void readResolve(...);
+    private void writeReplace(...);
+}
+-dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
+-dontwarn javax.annotation.**
+-dontwarn sun.misc.**
+-keepclassmembers class * {
+    @org.jetbrains.annotations.NotNull <fields>;
+    @org.jetbrains.annotations.Nullable <fields>;
+}
+-keepclassmembers class * {
+    @org.jetbrains.annotations.NotNull <methods>;
+    @org.jetbrains.annotations.Nullable <methods>;
+}
+-keepattributes RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
+-keepattributes InnerClasses,EnclosingMethod
+-keepattributes Signature
+-keepattributes *Annotation*
