@@ -24,13 +24,12 @@
 -adaptresourcefilenames **.png,**/*.png
 -classobfuscationdictionary obfuscation-dictionary.txt
 -renamesourcefileattribute SourceFile
--optimizationpasses 30
+-optimizationpasses 25
 -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
 -mergeinterfacesaggressively
 -allowaccessmodification
 -adaptclassstrings
 -repackageclasses ''
--repackageclassmembers ''
 -dontpreverify
 -dontoptimize
 -keepclassmembers class * {
