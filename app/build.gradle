@@ -31,13 +31,13 @@ android {
 
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig = signingConfigs.debug
         }
         release {
-            minifyEnabled true
-            shrinkResources true
-            debuggable false
-            signingConfig signingConfigs.release
+            minifyEnabled = true
+            shrinkResources = true
+            debuggable = false
+            signingConfig = signingConfigs.release
         }
     }
 
