@@ -22,7 +22,7 @@
             android:id="@+id/jsSwitch"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="JavaScript有効" />
+            android:text="JS有効(mht形式保存)" />
 
         <Switch
             android:id="@+id/localPathSwitch"
@@ -41,6 +41,7 @@
 
     <WebView
         android:id="@+id/webView"
+        android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
