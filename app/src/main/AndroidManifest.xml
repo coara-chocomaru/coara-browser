@@ -77,7 +77,6 @@
         <activity
             android:name=".grepmd5appActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
-            android:noHistory="true"
             android:exported="true" />
         
         <activity
