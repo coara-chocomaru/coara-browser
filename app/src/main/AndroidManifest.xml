@@ -70,7 +70,6 @@
         <activity
             android:name=".SecretActivity"
             android:process=":Secret_webview"
-            android:noHistory="true"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="false" />
 
@@ -88,7 +87,6 @@
         <activity
             android:name=".htmlview"
             android:configChanges="keyboardHidden|orientation|screenSize"
-            android:noHistory="true"
             android:exported="true" />
         
         <activity
@@ -111,19 +109,16 @@
         <activity
             android:name=".txtphoto"
             android:configChanges="keyboardHidden|orientation|screenSize"
-            android:noHistory="true"
             android:exported="true" />
         
         <activity
             android:name=".asciiart"
             android:configChanges="keyboardHidden|orientation|screenSize"
-            android:noHistory="true"
             android:exported="true" />
         
         <activity
             android:name=".QrCodeActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
-            android:noHistory="true"
             android:exported="true" />
        
         <activity
