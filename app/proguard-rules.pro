@@ -2,13 +2,13 @@
 -dontusemixedcaseclassnames
 -dontskipnonpubliclibraryclasses
 -dontskipnonpubliclibraryclassmembers
--dontpreverify 
+-dontpreverify
 -keepattributes SourceFile,LineNumberTable,*Annotation*,Exceptions,InnerClasses,Signature,Deprecated,EnclosingMethod,Record,PermittedSubclasses,NestHost,NestMembers,Module,ModuleMainClass,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
 -keepparameternames
 -repackageclasses ''
 -allowaccessmodification
 -mergeinterfacesaggressively
--optimizationpasses 30
+-optimizationpasses 40
 -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,!code/allocation/variable,!method/inlining/short,!method/inlining/unique,!method/inlining/tailrecursion,!method/removal/parameter,!class/unboxing/enum
 -adaptresourcefilenames **.properties,**.gif,**.jpg,**.png,**.xml
 -adaptresourcefilecontents **.properties,META-INF/MANIFEST.MF
@@ -29,6 +29,8 @@
 -dontwarn android.window.**
 -dontwarn kotlin.internal.**
 -dontwarn kotlinx.coroutines.**
+-dontwarn io.noties.markwon.core.** 
+-dontwarn io.noties.markwon.image.** 
 -assumenosideeffects class android.util.Log {
     public static boolean isLoggable(java.lang.String, int);
     public static int v(...);
@@ -48,17 +50,27 @@
 -keep public class * extends androidx.recyclerview.widget.RecyclerView$Adapter { *; }
 -keep public class * extends androidx.recyclerview.widget.RecyclerView$ViewHolder { *; }
 -keep public class * extends android.os.AsyncTask { *; }
--keep class com.coara.browser.** { *; }  
+-keep class com.coara.browser.** { *; } 
 -keep interface com.coara.browser.** { *; }
 -keep enum com.coara.browser.** { *; }
--keep class com.coara.browser.MainActivity$** { *; } 
+-keep class com.coara.browser.MainActivity$** { *; }
 -keep class com.coara.browser.pagedl$** { *; } 
--keep class com.coara.browser.grepmd5appActivity$** { *; }  #
+-keep class com.coara.browser.grepmd5appActivity$** { *; }
 -keep class com.coara.browser.txtphoto { *; }
 -keep class com.coara.browser.QrCodeActivity { *; }
 -keep class com.coara.browser.DownloadHistoryManager { *; }
 -keep class com.coara.browser.DownloadHistoryActivity { *; }
--keep class com.coara.browser.DownloadHistoryActivity$** { *; } 
+-keep class com.coara.browser.DownloadHistoryActivity$** { *; }
+-keep class com.coara.browser.SecretActivity { *; } 
+-keep class com.coara.browser.SecretActivity$** { *; } 
+-keep class com.coara.browser.SettingsActivity { *; } 
+-keep class com.coara.browser.SettingItem { *; } 
+-keep class com.coara.browser.asciiart { *; } 
+-keep class com.coara.browser.exec { *; }
+-keep class com.coara.browser.exec$** { *; }
+-keep class com.coara.browser.num { *; } 
+-keep class com.coara.browser.num$** { *; }
+-keep class com.coara.browser.htmlview { *; } 
 -keep class android.webkit.WebView { *; }
 -keep class android.webkit.WebSettings { *; }
 -keep class android.webkit.WebViewClient { *; }
@@ -105,7 +117,17 @@
 -keep class org.json.** { *; }
 -keep class com.google.zxing.** { *; }
 -keep class java.security.MessageDigest { *; } 
+-keep class io.noties.markwon.** { *; }  
+-keep class io.noties.markwon.core.MarkwonConfiguration { *; }
+-keep class io.noties.markwon.image.AsyncDrawableLoader { *; }
 -keep class com.coara.browser.MainActivity {
+    private static java.lang.reflect.Method sSetSaveFormDataMethod;
+    private static java.lang.reflect.Method sSetDatabaseEnabledMethod;
+    private static java.lang.reflect.Method sSetAppCacheEnabledMethod;
+    private static java.lang.reflect.Method sSetAppCachePathMethod;
+    *;
+}
+-keep class com.coara.browser.SecretActivity {
     private static java.lang.reflect.Method sSetSaveFormDataMethod;
     private static java.lang.reflect.Method sSetDatabaseEnabledMethod;
     private static java.lang.reflect.Method sSetAppCacheEnabledMethod;
@@ -133,6 +155,15 @@
     public void onResume();
     public void onDestroy();
 }
-
 -dontnote ** 
 -flattenpackagehierarchy ''
+-keep class java.lang.Runtime {
+    public java.lang.Process exec(java.lang.String);
+    public java.lang.Process exec(java.lang.String[]);
+    *;
+}
+-keep class java.util.regex.Pattern { *; }
+-keep class java.util.regex.Matcher { *; }
+-keep class android.text.Spannable { *; }
+-keep class android.text.style.ForegroundColorSpan { *; }
+-keep class android.text.style.BackgroundColorSpan { *; }
