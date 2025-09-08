@@ -1,130 +1,138 @@
+-verbose
 -dontusemixedcaseclassnames
--renamesourcefileattribute SourceFile
+-dontskipnonpubliclibraryclasses
+-dontskipnonpubliclibraryclassmembers
+-dontpreverify 
 -keepattributes SourceFile,LineNumberTable,*Annotation*,Exceptions,InnerClasses,Signature,Deprecated,EnclosingMethod,Record,PermittedSubclasses,NestHost,NestMembers,Module,ModuleMainClass,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
--dontwarn java.lang.**
--dontwarn android.**
--dontwarn androidx.**
--dontwarn com.google.android.material.**
--dontwarn org.codehaus.mojo.animal_sniffer.IgnoreJRERequirement
--dontwarn javax.annotation.**
--dontwarn sun.misc.**
--keep class android.** { *; }
--keep interface android.** { *; }
--keep class androidx.** { *; }
--keep interface androidx.** { *; }
--keep class com.google.android.material.** { *; }
--keep interface com.google.android.material.** { *; }
--keep class com.coara.browser.MainActivity { *; }
--keep class com.coara.browser.** { *; }
--keep class com.coara.browser.MainActivity$AndroidBridge { *; }
--keep class com.coara.browser.MainActivity$BlobDownloadInterface { *; }
--keep class com.coara.browser.MainActivity$Bookmark { *; }
--keep class com.coara.browser.MainActivity$HistoryItem { *; }
--keep class com.coara.browser.MainActivity$TabAdapter { *; }
--keep class com.coara.browser.MainActivity$TabAdapter$TabViewHolder { *; }
--keep class com.coara.browser.MainActivity$TabAdapter$AddTabViewHolder { *; }
--keep class com.coara.browser.MainActivity$HistoryAdapter { *; }
--keep class com.coara.browser.MainActivity$HistoryAdapter$HistoryViewHolder { *; }
--keep class com.coara.browser.MainActivity$BookmarkAdapter { *; }
--keep class com.coara.browser.MainActivity$BookmarkAdapter$BookmarkViewHolder { *; }
--assumenosideeffects class android.util.Log {
-    public static *** d(...);
-    public static *** v(...);
-    public static *** i(...);
-    public static *** w(...);
-    public static *** e(...);
-}
--adaptresourcefilecontents **.xml
--adaptresourcefilenames **.png,**/*.png
--classobfuscationdictionary obfuscation-dictionary.txt
--optimizationpasses 30
--optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*
--mergeinterfacesaggressively
--allowaccessmodification
--adaptclassstrings
+-keepparameternames
 -repackageclasses ''
--dontpreverify
--dontoptimize
+-allowaccessmodification
+-mergeinterfacesaggressively
+-optimizationpasses 30
+-optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,!code/allocation/variable,!method/inlining/short,!method/inlining/unique,!method/inlining/tailrecursion,!method/removal/parameter,!class/unboxing/enum
+-adaptresourcefilenames **.properties,**.gif,**.jpg,**.png,**.xml
+-adaptresourcefilecontents **.properties,META-INF/MANIFEST.MF
+-obfuscationdictionary obfuscation-dictionary.txt
+-classobfuscationdictionary obfuscation-dictionary.txt
+-packageobfuscationdictionary obfuscation-dictionary.txt
+-dontwarn java.lang.invoke.**
+-dontwarn java.lang.reflect.**
+-dontwarn java.nio.file.**
+-dontwarn javax.annotation.**
+-dontwarn javax.management.**
+-dontwarn sun.misc.**
+-dontwarn sun.security.**
+-dontwarn org.codehaus.mojo.animal_sniffer.*
+-dontwarn com.google.android.material.internal.**
+-dontwarn androidx.window.extensions.**
+-dontwarn androidx.window.sidecar.**
+-dontwarn android.window.**
+-dontwarn kotlin.internal.**
+-dontwarn kotlinx.coroutines.**
+-assumenosideeffects class android.util.Log {
+    public static boolean isLoggable(java.lang.String, int);
+    public static int v(...);
+    public static int i(...);
+    public static int w(...);
+    public static int d(...);
+    public static int e(...);
+}
+-keep public class * extends android.app.Activity { *; }
+-keep public class * extends android.app.Application { *; }
+-keep public class * extends android.app.Service { *; }
+-keep public class * extends android.content.BroadcastReceiver { *; }
+-keep public class * extends android.content.ContentProvider { *; }
+-keep public class * extends android.view.View { *; }
+-keep public class * extends androidx.appcompat.app.AppCompatActivity { *; }
+-keep public class * extends androidx.fragment.app.Fragment { *; }
+-keep public class * extends androidx.recyclerview.widget.RecyclerView$Adapter { *; }
+-keep public class * extends androidx.recyclerview.widget.RecyclerView$ViewHolder { *; }
+-keep public class * extends android.os.AsyncTask { *; }
+-keep class com.coara.browser.** { *; }  
+-keep interface com.coara.browser.** { *; }
+-keep enum com.coara.browser.** { *; }
+-keep class com.coara.browser.MainActivity$** { *; } 
+-keep class com.coara.browser.pagedl$** { *; } 
+-keep class com.coara.browser.grepmd5appActivity$** { *; }  #
+-keep class com.coara.browser.txtphoto { *; }
+-keep class com.coara.browser.QrCodeActivity { *; }
+-keep class com.coara.browser.DownloadHistoryManager { *; }
+-keep class com.coara.browser.DownloadHistoryActivity { *; }
+-keep class com.coara.browser.DownloadHistoryActivity$** { *; } 
+-keep class android.webkit.WebView { *; }
+-keep class android.webkit.WebSettings { *; }
+-keep class android.webkit.WebViewClient { *; }
+-keep class android.webkit.WebChromeClient { *; }
+-keep class android.webkit.DownloadListener { *; }
+-keep class android.webkit.ValueCallback { *; }
+-keep class android.webkit.PermissionRequest { *; }
+-keep class android.webkit.HttpAuthHandler { *; }
+-keep class android.webkit.JsPromptResult { *; }
+-keep class android.webkit.ConsoleMessage { *; }
+-keep class androidx.webkit.WebSettingsCompat { *; }
+-keep class androidx.webkit.WebViewFeature { *; }
+-keepclassmembers class * extends android.webkit.WebViewClient {
+    public *;
+}
+-keepclassmembers class * extends android.webkit.WebChromeClient {
+    public *;
+}
 -keepclassmembers class * {
     @android.webkit.JavascriptInterface <methods>;
 }
--keepclassmembers class * extends android.webkit.WebViewClient {
-    <methods>;
-    <fields>;
-}
--keepclassmembers class * extends android.webkit.WebChromeClient {
-    <methods>;
-    <fields>;
-}
--keepclassmembers class * {
-    void addTextChangedListener(android.text.TextWatcher);
-}
--keepclassmembers class * {
-    public void requestPermissions(androidx.core.app.ActivityCompat, java.lang.String[], int);
-    public void onRequestPermissionsResult(int, java.lang.String[], int[]);
-}
--keep class **$$Lambda$* { *; }
--keep class * implements android.os.Parcelable {
-    public static final android.os.Parcelable$Creator CREATOR;
-    <fields>;
-    <methods>;
-}
+-keep class * implements android.view.View$OnClickListener { *; }
+-keep class * implements android.view.View$OnLongClickListener { *; }
+-keep class * implements android.text.TextWatcher { *; }
+-keep class * implements android.widget.AdapterView$OnItemClickListener { *; }
+-keep class * implements android.content.DialogInterface$OnClickListener { *; }
+-keep class * implements android.content.DialogInterface$OnDismissListener { *; }
+-keep class * implements java.lang.Runnable { *; }
+-keep class * implements android.os.Handler$Callback { *; }
+-keep class * implements androidx.activity.result.ActivityResultCallback { *; }
 -keepnames class * implements java.io.Serializable
 -keepclassmembers class * implements java.io.Serializable {
     static final long serialVersionUID;
     private static final java.io.ObjectStreamField[] serialPersistentFields;
+    !static !transient <fields>;
     private void writeObject(java.io.ObjectOutputStream);
     private void readObject(java.io.ObjectInputStream);
     java.lang.Object writeReplace();
     java.lang.Object readResolve();
 }
--keepclassmembers class * {
-    public void set*(...);
-    public void get*(...);
-    public void *(...);
-    public boolean *(...);
+-keep class * implements android.os.Parcelable {
+    public static final android.os.Parcelable$Creator CREATOR;
 }
--keep class * implements android.view.View.OnClickListener { <methods>; }
--keep class * implements android.widget.AdapterView.OnItemClickListener { <methods>; }
--keep class * implements android.text.TextWatcher { <methods>; }
--keep class * implements android.view.View.OnLongClickListener { <methods>; }
--keep class * implements androidx.activity.result.ActivityResultCallback { <methods>; }
--keep class * implements android.webkit.ValueCallback { <methods>; }
--keep class * implements android.webkit.WebViewClient { <methods>; }
--keep class * implements android.webkit.WebChromeClient { <methods>; }
--keep class * implements android.webkit.DownloadListener { <methods>; }
--keep class * implements android.webkit.WebView$FindListener { <methods>; }
--keep class * implements android.webkit.PermissionRequest { <methods>; }
--keep class * implements android.webkit.HttpAuthHandler { <methods>; }
--keep class * implements android.webkit.JsPromptResult { <methods>; }
--keep class * implements android.webkit.ConsoleMessage { <methods>; }
--keep class * implements android.content.DialogInterface$OnClickListener { <methods>; }
--keep class * implements android.content.DialogInterface$OnDismissListener { <methods>; }
--keep class * implements java.lang.Runnable { <methods>; }
--keep class * implements android.os.Handler$Callback { <methods>; }
--keep class * extends androidx.appcompat.app.AppCompatActivity { <methods>; }
--keep class * extends android.app.Activity { <methods>; }
--keep class * extends androidx.fragment.app.Fragment { <methods>; }
--keep class * extends android.webkit.WebView { <methods>; <fields>; }
--keepclasseswithmembernames class * {
-    native <methods>;
+-keep class org.json.** { *; }
+-keep class com.google.zxing.** { *; }
+-keep class java.security.MessageDigest { *; } 
+-keep class com.coara.browser.MainActivity {
+    private static java.lang.reflect.Method sSetSaveFormDataMethod;
+    private static java.lang.reflect.Method sSetDatabaseEnabledMethod;
+    private static java.lang.reflect.Method sSetAppCacheEnabledMethod;
+    private static java.lang.reflect.Method sSetAppCachePathMethod;
+    *;
 }
--keepclasseswithmembers class * {
-    public <init>(android.content.Context, android.util.AttributeSet);
+-keep class android.util.LruCache { *; }
+-keep class java.util.concurrent.ExecutorService { *; }
+-keep class android.graphics.Bitmap { *; }
+-keepclassmembers class com.coara.browser.** {
+    public static final java.lang.String PREF_NAME;
+    public static final java.lang.String USER_AGENT;
+    public static final java.lang.String ACCEPT_HEADER;
+    public static final java.lang.String ACCEPT_LANGUAGE;
+    public static final java.lang.String KEY_*;
 }
--keepclasseswithmembers class * {
-    public <init>(android.content.Context, android.util.AttributeSet, int);
+-keep class **$$Lambda$* { *; }
+-keep class kotlin.jvm.internal.Lambda { *; }
+-keepclassmembers class * extends android.app.Activity {
+    public void onCreate(android.os.Bundle);
+    public void onActivityResult(int, int, android.content.Intent);
+    public void onRequestPermissionsResult(int, java.lang.String[], int[]);
+    public void onBackPressed();
+    public void onPause();
+    public void onResume();
+    public void onDestroy();
 }
--keepclassmembers enum * {
-    public static **[] values();
-    public static ** valueOf(java.lang.String);
-}
--keepclassmembers class * {
-    public void *(android.view.View);
-}
--keepclassmembers class * {
-    @org.jetbrains.annotations.NotNull <fields>;
-    @org.jetbrains.annotations.Nullable <fields>;
-    @org.jetbrains.annotations.NotNull <methods>;
-    @org.jetbrains.annotations.Nullable <methods>;
-}
+
+-dontnote ** 
+-flattenpackagehierarchy ''
