@@ -746,7 +746,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void preInitializeWebView() {
-        runOnUiThread(() -> {
+        runOnUiThread(new Runnable() { @Override public void run() {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
@@ -1297,7 +1297,7 @@ public class MainActivity extends AppCompatActivity {
     private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(() -> {
+            runOnUiThread(new Runnable() { @Override public void run() {
                 try {
                     int commaIndex = base64Data.indexOf(",");
                     String pureBase64 = base64Data.substring(commaIndex + 1);
