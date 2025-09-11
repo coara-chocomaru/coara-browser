@@ -2827,3 +2827,5 @@ private void addHistory(String url, String title) {
         } catch (Exception ignored) {}
     }
 }
+
+}
