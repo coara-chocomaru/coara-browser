@@ -237,19 +237,6 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        final int maxMemoryKb = (int) (Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSizeKb = Math.max(4 * 1024, maxMemoryKb / 8);
-        thumbnailCache = new LruCache<Integer, Bitmap>(cacheSizeKb) {
-            @Override
-            protected int sizeOf(Integer key, Bitmap value) {
-                try {
-                    return value.getByteCount() / 1024;
-                } catch (Exception e) {
-                    return super.sizeOf(key, value);
-                }
-            }
-        };
-
         toolbar = findViewById(R.id.topAppBar);
         setSupportActionBar(toolbar);
         if (getSupportActionBar() != null) {
@@ -1264,8 +1251,6 @@ public class MainActivity extends AppCompatActivity {
             if (webViews.size() > 1) {
                 webViews.remove(index);
                 Bitmap bm = tabSnapshots.remove(webView);
-                Object tagForRem = webView.getTag();
-                if (tagForRem instanceof Integer) removeCachedThumbnail((Integer) tagForRem);
                 if (bm != null && !bm.isRecycled()) {
                     try { bm.recycle(); } catch (Exception ignored) {}
                 }
@@ -1889,8 +1874,6 @@ public class MainActivity extends AppCompatActivity {
                 int id = -1;
                 if (tag instanceof Integer) id = (Integer) tag;
                 Bitmap bm = tabSnapshots.remove(w);
-                Object tagForRem2 = w.getTag();
-                if (tagForRem2 instanceof Integer) removeCachedThumbnail((Integer) tagForRem2);
                 if (bm != null && !bm.isRecycled()) {
                     try { bm.recycle(); } catch (Exception ignored) {}
                 }
@@ -1907,8 +1890,6 @@ public class MainActivity extends AppCompatActivity {
             int id2 = -1;
             if (tag2 instanceof Integer) id2 = (Integer) tag2;
             Bitmap cbm = tabSnapshots.remove(curr);
-            Object tagForRem3 = curr.getTag();
-            if (tagForRem3 instanceof Integer) removeCachedThumbnail((Integer) tagForRem3);
             if (cbm != null && !cbm.isRecycled()) {
                 try { cbm.recycle(); } catch (Exception ignored) {}
             }
@@ -2222,41 +2203,7 @@ private void showHistoryDialog() {
     }
 
     
-    
-
-    private void scheduleThumbnailGeneration(final WebView w, final int tabId, final int reqWidth, final ImageView target) {
-        if (w == null || tabId == -1) return;
-        Bitmap cached = getCachedThumbnail(tabId);
-        if (cached != null) {
-            runOnUiThread(() -> {
-                try { target.setImageBitmap(cached); } catch (Exception ignored) {}
-            });
-            return;
-        }
-        backgroundExecutor.execute(() -> {
-            try {
-                Bitmap orig = null;
-                synchronized (tabSnapshots) {
-                    orig = tabSnapshots.get(w);
-                }
-                if (orig == null) return;
-                int ow = orig.getWidth();
-                int oh = orig.getHeight();
-                if (ow <= 0 || oh <= 0) return;
-                int scale = Math.max(1, Math.min(ow / Math.max(1, reqWidth), oh / Math.max(1, reqWidth)));
-                int newW = Math.max(1, ow / scale);
-                int newH = Math.max(1, oh / scale);
-                Bitmap scaled = Bitmap.createScaledBitmap(orig, newW, newH, true);
-                putCachedThumbnail(tabId, scaled);
-                runOnUiThread(() -> {
-                    try {
-                        target.setImageBitmap(scaled);
-                    } catch (Exception ignored) {}
-                });
-            } catch (Exception ignored) {}
-        });
-    }
-private void showTabsDialog() {
+    private void showTabsDialog() {
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
         container.setLayoutParams(new LinearLayout.LayoutParams(
@@ -2398,20 +2345,7 @@ private void showTabsDialog() {
                         WebView w = webViews.get(tabIndex);
                         Bitmap bm = tabSnapshots.get(w);
                         if (bm != null) {
-                            Integer idObj = null;
-                            Object tag = w.getTag();
-                            if (tag instanceof Integer) idObj = (Integer) tag;
-                            if (idObj != null) {
-                                Bitmap cached = getCachedThumbnail(idObj);
-                                if (cached != null) {
-                                    img.setImageBitmap(cached);
-                                } else {
-                                    img.setImageDrawable(null);
-                                    scheduleThumbnailGeneration(w, idObj, Math.max(64, img.getWidth()), img);
-                                }
-                            } else {
-                                img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
-                            }
+                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
                         } else {
                             img.setImageDrawable(null);
                         }
