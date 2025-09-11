@@ -2220,7 +2220,7 @@ private void showHistoryDialog() {
         container.addView(viewPager, pagerParams);
 
         Button addTabButton = new Button(this);
-        addTabButton.setText("新しいタブ");
+        addTabButton.setText("新しいタブを開く");
         addTabButton.setOnClickListener(v -> {
             createNewTab();
             adapter.notifyDataSetChanged();
@@ -2228,9 +2228,9 @@ private void showHistoryDialog() {
         container.addView(addTabButton);
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("タブ")
+                .setTitle("タブ一覧")
                 .setView(container)
-                .setNegativeButton("閉じる", null)
+                .setNegativeButton("タブ一覧を閉じる", null)
                 .create();
         dialog.show();
     }
