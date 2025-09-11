@@ -2182,7 +2182,7 @@ private void showHistoryDialog() {
 
             holder.itemView.setOnClickListener(v -> {
                 switchToTab(position);
-                holder.itemView.getRootView().findViewById(android.R.id.content).performClick();
+                holder.itemView.getRootView().findViewById(android.R.id.content).performClick(); // Simulate dialog dismiss
             });
 
             holder.closeButton.setOnClickListener(v -> {
