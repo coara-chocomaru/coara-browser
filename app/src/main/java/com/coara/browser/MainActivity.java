@@ -72,6 +72,7 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import androidx.viewpager2.widget.ViewPager2;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -186,6 +187,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView preloadedWebView = null;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
+    private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
@@ -931,12 +933,13 @@ public class MainActivity extends AppCompatActivity {
                                 if (webViews.size() >= MAX_TABS) {
                                     Toast.makeText(MainActivity.this,
                                         "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-                                } else {
-                                    WebView newWebView = createNewWebView();
-                                    webViews.add(newWebView);
-                                    updateTabCount();
-                                    switchToTab(webViews.size() - 1);
-                                    newWebView.loadUrl(extra);
+                                    } else {
+                                        WebView newWebView = createNewWebView();
+                                        webViews.add(newWebView);
+                                        updateTabCount();
+                                        switchToTab(webViews.size() - 1);
+                                        newWebView.loadUrl(extra);
+                                    }
                                 }
                             } else if (which == 3 && !isDataUrlLocal) {
                                 if (extra != null && !extra.isEmpty()) {
@@ -1028,9 +1031,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE); 
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200); 
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -1060,6 +1063,9 @@ public class MainActivity extends AppCompatActivity {
           "notifyUrlChange();" +
           "})();"; 
             view.evaluateJavascript(jsOverrideHistory, null); 
+            if (view == getCurrentWebView()) {
+                captureTabSnapshot(view);
+            }
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
@@ -1202,6 +1208,7 @@ public class MainActivity extends AppCompatActivity {
         if (index != -1) {
             if (webViews.size() > 1) {
                 webViews.remove(index);
+                tabSnapshots.remove(webView);
                 if (currentTabIndex > index) {
                     currentTabIndex--;
                 } else if (currentTabIndex >= webViews.size()) {
@@ -1428,6 +1435,7 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         getCurrentWebView().loadUrl(START_PAGE);
+        captureTabSnapshot(newWebView);
     }
     private void createNewTab(String url) {
         if (webViews.size() >= MAX_TABS) {
@@ -1439,10 +1447,15 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         newWebView.loadUrl(url);
+        captureTabSnapshot(newWebView);
     }
 
     private void switchToTab(int index) {
         if (index < 0 || index >= webViews.size()) return;
+        WebView current = getCurrentWebView();
+        if (current != null) {
+            captureTabSnapshot(current);
+        }
         webViewContainer.removeAllViews();
         currentTabIndex = index;
         webViewContainer.addView(getCurrentWebView());
@@ -1790,6 +1803,7 @@ public class MainActivity extends AppCompatActivity {
         }
         webViews.clear();
         webViews.add(current);
+        tabSnapshots.clear();
         currentTabIndex = 0;
         webViewContainer.removeAllViews();
         webViewContainer.addView(current);
@@ -2091,16 +2105,143 @@ private void showHistoryDialog() {
     }
 
     private void showTabsDialog() {
-        RecyclerView recyclerView = new RecyclerView(this);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        ViewPager2 viewPager = new ViewPager2(this);
+        viewPager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
+        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
+        viewPager.setAdapter(adapter);
+        LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1);
+        container.addView(viewPager, pagerParams);
+
+        Button addTabButton = new Button(this);
+        addTabButton.setText("新しいタブ");
+        addTabButton.setOnClickListener(v -> {
+            createNewTab();
+            adapter.notifyDataSetChanged();
+        });
+        container.addView(addTabButton);
+
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-            .setTitle("タブ")
-            .setNegativeButton("閉じる", null)
-            .setView(recyclerView)
-            .create();
-        TabAdapter adapter = new TabAdapter(webViews, dialog);
-        recyclerView.setAdapter(adapter);
+                .setTitle("タブ")
+                .setView(container)
+                .setNegativeButton("閉じる", null)
+                .create();
         dialog.show();
+    }
+
+    private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.SnapshotViewHolder> {
+        @Override
+        public SnapshotViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout itemView = new FrameLayout(MainActivity.this);
+            itemView.setLayoutParams(new ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+
+            ImageView snapshotImage = new ImageView(MainActivity.this);
+            snapshotImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            snapshotImage.setId(View.generateViewId());
+            FrameLayout.LayoutParams imageParams = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT);
+            itemView.addView(snapshotImage, imageParams);
+
+            TextView title = new TextView(MainActivity.this);
+            title.setTextColor(Color.BLACK);
+            title.setTextSize(16);
+            title.setGravity(Gravity.CENTER);
+            title.setBackgroundColor(Color.argb(128, 255, 255, 255));
+            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM);
+            itemView.addView(title, titleParams);
+
+            ImageButton closeButton = new ImageButton(MainActivity.this);
+            closeButton.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP | Gravity.END);
+            itemView.addView(closeButton, closeParams);
+
+            return new SnapshotViewHolder(itemView, snapshotImage, title, closeButton);
+        }
+
+        @Override
+        public void onBindViewHolder(SnapshotViewHolder holder, int position) {
+            WebView webView = webViews.get(position);
+            String tabTitle = webView.getTitle();
+            if (tabTitle == null || tabTitle.isEmpty()) {
+                tabTitle = "タブ " + (position + 1);
+            }
+            holder.title.setText(tabTitle);
+
+            Bitmap snapshot = tabSnapshots.get(webView);
+            if (snapshot != null) {
+                holder.snapshotImage.setImageBitmap(snapshot);
+            } else {
+                holder.snapshotImage.setImageResource(android.R.color.transparent);
+            }
+
+            holder.itemView.setOnClickListener(v -> {
+                switchToTab(position);
+                holder.itemView.getRootView().findViewById(android.R.id.content).performClick();
+            });
+
+            holder.closeButton.setOnClickListener(v -> {
+                if (webViews.size() > 1) {
+                    webViews.remove(position);
+                    tabSnapshots.remove(webView);
+                    notifyItemRemoved(position);
+                    if (currentTabIndex >= webViews.size()) {
+                        currentTabIndex = webViews.size() - 1;
+                    }
+                    webViewContainer.removeAllViews();
+                    webViewContainer.addView(getCurrentWebView());
+                    updateTabCount();
+                } else {
+                    Toast.makeText(MainActivity.this, "これ以上タブを閉じられません", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return webViews.size();
+        }
+
+        class SnapshotViewHolder extends RecyclerView.ViewHolder {
+            ImageView snapshotImage;
+            TextView title;
+            ImageButton closeButton;
+
+            public SnapshotViewHolder(View itemView, ImageView snapshotImage, TextView title, ImageButton closeButton) {
+                super(itemView);
+                this.snapshotImage = snapshotImage;
+                this.title = title;
+                this.closeButton = closeButton;
+            }
+        }
+    }
+
+    private void captureTabSnapshot(WebView webView) {
+        if (webView == null) return;
+        int width = webView.getWidth();
+        int height = webView.getHeight();
+        if (width <= 0 || height <= 0) return;
+
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        webView.draw(canvas);
+        tabSnapshots.put(webView, bitmap);
     }
 
     private void showBookmarksManagementDialog() {
@@ -2393,96 +2534,6 @@ private void addHistory(String url, String title) {
         for (HistoryItem hi : historyItems) {
             final String url = hi.getUrl();
             backgroundExecutor.execute(() -> loadFaviconFromDisk(url));
-        }
-    }
-
-    private class TabAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-        private static final int VIEW_TYPE_TAB = 0;
-        private static final int VIEW_TYPE_ADD = 1;
-        private final List<WebView> tabs;
-        private final AlertDialog dialog;
-        public TabAdapter(List<WebView> tabs, AlertDialog dialog) {
-            this.tabs = tabs;
-            this.dialog = dialog;
-        }
-        @Override
-        public int getItemCount() {
-            return tabs.size() + 1;
-        }
-        @Override
-        public int getItemViewType(int position) {
-            return (position == tabs.size()) ? VIEW_TYPE_ADD : VIEW_TYPE_TAB;
-        }
-        @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            if (viewType == VIEW_TYPE_TAB) {
-                View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_tab, parent, false);
-                return new TabViewHolder(view);
-            } else {
-                View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_tab_add, parent, false);
-                return new AddTabViewHolder(view);
-            }
-        }
-        @Override
-        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-            if (holder.getItemViewType() == VIEW_TYPE_TAB) {
-                TabViewHolder tabHolder = (TabViewHolder) holder;
-                WebView webView = tabs.get(position);
-                String title = webView.getTitle();
-                if (title == null || title.isEmpty()) {
-                    title = "タブ " + (position + 1);
-                }
-                tabHolder.title.setText(title);
-                Bitmap icon = webViewFavicons.get(webView);
-                if (icon != null) {
-                    tabHolder.favicon.setImageBitmap(icon);
-                } else {
-                    tabHolder.favicon.setImageResource(R.drawable.transparent_vector);
-                }
-                tabHolder.itemView.setOnClickListener(v -> {
-                    switchToTab(position);
-                    dialog.dismiss();
-                });
-                tabHolder.closeButton.setOnClickListener(v -> {
-                    if (tabs.size() > 1) {
-                        tabs.remove(position);
-                        notifyItemRemoved(position);
-                        if (currentTabIndex >= tabs.size()) {
-                            currentTabIndex = tabs.size() - 1;
-                        }
-                        webViewContainer.removeAllViews();
-                        webViewContainer.addView(getCurrentWebView());
-                        updateTabCount();
-                    } else {
-                        Toast.makeText(MainActivity.this, "これ以上タブを閉じられません", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } else {
-                AddTabViewHolder addHolder = (AddTabViewHolder) holder;
-                addHolder.addButton.setOnClickListener(v -> {
-                    createNewTab();
-                    notifyItemInserted(tabs.size() - 1);
-                    dialog.dismiss();
-                });
-            }
-        }
-        class TabViewHolder extends RecyclerView.ViewHolder {
-            ImageView favicon;
-            TextView title;
-            ImageButton closeButton;
-            public TabViewHolder(View itemView) {
-                super(itemView);
-                favicon = itemView.findViewById(R.id.tabFavicon);
-                title = itemView.findViewById(R.id.tabTitle);
-                closeButton = itemView.findViewById(R.id.tabCloseButton);
-            }
-        }
-        class AddTabViewHolder extends RecyclerView.ViewHolder {
-            ImageView addButton;
-            public AddTabViewHolder(View itemView) {
-                super(itemView);
-                addButton = itemView.findViewById(R.id.tabAddButton);
-            }
         }
     }
 
