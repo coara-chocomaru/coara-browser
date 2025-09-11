@@ -78,16 +78,26 @@
     - ライセンス: Apache License, Version 2.0  
     - 著作権: © The Android Open Source Project
 
-16. **Android SDKライセンス**  
+16. **androidx.viewpager2**  
+    - アーティファクト: `androidx.viewpager2:viewpager2:1.1.0`  
+    - ライセンス: Apache License, Version 2.0  
+    - 著作権: © The Android Open Source Project
+
+17. **androidx.fragment:fragment**  
+    - アーティファクト: `androidx.fragment:fragment:1.8.9`
+    - ライセンス: Apache License, Version 2.0  
+    - 著作権: © The Android Open Source Project
+
+18. **Android SDKライセンス**  
     - Android SDKに関する詳細なライセンス情報は(developer.android.com)をご覧下さい。
 
 ## 商標通知
 
-17. **Android™** は Google LLC の商標です。
+19. **Android™** は Google LLC の商標です。
 
 ---
 
-以上の17項目がライセンス情報です。  
+以上の19項目がライセンス情報です。  
 各ライブラリの詳細なライセンス情報および利用条件については、各ライブラリの配布物に含まれるファイルをご確認ください。
 
 ---
