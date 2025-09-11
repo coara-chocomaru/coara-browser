@@ -523,6 +523,24 @@ public class MainActivity extends AppCompatActivity {
             Bundle state = new Bundle();
             webView.saveState(state);
             saveBundleToFile(state, "tab_state_" + id + ".dat");
+            if (tabSnapshots.containsKey(webView)) {
+                Bitmap snap = tabSnapshots.get(webView);
+                if (snap != null) {
+                    final int finalIdForSnap = id;
+                    final Bitmap finalSnap = snap;
+                    backgroundExecutor.execute(() -> {
+                        try {
+                            File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
+                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                                finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                fos.flush();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                }
+            }
         }
         Object currentTag = getCurrentWebView().getTag();
         int currentTabId;
@@ -553,6 +571,17 @@ public class MainActivity extends AppCompatActivity {
             WebView webView = createNewWebView();
             webView.setTag(id);
             webViews.add(webView);
+            File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+            if (snapFile.exists()) {
+                try {
+                    Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
+                    if (bm != null) {
+                        tabSnapshots.put(webView, bm);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
             if (id > maxId) maxId = id;
             if (id == currentTabId) {
                 webView.loadUrl(url);
@@ -1208,9 +1237,21 @@ public class MainActivity extends AppCompatActivity {
     private void closeTab(WebView webView) {
         int index = webViews.indexOf(webView);
         if (index != -1) {
+            Object tag = webView.getTag();
+            int id = -1;
+            if (tag instanceof Integer) id = (Integer) tag;
             if (webViews.size() > 1) {
                 webViews.remove(index);
-                tabSnapshots.remove(webView);
+                Bitmap bm = tabSnapshots.remove(webView);
+                if (bm != null && !bm.isRecycled()) {
+                    try { bm.recycle(); } catch (Exception ignored) {}
+                }
+                if (id != -1) {
+                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    if (snapFile.exists()) {
+                        snapFile.delete();
+                    }
+                }
                 if (currentTabIndex > index) {
                     currentTabIndex--;
                 } else if (currentTabIndex >= webViews.size()) {
@@ -1223,7 +1264,7 @@ public class MainActivity extends AppCompatActivity {
                 webView.loadUrl(START_PAGE);
             }
         }
-    }
+}
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
@@ -1813,17 +1854,42 @@ public class MainActivity extends AppCompatActivity {
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
             if (i != currentTabIndex) {
-                webViews.get(i).destroy();
+                WebView w = webViews.get(i);
+                Object tag = w.getTag();
+                int id = -1;
+                if (tag instanceof Integer) id = (Integer) tag;
+                Bitmap bm = tabSnapshots.remove(w);
+                if (bm != null && !bm.isRecycled()) {
+                    try { bm.recycle(); } catch (Exception ignored) {}
+                }
+                if (id != -1) {
+                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    if (snapFile.exists()) snapFile.delete();
+                }
+                w.destroy();
+            }
+        }
+        WebView curr = getCurrentWebView();
+        if (curr != null) {
+            Object tag2 = curr.getTag();
+            int id2 = -1;
+            if (tag2 instanceof Integer) id2 = (Integer) tag2;
+            Bitmap cbm = tabSnapshots.remove(curr);
+            if (cbm != null && !cbm.isRecycled()) {
+                try { cbm.recycle(); } catch (Exception ignored) {}
+            }
+            if (id2 != -1) {
+                File snapFileCurr = new File(getFilesDir(), "tab_snapshot_" + id2 + ".png");
+                if (snapFileCurr.exists()) snapFileCurr.delete();
             }
         }
         webViews.clear();
         webViews.add(current);
-        tabSnapshots.clear();
         currentTabIndex = 0;
         webViewContainer.removeAllViews();
         webViewContainer.addView(current);
         updateTabCount();
-    }
+}
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
     int width = rootView.getWidth();
@@ -2213,14 +2279,8 @@ private void showHistoryDialog() {
 
             holder.closeButton.setOnClickListener(v -> {
                 if (webViews.size() > 1) {
-                    webViews.remove(position);
-                    tabSnapshots.remove(webView);
+                    closeTab(webView);
                     notifyItemRemoved(position);
-                    if (currentTabIndex >= webViews.size()) {
-                        currentTabIndex = webViews.size() - 1;
-                    }
-                    webViewContainer.removeAllViews();
-                    webViewContainer.addView(getCurrentWebView());
                     updateTabCount();
                 } else {
                     Toast.makeText(MainActivity.this, "これ以上タブを閉じられません", Toast.LENGTH_SHORT).show();
@@ -2249,15 +2309,32 @@ private void showHistoryDialog() {
 
     private void captureTabSnapshot(WebView webView) {
         if (webView == null) return;
+        Object tag = webView.getTag();
+        int id = -1;
+        if (tag instanceof Integer) id = (Integer) tag;
         int width = webView.getWidth();
         int height = webView.getHeight();
         if (width <= 0 || height <= 0) return;
-
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         webView.draw(canvas);
         tabSnapshots.put(webView, bitmap);
-    }
+        if (id != -1) {
+            final int finalId = id;
+            final Bitmap finalBitmap = bitmap;
+            backgroundExecutor.execute(() -> {
+                try {
+                    File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                        fos.flush();
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+}
 
     private void showBookmarksManagementDialog() {
         if (bookmarks.isEmpty()) {
