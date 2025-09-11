@@ -5,16 +5,11 @@
 -dontpreverify
 -keepattributes SourceFile,LineNumberTable,*Annotation*,Exceptions,InnerClasses,Signature,Deprecated,EnclosingMethod,Record,PermittedSubclasses,NestHost,NestMembers,Module,ModuleMainClass,RuntimeVisibleAnnotations,RuntimeVisibleParameterAnnotations
 -keepparameternames
--repackageclasses ''
 -allowaccessmodification
--mergeinterfacesaggressively
--optimizationpasses 45
+-optimizationpasses 50
 -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,!code/allocation/variable,!method/inlining/short,!method/inlining/unique,!method/inlining/tailrecursion,!method/removal/parameter,!class/unboxing/enum
 -adaptresourcefilenames **.properties,**.gif,**.jpg,**.png,**.xml
 -adaptresourcefilecontents **.properties,META-INF/MANIFEST.MF
--obfuscationdictionary obfuscation-dictionary.txt
--classobfuscationdictionary obfuscation-dictionary.txt
--packageobfuscationdictionary obfuscation-dictionary.txt
 -dontwarn java.lang.invoke.**
 -dontwarn java.lang.reflect.**
 -dontwarn java.nio.file.**
@@ -156,7 +151,6 @@
     public void onDestroy();
 }
 -dontnote ** 
--flattenpackagehierarchy ''
 -keep class java.lang.Runtime {
     public java.lang.Process exec(java.lang.String);
     public java.lang.Process exec(java.lang.String[]);
