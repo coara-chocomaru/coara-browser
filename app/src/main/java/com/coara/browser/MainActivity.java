@@ -2202,6 +2202,7 @@ private void showHistoryDialog() {
         dialog.show();
     }
 
+    
     private void showTabsDialog() {
         LinearLayout container = new LinearLayout(this);
         container.setOrientation(LinearLayout.VERTICAL);
@@ -2211,7 +2212,7 @@ private void showHistoryDialog() {
 
         ViewPager2 viewPager = new ViewPager2(this);
         viewPager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
-        TabSnapshotAdapter adapter = new TabSnapshotAdapter(dialog);
+        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
         viewPager.setAdapter(adapter);
         LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -2232,212 +2233,196 @@ private void showHistoryDialog() {
                 .setView(container)
                 .setNegativeButton("タブ一覧を閉じる", null)
                 .create();
+        adapter.setParentDialog(dialog);
         dialog.show();
     }
 
-    private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.SnapshotViewHolder> {
+    private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
         private AlertDialog parentDialog;
-        public TabSnapshotAdapter(AlertDialog dialog) {
-            this.parentDialog = dialog;
-        }
+        public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
+        public TabSnapshotAdapter() { }
+
         @Override
-        public SnapshotViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        public PageViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
             FrameLayout root = new FrameLayout(MainActivity.this);
-            root.setLayoutParams(new ViewGroup.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
-
-            LinearLayout column = new LinearLayout(MainActivity.this);
-            column.setOrientation(LinearLayout.VERTICAL);
-            column.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.MATCH_PARENT));
-            int tileMargin = (int)(8 * getResources().getDisplayMetrics().density);
-
+            root.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            LinearLayout container = new LinearLayout(MainActivity.this);
+            container.setOrientation(LinearLayout.VERTICAL);
+            FrameLayout.LayoutParams containerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            container.setLayoutParams(containerParams);
             LinearLayout row1 = new LinearLayout(MainActivity.this);
             row1.setOrientation(LinearLayout.HORIZONTAL);
-            row1.setLayoutParams(new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
             LinearLayout row2 = new LinearLayout(MainActivity.this);
             row2.setOrientation(LinearLayout.HORIZONTAL);
-            row2.setLayoutParams(new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+            row1.setLayoutParams(rowParams);
+            row2.setLayoutParams(rowParams);
+            int tileMargin = dpToPx(6);
+            LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            tileParams.setMargins(tileMargin, tileMargin, tileMargin, tileMargin);
             FrameLayout tile00 = new FrameLayout(MainActivity.this);
-            tile00.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            tile00.setPadding(tileMargin, tileMargin, tileMargin, tileMargin);
             FrameLayout tile01 = new FrameLayout(MainActivity.this);
-            tile01.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            tile01.setPadding(tileMargin, tileMargin, tileMargin, tileMargin);
             FrameLayout tile10 = new FrameLayout(MainActivity.this);
-            tile10.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            tile10.setPadding(tileMargin, tileMargin, tileMargin, tileMargin);
             FrameLayout tile11 = new FrameLayout(MainActivity.this);
-            tile11.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-            tile11.setPadding(tileMargin, tileMargin, tileMargin, tileMargin);
-
+            tile00.setLayoutParams(tileParams);
+            tile01.setLayoutParams(tileParams);
+            tile10.setLayoutParams(tileParams);
+            tile11.setLayoutParams(tileParams);
             ImageView img00 = new ImageView(MainActivity.this);
-            img00.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img00.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            tile00.addView(img00);
-
             ImageView img01 = new ImageView(MainActivity.this);
-            img01.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img01.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            tile01.addView(img01);
-
             ImageView img10 = new ImageView(MainActivity.this);
-            img10.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img10.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            tile10.addView(img10);
-
             ImageView img11 = new ImageView(MainActivity.this);
+            img00.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img01.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img10.setScaleType(ImageView.ScaleType.CENTER_CROP);
             img11.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img11.setLayoutParams(new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            tile11.addView(img11);
-
+            FrameLayout.LayoutParams imgParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            tile00.addView(img00, imgParams);
+            tile01.addView(img01, imgParams);
+            tile10.addView(img10, imgParams);
+            tile11.addView(img11, imgParams);
             TextView title00 = new TextView(MainActivity.this);
-            title00.setTextColor(Color.BLACK);
-            title00.setTextSize(12);
-            title00.setGravity(Gravity.CENTER);
-            title00.setBackgroundColor(Color.argb(160, 255, 255, 255));
-            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    Gravity.BOTTOM);
-            tile00.addView(title00, titleParams);
-
             TextView title01 = new TextView(MainActivity.this);
-            title01.setTextColor(Color.BLACK);
-            title01.setTextSize(12);
-            title01.setGravity(Gravity.CENTER);
-            title01.setBackgroundColor(Color.argb(160, 255, 255, 255));
-            tile01.addView(title01, titleParams);
-
             TextView title10 = new TextView(MainActivity.this);
-            title10.setTextColor(Color.BLACK);
-            title10.setTextSize(12);
-            title10.setGravity(Gravity.CENTER);
-            title10.setBackgroundColor(Color.argb(160, 255, 255, 255));
-            tile10.addView(title10, titleParams);
-
             TextView title11 = new TextView(MainActivity.this);
+            title00.setTextColor(Color.BLACK);
+            title01.setTextColor(Color.BLACK);
+            title10.setTextColor(Color.BLACK);
             title11.setTextColor(Color.BLACK);
+            title00.setTextSize(12);
+            title01.setTextSize(12);
+            title10.setTextSize(12);
             title11.setTextSize(12);
+            title00.setGravity(Gravity.CENTER);
+            title01.setGravity(Gravity.CENTER);
+            title10.setGravity(Gravity.CENTER);
             title11.setGravity(Gravity.CENTER);
-            title11.setBackgroundColor(Color.argb(160, 255, 255, 255));
+            title00.setBackgroundColor(Color.argb(160,255,255,255));
+            title01.setBackgroundColor(Color.argb(160,255,255,255));
+            title10.setBackgroundColor(Color.argb(160,255,255,255));
+            title11.setBackgroundColor(Color.argb(160,255,255,255));
+            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+            tile00.addView(title00, titleParams);
+            tile01.addView(title01, titleParams);
+            tile10.addView(title10, titleParams);
             tile11.addView(title11, titleParams);
-
             ImageButton close00 = new ImageButton(MainActivity.this);
-            close00.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.END);
-            tile00.addView(close00, closeParams);
-
             ImageButton close01 = new ImageButton(MainActivity.this);
-            close01.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            tile01.addView(close01, closeParams);
-
             ImageButton close10 = new ImageButton(MainActivity.this);
-            close10.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            tile10.addView(close10, closeParams);
-
             ImageButton close11 = new ImageButton(MainActivity.this);
+            close00.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close01.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close10.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
             close11.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dpToPx(36), dpToPx(36), Gravity.TOP | Gravity.END);
+            closeParams.setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
+            tile00.addView(close00, closeParams);
+            tile01.addView(close01, closeParams);
+            tile10.addView(close10, closeParams);
             tile11.addView(close11, closeParams);
-
             row1.addView(tile00);
             row1.addView(tile01);
             row2.addView(tile10);
             row2.addView(tile11);
-
-            column.addView(row1);
-            column.addView(row2);
-            root.addView(column);
-
-            return new SnapshotViewHolder(root,
-                    img00, img01, img10, img11,
-                    title00, title01, title10, title11,
-                    close00, close01, close10, close11);
+            container.addView(row1);
+            container.addView(row2);
+            root.addView(container);
+            PageViewHolder vh = new PageViewHolder(root, img00, img01, img10, img11, title00, title01, title10, title11, close00, close01, close10, close11);
+            return vh;
         }
 
         @Override
-        public void onBindViewHolder(SnapshotViewHolder holder, int position) {
-            int base = position * 4;
-            for (int i = 0; i < 4; i++) {
-                int idx = base + i;
-                ImageView iv = holder.images[i];
-                TextView tv = holder.titles[i];
-                ImageButton cb = holder.closes[i];
-                FrameLayout tile = holder.tiles[i];
-                if (idx < webViews.size()) {
-                    WebView w = webViews.get(idx);
-                    String tabTitle = w.getTitle();
-                    if (tabTitle == null || tabTitle.isEmpty()) tabTitle = "タブ " + (idx + 1);
-                    tv.setText(tabTitle);
-                    Bitmap snap = tabSnapshots.get(w);
-                    if (snap != null) {
-                        iv.setImageBitmap(snap);
-                    } else {
-                        iv.setImageResource(android.R.color.transparent);
-                    }
-                    tile.setVisibility(View.VISIBLE);
-                    final int targetIndex = idx;
-                    iv.setOnClickListener(v -> {
-                        switchToTab(targetIndex);
-                        if (parentDialog != null) parentDialog.dismiss();
-                    });
-                    cb.setOnClickListener(v -> {
-                        if (webViews.size() > 1) {
-                            closeTab(webViews.get(targetIndex));
-                            notifyDataSetChanged();
-                            updateTabCount();
+        public void onBindViewHolder(PageViewHolder holder, int position) {
+            int baseIndex;
+            synchronized (webViews) {
+                baseIndex = position * 4;
+                for (int i = 0; i < 4; i++) {
+                    final int tabIndex = baseIndex + i;
+                    ImageView img = holder.images[i];
+                    TextView title = holder.titles[i];
+                    ImageButton close = holder.closes[i];
+                    if (tabIndex < webViews.size()) {
+                        WebView w = webViews.get(tabIndex);
+                        Bitmap bm = tabSnapshots.get(w);
+                        if (bm != null) {
+                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
                         } else {
-                            Toast.makeText(MainActivity.this, "これ以上タブを閉じられません", Toast.LENGTH_SHORT).show();
+                            img.setImageDrawable(null);
                         }
-                    });
-                } else {
-                    iv.setImageResource(android.R.color.transparent);
-                    tv.setText("");
-                    tile.setVisibility(View.INVISIBLE);
-                    iv.setOnClickListener(null);
-                    cb.setOnClickListener(null);
+                        String t = w.getUrl();
+                        if (t == null) t = "";
+                        title.setText(shortTitle(t));
+                        img.setAlpha(1f);
+                        img.setClickable(true);
+                        img.setOnClickListener(v -> {
+                            synchronized (webViews) {
+                                currentTabIndex = tabIndex;
+                            }
+                            runOnUiThread(() -> {
+                                try {
+                                    webViewContainer.removeAllViews();
+                                    webViewContainer.addView(getCurrentWebView());
+                                    updateTabCount();
+                                    if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
+                                } catch (Exception ignored) {}
+                            });
+                        });
+                        close.setVisibility(View.VISIBLE);
+                        close.setOnClickListener(v -> {
+                            WebView target;
+                            synchronized (webViews) {
+                                if (tabIndex >= 0 && tabIndex < webViews.size()) {
+                                    target = webViews.get(tabIndex);
+                                } else return;
+                            }
+                            closeTab(target);
+                            notifyDataSetChanged();
+                        });
+                    } else {
+                        img.setImageDrawable(null);
+                        title.setText("");
+                        img.setClickable(false);
+                        img.setOnClickListener(null);
+                        close.setVisibility(View.INVISIBLE);
+                    }
                 }
             }
         }
 
         @Override
         public int getItemCount() {
-            int size = webViews.size();
-            return (size + 3) / 4;
+            synchronized (webViews) {
+                int n = webViews.size();
+                return (n + 3) / 4;
+            }
         }
 
-        class SnapshotViewHolder extends RecyclerView.ViewHolder {
-            FrameLayout[] tiles = new FrameLayout[4];
-            ImageView[] images = new ImageView[4];
-            TextView[] titles = new TextView[4];
-            ImageButton[] closes = new ImageButton[4];
-            public SnapshotViewHolder(View itemView,
-                                      ImageView img00, ImageView img01, ImageView img10, ImageView img11,
-                                      TextView title00, TextView title01, TextView title10, TextView title11,
-                                      ImageButton close00, ImageButton close01, ImageButton close10, ImageButton close11) {
+        private String shortTitle(String url) {
+            if (url == null) return "";
+            if (url.length() > 40) return url.substring(0, 37) + "...";
+            return url;
+        }
+
+        private int dpToPx(int dp) {
+            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+        }
+
+        private class PageViewHolder extends RecyclerView.ViewHolder {
+            public ImageView[] images = new ImageView[4];
+            public TextView[] titles = new TextView[4];
+            public ImageButton[] closes = new ImageButton[4];
+            public PageViewHolder(View itemView,
+                                  ImageView img00, ImageView img01, ImageView img10, ImageView img11,
+                                  TextView title00, TextView title01, TextView title10, TextView title11,
+                                  ImageButton close00, ImageButton close01, ImageButton close10, ImageButton close11) {
                 super(itemView);
-                tiles[0] = (FrameLayout)((ViewGroup)((ViewGroup)((FrameLayout)itemView).getChildAt(0)).getChildAt(0)).getChildAt(0);
-                tiles[1] = (FrameLayout)((ViewGroup)((ViewGroup)((FrameLayout)itemView).getChildAt(0)).getChildAt(0)).getChildAt(1);
-                tiles[2] = (FrameLayout)((ViewGroup)((ViewGroup)((FrameLayout)itemView).getChildAt(0)).getChildAt(1)).getChildAt(0);
-                tiles[3] = (FrameLayout)((ViewGroup)((ViewGroup)((FrameLayout)itemView).getChildAt(0)).getChildAt(1)).getChildAt(1);
                 images[0] = img00; images[1] = img01; images[2] = img10; images[3] = img11;
                 titles[0] = title00; titles[1] = title01; titles[2] = title10; titles[3] = title11;
                 closes[0] = close00; closes[1] = close01; closes[2] = close10; closes[3] = close11;
             }
         }
-    }}
-
-    private void captureTabSnapshot(WebView webView) {
+    }
+private void captureTabSnapshot(WebView webView) {
         if (webView == null) return;
         Object tag = webView.getTag();
         int id = -1;
