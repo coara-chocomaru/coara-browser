@@ -8,7 +8,7 @@
 -repackageclasses ''
 -allowaccessmodification
 -mergeinterfacesaggressively
--optimizationpasses 40
+-optimizationpasses 45
 -optimizations !code/simplification/arithmetic,!code/simplification/cast,!field/*,!class/merging/*,!code/allocation/variable,!method/inlining/short,!method/inlining/unique,!method/inlining/tailrecursion,!method/removal/parameter,!class/unboxing/enum
 -adaptresourcefilenames **.properties,**.gif,**.jpg,**.png,**.xml
 -adaptresourcefilecontents **.properties,META-INF/MANIFEST.MF
@@ -167,3 +167,5 @@
 -keep class android.text.Spannable { *; }
 -keep class android.text.style.ForegroundColorSpan { *; }
 -keep class android.text.style.BackgroundColorSpan { *; }
+-keep class androidx.viewpager2.widget.ViewPager2 { *; }
+-keep class androidx.viewpager2.adapter.FragmentStateAdapter { *; }
