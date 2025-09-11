@@ -1864,7 +1864,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearTabs() {
-        synchronized (webViews) { {
+        synchronized (webViews) {
         WebView current = getCurrentWebView();
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
@@ -2826,6 +2826,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-}
-
 }
