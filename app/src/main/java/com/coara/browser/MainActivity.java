@@ -1018,9 +1018,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
