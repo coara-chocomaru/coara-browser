@@ -837,8 +837,7 @@ public class MainActivity extends AppCompatActivity {
                             } else if (which == 1) {
                                 if (isDataUrl) {
                                     if (webViews.size() >= MAX_TABS) {
-                                        Toast.makeText(MainActivity.this,
-                                            "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                     } else {
                                         WebView newWebView = createNewWebView();
                                         webViews.add(newWebView);
@@ -851,13 +850,10 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             } else if (which == 2) {
                                 if (isDataUrl) {
-                                    if (extra != null && !extra.isEmpty()) {
-                                        saveImage(extra);
-                                    }
+                                    saveImage(extra);
                                 } else {
                                     if (webViews.size() >= MAX_TABS) {
-                                        Toast.makeText(MainActivity.this,
-                                            "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                     } else {
                                         WebView newWebView = createNewWebView();
                                         webViews.add(newWebView);
@@ -866,10 +862,8 @@ public class MainActivity extends AppCompatActivity {
                                         newWebView.loadUrl(extra);
                                     }
                                 }
-                            } else if (which == 3 && !isDataUrl) {
-                                if (extra != null && !extra.isEmpty()) {
-                                    saveImage(extra);
-                                }
+                            } else if (which == 3) {
+                                saveImage(extra);
                             }
                         }).show();
                     return true;
@@ -888,8 +882,7 @@ public class MainActivity extends AppCompatActivity {
                                 handleDownload(extra, null, null, null, 0);
                             } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
-                                    Toast.makeText(MainActivity.this,
-                                        "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                 } else {
                                     WebView newWebView = createNewWebView();
                                     webViews.add(newWebView);
@@ -923,28 +916,22 @@ public class MainActivity extends AppCompatActivity {
                                 copyLink(extra);
                             } else if (which == 1) {
                                 if (isDataUrlLocal) {
-                                    if (extra != null && !extra.isEmpty()) {
-                                        saveImage(extra);
-                                    }
+                                    saveImage(extra);
                                 } else {
                                     handleDownload(extra, null, null, null, 0);
                                 }
-                            } else if (which == 2 && !isDataUrlLocal) {
+                            } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
-                                    Toast.makeText(MainActivity.this,
-                                        "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-                                    } else {
-                                        WebView newWebView = createNewWebView();
-                                        webViews.add(newWebView);
-                                        updateTabCount();
-                                        switchToTab(webViews.size() - 1);
-                                        newWebView.loadUrl(extra);
-                                    }
+                                    Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                } else {
+                                    WebView newWebView = createNewWebView();
+                                    webViews.add(newWebView);
+                                    updateTabCount();
+                                    switchToTab(webViews.size() - 1);
+                                    newWebView.loadUrl(extra);
                                 }
-                            } else if (which == 3 && !isDataUrlLocal) {
-                                if (extra != null && !extra.isEmpty()) {
-                                    saveImage(extra);
-                                }
+                            } else if (which == 3) {
+                                saveImage(extra);
                             }
                         }).show();
                     return true;
@@ -1031,9 +1018,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE); 
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200); 
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -2193,7 +2180,7 @@ private void showHistoryDialog() {
 
             holder.itemView.setOnClickListener(v -> {
                 switchToTab(position);
-                holder.itemView.getRootView().findViewById(android.R.id.content).performClick();
+                holder.itemView.getRootView().findViewById(android.R.id.content).performClick(); // Simulate dialog dismiss
             });
 
             holder.closeButton.setOnClickListener(v -> {
