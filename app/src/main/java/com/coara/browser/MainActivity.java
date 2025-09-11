@@ -645,10 +645,6 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }
-    } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
     }
     private void applyCombinedOptimizations(WebView webView) {
         String js = "javascript:(function(){" +
@@ -2669,4 +2665,6 @@ private void addHistory(String url, String title) {
             }
         }
     }
+}
+
 }
