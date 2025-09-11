@@ -553,6 +553,10 @@ public class MainActivity extends AppCompatActivity {
             WebView webView = createNewWebView();
             webView.setTag(id);
             webViews.add(webView);
+            if (id == currentTabId) {
+                currentTabIndex = webViews.size() - 1;
+            }
+            webViews.add(webView);
             if (id > maxId) maxId = id;
             if (id == currentTabId) {
                 webView.loadUrl(url);
@@ -610,24 +614,36 @@ public class MainActivity extends AppCompatActivity {
             tabCountTextView.setText(String.valueOf(webViews.size()));
         }
     }
+    
+    // sentinel チェックを filesDir を使うように変更
     private void checkSentinelAndClearTabsIfNecessary() {
-        File cacheDir = getCacheDir();
-        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        File filesDir = getFilesDir();
+        File sentinel = new File(filesDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
+            // sentinel が存在しない＝初回起動か、完全なアプリデータ消去後と判断する。
+            // ここではタブ関連のプリファレンスキー名を正しく消す（以前は誤ったキーを消していた）
             SharedPreferences.Editor editor = pref.edit();
             editor.remove(KEY_TABS);
-            editor.remove(KEY_CURRENT_TAB);
+            editor.remove(KEY_CURRENT_TAB_ID);
             editor.apply();
             webViews.clear();
         }
     }
+
+    }
+    
     private void ensureCacheSentinelExists() {
-        File cacheDir = getCacheDir();
-        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        File filesDir = getFilesDir();
+        File sentinel = new File(filesDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
             try {
                 sentinel.createNewFile();
             } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+ catch (IOException e) {
                 e.printStackTrace();
             }
         }
@@ -728,14 +744,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void preInitializeWebView() {
-        runOnUiThread(new Runnable() { @Override public void run() {
+        runOnUiThread(() -> {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
             String defaultUA = settings.getUserAgentString();
             settings.setUserAgentString(defaultUA + APPEND_STR);
             preloadedWebView = webView;
-            }
         });
     }
 
@@ -1012,7 +1027,11 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                urlEditText.setText(url);
+                try {
+                    if (view == getCurrentWebView()) {
+                        urlEditText.setText(url);
+                    }
+                } catch (Exception e) {}
                 super.onPageStarted(view, url, favicon);
             }
             @Override
@@ -1021,7 +1040,7 @@ public class MainActivity extends AppCompatActivity {
                   applyCombinedOptimizations(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
              view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
-             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() { @Override public void run() { injectLazyLoading(view); } }, 200);
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -1144,7 +1163,7 @@ public class MainActivity extends AppCompatActivity {
                 String currentUrl = view.getUrl();
                 if (currentUrl != null) {
                     faviconCache.put(currentUrl, icon);
-                    backgroundExecutor.execute(new Runnable() { @Override public void run() { saveFaviconToFile(currentUrl, icon); } });
+                    backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
                 }
             }
             @Override
@@ -1280,7 +1299,7 @@ public class MainActivity extends AppCompatActivity {
     private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(new Runnable() { @Override public void run() {
+            runOnUiThread(() -> {
                 try {
                     int commaIndex = base64Data.indexOf(",");
                     String pureBase64 = base64Data.substring(commaIndex + 1);
@@ -1478,7 +1497,7 @@ public class MainActivity extends AppCompatActivity {
     private class AndroidBridge {
     @JavascriptInterface
     public void onUrlChange(final String url) {
-        new Handler(Looper.getMainLooper()).post(new Runnable() { @Override public void run() { 
+        new Handler(Looper.getMainLooper()).post(() -> { 
             addHistory(url, getCurrentWebView().getTitle()); 
             if (url.startsWith("https://m.youtube.com/watch") ||
                 url.startsWith("https://chatgpt.com/") ||
@@ -1489,7 +1508,6 @@ public class MainActivity extends AppCompatActivity {
                 swipeRefreshLayout.setEnabled(true);
             }
             urlEditText.setText(url);
-            }
         });
     }
 }
