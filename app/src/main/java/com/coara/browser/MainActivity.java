@@ -1291,32 +1291,45 @@ public class MainActivity extends AppCompatActivity {
         return "blob_download_" + timeStamp + ext;
     }
 
+    
     private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(new Runnable() { @Override public void run() {
-                try {
-                    int commaIndex = base64Data.indexOf(",");
-                    String pureBase64 = base64Data.substring(commaIndex + 1);
-                    byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadDir.exists()) {
-                        downloadDir.mkdirs();
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        int commaIndex = base64Data.indexOf(",");
+                        String pureBase64 = base64Data.substring(commaIndex + 1);
+                        byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
+                        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        if (!downloadDir.exists()) {
+                            downloadDir.mkdirs();
+                        }
+                        File file = new File(downloadDir, fileName);
+                        FileOutputStream fos = new FileOutputStream(file);
+                        try {
+                            fos.write(data);
+                            fos.flush();
+                        } finally {
+                            try { fos.close(); } catch (Exception ignored) {}
+                        }
+                        Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     }
-                    File file = new File(downloadDir, fileName);
-                    try (FileOutputStream fos = new FileOutputStream(file)) {
-                        fos.write(data);
-                        fos.flush();
-                    }
-                    Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
             });
         }
+
         @JavascriptInterface
-        public void onBlobDownloadError(String errorMessage) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show());
+        public void onBlobDownloadError(final String errorMessage) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show();
+                }
+            });
         }
     }
 
@@ -2665,6 +2678,4 @@ private void addHistory(String url, String title) {
             }
         }
     }
-}
-
 }
