@@ -497,6 +497,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
+        synchronized (webViews) {
         JSONArray tabsArray = new JSONArray();
         for (WebView webView : webViews) {
             Object tag = webView.getTag();
@@ -556,7 +557,10 @@ public class MainActivity extends AppCompatActivity {
                 .putInt(KEY_CURRENT_TAB_ID, currentTabId)
                 .apply();
     }
+        }
+
     private void loadTabsState() {
+        synchronized (webViews) {
     String tabsJsonStr = pref.getString(KEY_TABS, "[]");
     int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
     try {
@@ -582,6 +586,7 @@ public class MainActivity extends AppCompatActivity {
                     e.printStackTrace();
                 }
             }
+            try { restoreCookiesForTab(id, url); } catch (Exception ignored) {}
             if (id > maxId) maxId = id;
             if (id == currentTabId) {
                 webView.loadUrl(url);
@@ -634,6 +639,8 @@ public class MainActivity extends AppCompatActivity {
     }
     updateTabCount();
 }
+        }
+
     private void updateTabCount() {
         if (tabCountTextView != null) {
             tabCountTextView.setText(String.valueOf(webViews.size()));
@@ -1235,6 +1242,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void closeTab(WebView webView) {
+        synchronized (webViews) {
         int index = webViews.indexOf(webView);
         if (index != -1) {
             Object tag = webView.getTag();
@@ -1257,14 +1265,20 @@ public class MainActivity extends AppCompatActivity {
                 } else if (currentTabIndex >= webViews.size()) {
                     currentTabIndex = webViews.size() - 1;
                 }
-                webViewContainer.removeAllViews();
-                webViewContainer.addView(getCurrentWebView());
-                updateTabCount();
+                runOnUiThread(() -> {
+                    try {
+                        webViewContainer.removeAllViews();
+                        webViewContainer.addView(getCurrentWebView());
+                        updateTabCount();
+                    } catch (Exception ignored) {}
+                });
             } else {
                 webView.loadUrl(START_PAGE);
             }
         }
 }
+
+        }
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
@@ -1850,6 +1864,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearTabs() {
+        synchronized (webViews) { {
         WebView current = getCurrentWebView();
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
@@ -1890,6 +1905,8 @@ public class MainActivity extends AppCompatActivity {
         webViewContainer.addView(current);
         updateTabCount();
 }
+        }
+
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
     int width = rootView.getWidth();
@@ -2754,5 +2771,59 @@ private void addHistory(String url, String title) {
                 url = itemView.findViewById(R.id.bookmarkUrl);
             }
         }
+    }
+
+    private void saveCookiesForTab(final int id, final String url) {
+        try {
+            if (id == -1 || url == null) return;
+            final CookieManager cm = CookieManager.getInstance();
+            final String cookie = cm.getCookie(url);
+            if (cookie == null) return;
+            backgroundExecutor.execute(() -> {
+                try {
+                    File out = new File(getFilesDir(), "tab_cookies_" + id + ".txt");
+                    try (FileOutputStream fos = new FileOutputStream(out)) {
+                        fos.write(cookie.getBytes("UTF-8"));
+                        fos.flush();
+                    }
+                    cm.flush();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void restoreCookiesForTab(final int id, final String url) {
+        try {
+            if (id == -1 || url == null) return;
+            File in = new File(getFilesDir(), "tab_cookies_" + id + ".txt");
+            if (!in.exists()) return;
+            String cookie = null;
+            try (FileInputStream fis = new FileInputStream(in)) {
+                byte[] data = new byte[(int) in.length()];
+                int r = fis.read(data);
+                if (r > 0) cookie = new String(data, "UTF-8");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            if (cookie != null) {
+                final String finalCookie = cookie;
+                runOnUiThread(() -> {
+                    try {
+                        CookieManager.getInstance().setCookie(url, finalCookie);
+                        CookieManager.getInstance().flush();
+                    } catch (Exception ignored) {}
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void safeDeleteFile(File f) {
+        try {
+            if (f != null && f.exists()) {
+                f.delete();
+            }
+        } catch (Exception ignored) {}
     }
 }
