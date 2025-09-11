@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 8;
+    private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "cache_sentinel.txt";
     public static final String EXTRA_CLEAR_HISTORY = "com.coara.browser.EXTRA_CLEAR_HISTORY";
@@ -2349,7 +2349,8 @@ private void showHistoryDialog() {
                         } else {
                             img.setImageDrawable(null);
                         }
-                        String t = w.getUrl();
+                        String t = w.getTitle();
+                        if (t == null || t.isEmpty()) t = w.getUrl();
                         if (t == null) t = "";
                         title.setText(shortTitle(t));
                         img.setAlpha(1f);
