@@ -130,7 +130,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 20;
+    private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "cache_sentinel.txt";
     public static final String EXTRA_CLEAR_HISTORY = "com.coara.browser.EXTRA_CLEAR_HISTORY";
@@ -614,7 +614,11 @@ public class MainActivity extends AppCompatActivity {
         File cacheDir = getCacheDir();
         File sentinel = new File(cacheDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
-            ensureCacheSentinelExists();
+            SharedPreferences.Editor editor = pref.edit();
+            editor.remove(KEY_TABS);
+            editor.remove(KEY_CURRENT_TAB);
+            editor.apply();
+            webViews.clear();
         }
     }
     private void ensureCacheSentinelExists() {
@@ -724,13 +728,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void preInitializeWebView() {
-        runOnUiThread(() -> {
+        runOnUiThread(new Runnable() { @Override public void run() {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
             String defaultUA = settings.getUserAgentString();
             settings.setUserAgentString(defaultUA + APPEND_STR);
             preloadedWebView = webView;
+            }
         });
     }
 
@@ -746,7 +751,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
-        webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
+        webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -1007,9 +1012,7 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                if (view == getCurrentWebView()) {
-                    urlEditText.setText(url);
-                }
+                urlEditText.setText(url);
                 super.onPageStarted(view, url, favicon);
             }
             @Override
@@ -1018,7 +1021,7 @@ public class MainActivity extends AppCompatActivity {
                   applyCombinedOptimizations(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
              view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);
+             new Handler(Looper.getMainLooper()).postDelayed(new Runnable() { @Override public void run() { injectLazyLoading(view); } }, 200);
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -1141,7 +1144,7 @@ public class MainActivity extends AppCompatActivity {
                 String currentUrl = view.getUrl();
                 if (currentUrl != null) {
                     faviconCache.put(currentUrl, icon);
-                    backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
+                    backgroundExecutor.execute(new Runnable() { @Override public void run() { saveFaviconToFile(currentUrl, icon); } });
                 }
             }
             @Override
@@ -1277,7 +1280,7 @@ public class MainActivity extends AppCompatActivity {
     private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(() -> {
+            runOnUiThread(new Runnable() { @Override public void run() {
                 try {
                     int commaIndex = base64Data.indexOf(",");
                     String pureBase64 = base64Data.substring(commaIndex + 1);
@@ -1473,32 +1476,20 @@ public class MainActivity extends AppCompatActivity {
       }
     }
     private class AndroidBridge {
-        private final WebView owner;
-        public AndroidBridge(WebView owner) {
-            this.owner = owner;
-        }
-        @JavascriptInterface
-        public void onUrlChange(final String url) {
-            new Handler(Looper.getMainLooper()).post(() -> {
-                WebView current = getCurrentWebView();
-                if (owner == current) {
-                    addHistory(url, owner.getTitle());
-                    if (url.startsWith("https://m.youtube.com/watch") ||
-                        url.startsWith("https://chatgpt.com/") ||
-                        url.startsWith("https://m.youtube.com/shorts/")) {
-                        swipeRefreshLayout.setEnabled(false);
-                    } else {
-                        swipeRefreshLayout.setEnabled(true);
-                    }
-                    urlEditText.setText(url);
-                } else {
-                }
-            });
-        }
-    } else {
+    @JavascriptInterface
+    public void onUrlChange(final String url) {
+        new Handler(Looper.getMainLooper()).post(new Runnable() { @Override public void run() { 
+            addHistory(url, getCurrentWebView().getTitle()); 
+            if (url.startsWith("https://m.youtube.com/watch") ||
+                url.startsWith("https://chatgpt.com/") ||
+                url.startsWith("https://365sns.f5.si/") ||
+                url.startsWith("https://m.youtube.com/shorts/")) {
+                swipeRefreshLayout.setEnabled(false);
+            } else {
                 swipeRefreshLayout.setEnabled(true);
             }
             urlEditText.setText(url);
+            }
         });
     }
 }
@@ -2191,7 +2182,7 @@ private void showHistoryDialog() {
 
             holder.itemView.setOnClickListener(v -> {
                 switchToTab(position);
-                holder.itemView.getRootView().findViewById(android.R.id.content).performClick(); // Simulate dialog dismiss
+                holder.itemView.getRootView().findViewById(android.R.id.content).performClick();
             });
 
             holder.closeButton.setOnClickListener(v -> {
