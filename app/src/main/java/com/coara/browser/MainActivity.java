@@ -753,6 +753,7 @@ public class MainActivity extends AppCompatActivity {
             String defaultUA = settings.getUserAgentString();
             settings.setUserAgentString(defaultUA + APPEND_STR);
             preloadedWebView = webView;
+        }
         });
     }
 
