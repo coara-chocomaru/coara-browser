@@ -553,10 +553,6 @@ public class MainActivity extends AppCompatActivity {
             WebView webView = createNewWebView();
             webView.setTag(id);
             webViews.add(webView);
-            if (id == currentTabId) {
-                currentTabIndex = webViews.size() - 1;
-            }
-            webViews.add(webView);
             if (id > maxId) maxId = id;
             if (id == currentTabId) {
                 webView.loadUrl(url);
@@ -614,14 +610,15 @@ public class MainActivity extends AppCompatActivity {
             tabCountTextView.setText(String.valueOf(webViews.size()));
         }
     }
-    
-    // sentinel チェックを filesDir を使うように変更
     private void checkSentinelAndClearTabsIfNecessary() {
         File filesDir = getFilesDir();
         File sentinel = new File(filesDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
-            // sentinel が存在しない＝初回起動か、完全なアプリデータ消去後と判断する。
-            // ここではタブ関連のプリファレンスキー名を正しく消す（以前は誤ったキーを消していた）
+            try {
+                sentinel.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             SharedPreferences.Editor editor = pref.edit();
             editor.remove(KEY_TABS);
             editor.remove(KEY_CURRENT_TAB_ID);
@@ -629,9 +626,6 @@ public class MainActivity extends AppCompatActivity {
             webViews.clear();
         }
     }
-
-    }
-    
     private void ensureCacheSentinelExists() {
         File filesDir = getFilesDir();
         File sentinel = new File(filesDir, SENTINEL_FILENAME);
@@ -642,8 +636,16 @@ public class MainActivity extends AppCompatActivity {
                 e.printStackTrace();
             }
         }
-    }
- catch (IOException e) {
+        File cacheDir = getCacheDir();
+        File cacheSentinel = new File(cacheDir, SENTINEL_FILENAME);
+        if (!cacheSentinel.exists()) {
+            try {
+                cacheSentinel.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    } catch (IOException e) {
                 e.printStackTrace();
             }
         }
@@ -1027,11 +1029,7 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                try {
-                    if (view == getCurrentWebView()) {
-                        urlEditText.setText(url);
-                    }
-                } catch (Exception e) {}
+                urlEditText.setText(url);
                 super.onPageStarted(view, url, favicon);
             }
             @Override
