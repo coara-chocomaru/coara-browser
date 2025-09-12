@@ -613,11 +613,6 @@ public class SecretActivity extends AppCompatActivity {
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-            } catch (Throwable t) {
-                try { clearAllSecretData(); } catch (Exception ignored) {}
-                finish();
-                return;
-            }
         } else {
             boolean found = false;
             for (int i = 0; i < webViews.size(); i++) {
@@ -1110,9 +1105,9 @@ public class SecretActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                   super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -2704,4 +2699,3 @@ private void addHistory(String url, String title) {
             }
         }
     }
-}
