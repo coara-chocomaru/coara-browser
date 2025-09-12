@@ -128,7 +128,7 @@ public class SecretActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/secret.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 8;
+    private static final int MAX_TABS = 1;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "secret_cache_sentinel.txt";
     private static Method sSetSaveFormDataMethod;
@@ -282,17 +282,13 @@ public class SecretActivity extends AppCompatActivity {
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
-        if (pref.contains(KEY_TABS)) {
-            loadTabsState();
-        } else {
-            WebView initialWebView = createNewWebView();
+        WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-        }
         updateTabCount();
         boolean shouldClear = getIntent()
             .getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
@@ -482,10 +478,18 @@ public class SecretActivity extends AppCompatActivity {
     private void handleIntent(Intent intent) {
         if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
             Uri data = intent.getData();
+            clearTabs();
+            historyItems.clear();
+            WebStorage.getInstance().deleteAllData();
+            CookieManager cookieManager = CookieManager.getInstance();
+            cookieManager.removeAllCookies(null);
+            cookieManager.flush();
             if (data != null) {
                 String url = data.toString();
                 createNewTab(url);
-                getCurrentWebView().setTag("external");
+                if (!webViews.isEmpty()) {
+                    getCurrentWebView().setTag("external");
+                }
             }
             setIntent(new Intent());
         }
@@ -1450,31 +1454,48 @@ public class SecretActivity extends AppCompatActivity {
         });
     }
     private void createNewTab() {
-        if (webViews.size() >= MAX_TABS) {
-            WebView removed = webViews.remove(0);
-            removed.destroy();
-            if (currentTabIndex > 0) {
-                currentTabIndex--;
+        if (webViews.isEmpty()) {
+            WebView newWebView = createNewWebView();
+            newWebView.setTag(nextTabId++);
+            webViews.add(newWebView);
+            currentTabIndex = 0;
+            webViewContainer.removeAllViews();
+            webViewContainer.addView(newWebView);
+            newWebView.loadUrl(START_PAGE);
+            updateTabCount();
+        } else {
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                try { current.stopLoading(); } catch (Exception ignored) {}
+                try { current.clearHistory(); } catch (Exception ignored) {}
+                current.loadUrl(START_PAGE);
+                webViewContainer.removeAllViews();
+                webViewContainer.addView(current);
+                currentTabIndex = 0;
+                updateTabCount();
             }
         }
-        WebView newWebView = createNewWebView();
-        newWebView.setTag(nextTabId);
-        nextTabId++;
-        webViews.add(newWebView);
-        updateTabCount();
-        switchToTab(webViews.size() - 1);
-        getCurrentWebView().loadUrl(START_PAGE);
     }
     private void createNewTab(String url) {
-        if (webViews.size() >= MAX_TABS) {
-            Toast.makeText(this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
-            return;
+        if (webViews.isEmpty()) {
+            WebView newWebView = createNewWebView();
+            newWebView.setTag(nextTabId++);
+            webViews.add(newWebView);
+            currentTabIndex = 0;
+            webViewContainer.removeAllViews();
+            webViewContainer.addView(newWebView);
+            newWebView.loadUrl(url);
+            updateTabCount();
+        } else {
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                try { current.stopLoading(); } catch (Exception ignored) {}
+                try { current.clearHistory(); } catch (Exception ignored) {}
+                current.loadUrl(url);
+                urlEditText.setText(url);
+                updateTabCount();
+            }
         }
-        WebView newWebView = createNewWebView();
-        webViews.add(newWebView);
-        updateTabCount();
-        switchToTab(webViews.size() - 1);
-        newWebView.loadUrl(url);
     }
 
     private void switchToTab(int index) {
