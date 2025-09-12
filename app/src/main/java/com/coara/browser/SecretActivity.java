@@ -2682,7 +2682,6 @@ private void addHistory(String url, String title) {
     }
 }
 
-
 private void updateTabCount() {
         if (tabCountTextView != null) {
             tabCountTextView.setText(String.valueOf(webViews.size()));
