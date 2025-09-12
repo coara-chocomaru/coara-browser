@@ -3,11 +3,11 @@ name: Build
 on:
   push:
     branches:
-      - test2
+      - main2
   pull_request:
   
     branches:
-      - test2
+      - main2
 permissions:
   contents: read
 
