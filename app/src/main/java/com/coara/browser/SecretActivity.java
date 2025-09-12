@@ -109,10 +109,6 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 public class SecretActivity extends AppCompatActivity {
-    private static volatile boolean DATA_DIR_SUFFIX_SET = false;
-    private static final Object DATA_DIR_LOCK = new Object();
-    private static String DATA_DIR_SUFFIX = "SecretActivity";
-
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|yahoo|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "SecretBrowserPrefs";
@@ -132,7 +128,7 @@ public class SecretActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/secret.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 6;
+    private static final int MAX_TABS = 8;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "secret_cache_sentinel.txt";
     private static Method sSetSaveFormDataMethod;
@@ -231,19 +227,7 @@ public class SecretActivity extends AppCompatActivity {
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            synchronized (DATA_DIR_LOCK) {
-                if (!DATA_DIR_SUFFIX_SET) {
-                    try {
-                        WebView.setDataDirectorySuffix(DATA_DIR_SUFFIX);
-                        DATA_DIR_SUFFIX_SET = true;
-                    } catch (Throwable ignored) {
-                        DATA_DIR_SUFFIX_SET = true;
-                    }
-                }
-            }
-        }
-        super.onCreate(savedInstanceState);
+    super.onCreate(savedInstanceState);
     setContentView(R.layout.secret_main);
 
     toolbar = findViewById(R.id.topAppBar);
@@ -282,6 +266,7 @@ public class SecretActivity extends AppCompatActivity {
         cookieManager.removeAllCookies(null);
         cookieManager.flush();
         loadBookmarks();
+        loadHistory();
         if (!historyItems.isEmpty()) {
             currentHistoryIndex = historyItems.size() - 1;
         }
@@ -297,20 +282,17 @@ public class SecretActivity extends AppCompatActivity {
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
-        try {
+        if (pref.contains(KEY_TABS)) {
+            loadTabsState();
+        } else {
             WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
-
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-            } catch (Throwable t) {
-                try { clearAllSecretData(); } catch (Exception ignored) {}
-                finish();
-                return;
-            }
+        }
         updateTabCount();
         boolean shouldClear = getIntent()
             .getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
@@ -448,48 +430,6 @@ public class SecretActivity extends AppCompatActivity {
        });
     }
 
-    
-    private void clearAllSecretData() {
-        try {
-            for (WebView w : new ArrayList<>(webViews)) {
-                try {
-                    w.clearHistory();
-                    w.clearCache(true);
-                    w.clearFormData();
-                    w.loadUrl("about:blank");
-                    w.stopLoading();
-                    w.removeAllViews();
-                    w.destroy();
-                } catch (Exception ignored) {}
-            }
-            webViews.clear();
-            webViewContainer.removeAllViews();
-            currentTabIndex = 0;
-            nextTabId = 0;
-            historyItems.clear();
-            WebStorage.getInstance().deleteAllData();
-            WebViewDatabase db = WebViewDatabase.getInstance(SecretActivity.this);
-            try { db.clearFormData(); } catch (Exception ignored) {}
-            try { db.clearHttpAuthUsernamePassword(); } catch (Exception ignored) {}
-            CookieManager cookieManager = CookieManager.getInstance();
-            try { cookieManager.removeAllCookies(null); } catch (Exception ignored) {}
-            try { cookieManager.flush(); } catch (Exception ignored) {}
-            pref.edit().remove(KEY_TABS).remove(KEY_HISTORY).apply();
-            File dir = getFilesDir();
-            if (dir != null && dir.isDirectory()) {
-                File[] files = dir.listFiles();
-                if (files != null) {
-                    for (File f : files) {
-                        String n = f.getName();
-                        if (n.startsWith("tab_state_") || n.startsWith("tab_snapshot_")) {
-                            try { f.delete(); } catch (Exception ignored) {}
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-    }
-
     private void clear0() {
         WebView webView = getCurrentWebView();
     if (webView != null) {
@@ -540,22 +480,20 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void handleIntent(Intent intent) {
-        if (intent == null) return;
-        boolean fromMain = intent.getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false) || intent.getBooleanExtra("from_main", false);
-        if (fromMain) {
-            boolean shouldClear = intent.getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
-            if (shouldClear) {
-                clearAllSecretData();
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+            Uri data = intent.getData();
+            if (data != null) {
+                String url = data.toString();
+                createNewTab(url);
+                getCurrentWebView().setTag("external");
             }
             setIntent(new Intent());
-        } else {
         }
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        try { clearAllSecretData(); } catch (Exception ignored) {}
         handleIntent(intent);
     }
 
@@ -572,66 +510,101 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
-        
+        JSONArray tabsArray = new JSONArray();
+        for (WebView webView : webViews) {
+            int id = (int) webView.getTag();
+            String url = webView.getUrl();
+            if (url == null) url = "";
+            JSONObject tabObj = new JSONObject();
+            try {
+                tabObj.put("id", id);
+                tabObj.put("url", url);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            tabsArray.put(tabObj);
+            Bundle state = new Bundle();
+            webView.saveState(state);
+            saveBundleToFile(state, "tab_state_" + id + ".dat");
+        }
+        int currentTabId = (int) getCurrentWebView().getTag();
+        pref.edit()
+            .putString(KEY_TABS, tabsArray.toString())
+            .putInt(KEY_CURRENT_TAB_ID, currentTabId)
+            .apply();
     }
-
     private void loadTabsState() {
-        String tabsJsonStr = pref.getString(KEY_TABS, "[]");
-        int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
-        try {
-            JSONArray tabsArray = new JSONArray(tabsJsonStr);
-            webViews.clear();
-            webViewContainer.removeAllViews();
-            int maxId = 0;
-            for (int i = 0; i < tabsArray.length(); i++) {
-                JSONObject tabObj = tabsArray.getJSONObject(i);
-                int id = tabObj.getInt("id");
-                String url = tabObj.optString("url", START_PAGE);
-                WebView webView = createNewWebView();
-                webView.setTag(id);
-                webViews.add(webView);
-                if (id > maxId) maxId = id;
-            }
-            nextTabId = maxId + 1;
-            if (webViews.isEmpty()) {
-                WebView initialWebView = createNewWebView();
-                initialWebView.setTag(nextTabId++);
-                webViews.add(initialWebView);
-                currentTabIndex = 0;
-                webViewContainer.addView(initialWebView);
-                initialWebView.loadUrl(START_PAGE);
+    String tabsJsonStr = pref.getString(KEY_TABS, "[]");
+    int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
+    try {
+        JSONArray tabsArray = new JSONArray(tabsJsonStr);
+        webViews.clear();
+        webViewContainer.removeAllViews();
+        int maxId = 0;
+        for (int i = 0; i < tabsArray.length(); i++) {
+            JSONObject tabObj = tabsArray.getJSONObject(i);
+            int id = tabObj.getInt("id");
+            String url = tabObj.getString("url");
+            WebView webView = createNewWebView();
+            webView.setTag(id);
+            webViews.add(webView);
+            if (id > maxId) maxId = id;
+            if (id == currentTabId) {
+                webView.loadUrl(url);
             } else {
-                boolean found = false;
-                for (int i = 0; i < webViews.size(); i++) {
-                    if ((int) webViews.get(i).getTag() == currentTabId) {
-                        currentTabIndex = i;
-                        found = true;
-                        break;
+                Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
+                if (state != null) {
+                    WebBackForwardList restored = webView.restoreState(state);
+                    if (restored == null) {
+                        webView.loadUrl(url);
                     }
+                } else {
+                    webView.loadUrl(url);
                 }
-                if (!found) {
-                    currentTabIndex = 0;
-                }
-                webViewContainer.addView(getCurrentWebView());
             }
-        } catch (JSONException e) {
-            e.printStackTrace();
+        }
+        nextTabId = maxId + 1;
+        if (webViews.isEmpty()) {
             WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId++);
-            webViews.clear();
+            initialWebView.setTag(nextTabId);
+            nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
-            webViewContainer.removeAllViews();
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-        } catch (Throwable t) {
-            try { clearAllSecretData(); } catch (Exception ignored) {}
-            finish();
-            return;
-        updateTabCount();
+        } else {
+            boolean found = false;
+            for (int i = 0; i < webViews.size(); i++) {
+                if ((int) webViews.get(i).getTag() == currentTabId) {
+                    currentTabIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                currentTabIndex = 0;
+            }
+            webViewContainer.addView(getCurrentWebView());
+        }
+    } catch (JSONException e) {
+        e.printStackTrace();
+        WebView initialWebView = createNewWebView();
+        initialWebView.setTag(nextTabId);
+        nextTabId++;
+        webViews.clear();
+        webViews.add(initialWebView);
+        currentTabIndex = 0;
+        webViewContainer.removeAllViews();
+        webViewContainer.addView(initialWebView);
+        initialWebView.loadUrl(START_PAGE);
     }
-
-    
+    updateTabCount();
+}
+    private void updateTabCount() {
+        if (tabCountTextView != null) {
+            tabCountTextView.setText(String.valueOf(webViews.size()));
+        }
+    }
     private void checkSentinelAndClearTabsIfNecessary() {
     File cacheDir = getCacheDir();
     File sentinel = new File(cacheDir, SENTINEL_FILENAME);
@@ -2678,12 +2651,6 @@ private void addHistory(String url, String title) {
                 title = itemView.findViewById(R.id.bookmarkTitle);
                 url = itemView.findViewById(R.id.bookmarkUrl);
             }
-        }
-    }
-
-private void updateTabCount() {
-        if (tabCountTextView != null) {
-            tabCountTextView.setText(String.valueOf(webViews.size()));
         }
     }
 }
