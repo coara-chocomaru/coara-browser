@@ -10,7 +10,7 @@ android {
         minSdk = 24
         targetSdk = 30
         versionCode = 220
-        versionName = "4.2.2"
+        versionName = "4.2.3"
         multiDexEnabled = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
     }
