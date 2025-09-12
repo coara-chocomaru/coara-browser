@@ -128,7 +128,7 @@ public class SecretActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/secret.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 8;
+    private static final int MAX_TABS = 4;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "secret_cache_sentinel.txt";
     private static Method sSetSaveFormDataMethod;
@@ -227,7 +227,10 @@ public class SecretActivity extends AppCompatActivity {
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
-    super.onCreate(savedInstanceState);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WebView.setDataDirectorySuffix("SecretActivity");
+        }
+        super.onCreate(savedInstanceState);
     setContentView(R.layout.secret_main);
 
     toolbar = findViewById(R.id.topAppBar);
@@ -266,7 +269,6 @@ public class SecretActivity extends AppCompatActivity {
         cookieManager.removeAllCookies(null);
         cookieManager.flush();
         loadBookmarks();
-        loadHistory();
         if (!historyItems.isEmpty()) {
             currentHistoryIndex = historyItems.size() - 1;
         }
@@ -282,17 +284,13 @@ public class SecretActivity extends AppCompatActivity {
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
-        if (pref.contains(KEY_TABS)) {
-            loadTabsState();
-        } else {
-            WebView initialWebView = createNewWebView();
+        WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-        }
         updateTabCount();
         boolean shouldClear = getIntent()
             .getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
@@ -430,6 +428,48 @@ public class SecretActivity extends AppCompatActivity {
        });
     }
 
+    
+    private void clearAllSecretData() {
+        try {
+            for (WebView w : new ArrayList<>(webViews)) {
+                try {
+                    w.clearHistory();
+                    w.clearCache(true);
+                    w.clearFormData();
+                    w.loadUrl("about:blank");
+                    w.stopLoading();
+                    w.removeAllViews();
+                    w.destroy();
+                } catch (Exception ignored) {}
+            }
+            webViews.clear();
+            webViewContainer.removeAllViews();
+            currentTabIndex = 0;
+            nextTabId = 0;
+            historyItems.clear();
+            WebStorage.getInstance().deleteAllData();
+            WebViewDatabase db = WebViewDatabase.getInstance(SecretActivity.this);
+            try { db.clearFormData(); } catch (Exception ignored) {}
+            try { db.clearHttpAuthUsernamePassword(); } catch (Exception ignored) {}
+            CookieManager cookieManager = CookieManager.getInstance();
+            try { cookieManager.removeAllCookies(null); } catch (Exception ignored) {}
+            try { cookieManager.flush(); } catch (Exception ignored) {}
+            pref.edit().remove(KEY_TABS).remove(KEY_HISTORY).apply();
+            File dir = getFilesDir();
+            if (dir != null && dir.isDirectory()) {
+                File[] files = dir.listFiles();
+                if (files != null) {
+                    for (File f : files) {
+                        String n = f.getName();
+                        if (n.startsWith("tab_state_") || n.startsWith("tab_snapshot_")) {
+                            try { f.delete(); } catch (Exception ignored) {}
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void clear0() {
         WebView webView = getCurrentWebView();
     if (webView != null) {
@@ -480,20 +520,22 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void handleIntent(Intent intent) {
-        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
-            Uri data = intent.getData();
-            if (data != null) {
-                String url = data.toString();
-                createNewTab(url);
-                getCurrentWebView().setTag("external");
+        if (intent == null) return;
+        boolean fromMain = intent.getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false) || intent.getBooleanExtra("from_main", false);
+        if (fromMain) {
+            boolean shouldClear = intent.getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
+            if (shouldClear) {
+                clearAllSecretData();
             }
             setIntent(new Intent());
+        } else {
         }
     }
 
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        clearAllSecretData();
         handleIntent(intent);
     }
 
@@ -510,28 +552,7 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
-        JSONArray tabsArray = new JSONArray();
-        for (WebView webView : webViews) {
-            int id = (int) webView.getTag();
-            String url = webView.getUrl();
-            if (url == null) url = "";
-            JSONObject tabObj = new JSONObject();
-            try {
-                tabObj.put("id", id);
-                tabObj.put("url", url);
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-            tabsArray.put(tabObj);
-            Bundle state = new Bundle();
-            webView.saveState(state);
-            saveBundleToFile(state, "tab_state_" + id + ".dat");
-        }
-        int currentTabId = (int) getCurrentWebView().getTag();
-        pref.edit()
-            .putString(KEY_TABS, tabsArray.toString())
-            .putInt(KEY_CURRENT_TAB_ID, currentTabId)
-            .apply();
+        
     }
     private void loadTabsState() {
     String tabsJsonStr = pref.getString(KEY_TABS, "[]");
