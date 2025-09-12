@@ -631,11 +631,7 @@ public class SecretActivity extends AppCompatActivity {
         updateTabCount();
     }
 
-    private void updateTabCount() {
-        if (tabCountTextView != null) {
-            tabCountTextView.setText(String.valueOf(webViews.size()));
-        }
-    }
+    
     private void checkSentinelAndClearTabsIfNecessary() {
     File cacheDir = getCacheDir();
     File sentinel = new File(cacheDir, SENTINEL_FILENAME);
@@ -2685,4 +2681,11 @@ private void addHistory(String url, String title) {
         }
     }
 }
+
+
+private void updateTabCount() {
+        if (tabCountTextView != null) {
+            tabCountTextView.setText(String.valueOf(webViews.size()));
+        }
+    }
 }
