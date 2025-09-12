@@ -1558,38 +1558,33 @@ public class MainActivity extends AppCompatActivity {
       }
     }
     private class AndroidBridge {
-    private final WebView owner;
-    public AndroidBridge(WebView owner) {
-        this.owner = owner;
-    }
-    @JavascriptInterface
-    public void onUrlChange(final String url) {
-        new Handler(Looper.getMainLooper()).post(() -> {
-            try {
-                if (owner == getCurrentWebView()) {
-                    if (url.startsWith("https://m.youtube.com/watch") ||
-                        url.startsWith("https://chatgpt.com/") ||
-                        url.startsWith("https://365sns.f5.si/") ||
-                        url.startsWith("https://m.youtube.com/shorts/")) {
-                        swipeRefreshLayout.setEnabled(false);
-                    } else {
-                        swipeRefreshLayout.setEnabled(true);
-                    }
-                    urlEditText.setText(url);
-                    addHistory(url, owner.getTitle());
-                } else {
-                    // Do not modify the URL bar or visible UI for background tabs.
+        private final WebView owner;
+        public AndroidBridge(WebView owner) {
+            this.owner = owner;
+        }
+        @JavascriptInterface
+        public void onUrlChange(final String url) {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (owner == getCurrentWebView()) {
+                            if (url.startsWith("https://m.youtube.com/watch") ||
+                                url.startsWith("https://chatgpt.com/") ||
+                                url.startsWith("https://365sns.f5.si/") ||
+                                url.startsWith("https://m.youtube.com/shorts/")) {
+                                swipeRefreshLayout.setEnabled(false);
+                            } else {
+                                swipeRefreshLayout.setEnabled(true);
+                            }
+                            urlEditText.setText(url);
+                            addHistory(url, owner.getTitle());
+                        }
+                    } catch (Exception ignored) {}
                 }
-            } catch (Exception ignored) {}
-        });
+            });
+        }
     }
-} else {
-                swipeRefreshLayout.setEnabled(true);
-            }
-            urlEditText.setText(url);
-        });
-    }
-}
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
