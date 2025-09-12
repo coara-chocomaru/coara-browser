@@ -574,78 +574,63 @@ public class SecretActivity extends AppCompatActivity {
     private void saveTabsState() {
         
     }
+
     private void loadTabsState() {
-    String tabsJsonStr = pref.getString(KEY_TABS, "[]");
-    int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
-    try {
-        JSONArray tabsArray = new JSONArray(tabsJsonStr);
-        webViews.clear();
-        webViewContainer.removeAllViews();
-        int maxId = 0;
-        for (int i = 0; i < tabsArray.length(); i++) {
-            JSONObject tabObj = tabsArray.getJSONObject(i);
-            int id = tabObj.getInt("id");
-            String url = tabObj.getString("url");
-            WebView webView = createNewWebView();
-            webView.setTag(id);
-            webViews.add(webView);
-            if (id > maxId) maxId = id;
-            if (id == currentTabId) {
-                webView.loadUrl(url);
-            } else {
-                Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                if (state != null) {
-                    WebBackForwardList restored = webView.restoreState(state);
-                    if (restored == null) {
-                        webView.loadUrl(url);
-                    }
-                } else {
-                    webView.loadUrl(url);
-                }
+        String tabsJsonStr = pref.getString(KEY_TABS, "[]");
+        int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
+        try {
+            JSONArray tabsArray = new JSONArray(tabsJsonStr);
+            webViews.clear();
+            webViewContainer.removeAllViews();
+            int maxId = 0;
+            for (int i = 0; i < tabsArray.length(); i++) {
+                JSONObject tabObj = tabsArray.getJSONObject(i);
+                int id = tabObj.getInt("id");
+                String url = tabObj.optString("url", START_PAGE);
+                WebView webView = createNewWebView();
+                webView.setTag(id);
+                webViews.add(webView);
+                if (id > maxId) maxId = id;
             }
-        }
-        nextTabId = maxId + 1;
-        if (webViews.isEmpty()) {
+            nextTabId = maxId + 1;
+            if (webViews.isEmpty()) {
+                WebView initialWebView = createNewWebView();
+                initialWebView.setTag(nextTabId++);
+                webViews.add(initialWebView);
+                currentTabIndex = 0;
+                webViewContainer.addView(initialWebView);
+                initialWebView.loadUrl(START_PAGE);
+            } else {
+                boolean found = false;
+                for (int i = 0; i < webViews.size(); i++) {
+                    if ((int) webViews.get(i).getTag() == currentTabId) {
+                        currentTabIndex = i;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    currentTabIndex = 0;
+                }
+                webViewContainer.addView(getCurrentWebView());
+            }
+        } catch (JSONException e) {
+            e.printStackTrace();
             WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId);
-            nextTabId++;
+            initialWebView.setTag(nextTabId++);
+            webViews.clear();
             webViews.add(initialWebView);
             currentTabIndex = 0;
+            webViewContainer.removeAllViews();
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
-        } else {
-            boolean found = false;
-            for (int i = 0; i < webViews.size(); i++) {
-                if ((int) webViews.get(i).getTag() == currentTabId) {
-                    currentTabIndex = i;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                currentTabIndex = 0;
-            }
-            webViewContainer.addView(getCurrentWebView());
-        }
-    } catch (JSONException e) {
-        e.printStackTrace();
-        WebView initialWebView = createNewWebView();
-        initialWebView.setTag(nextTabId);
-        nextTabId++;
-        webViews.clear();
-        webViews.add(initialWebView);
-        currentTabIndex = 0;
-        webViewContainer.removeAllViews();
-        webViewContainer.addView(initialWebView);
-        initialWebView.loadUrl(START_PAGE);
-            } catch (Throwable t) {
-                try { clearAllSecretData(); } catch (Exception ignored) {}
-                finish();
-                return;
-            }
+        } catch (Throwable t) {
+            try { clearAllSecretData(); } catch (Exception ignored) {}
+            finish();
+            return;
+        updateTabCount();
     }
-    updateTabCount();
-}
+
     private void updateTabCount() {
         if (tabCountTextView != null) {
             tabCountTextView.setText(String.valueOf(webViews.size()));
@@ -1105,9 +1090,9 @@ public class SecretActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                   super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -2699,3 +2684,5 @@ private void addHistory(String url, String title) {
             }
         }
     }
+}
+}
