@@ -628,6 +628,7 @@ public class SecretActivity extends AppCompatActivity {
             try { clearAllSecretData(); } catch (Exception ignored) {}
             finish();
             return;
+        }
         updateTabCount();
     }
 
@@ -2680,7 +2681,6 @@ private void addHistory(String url, String title) {
             }
         }
     }
-}
 
 private void updateTabCount() {
         if (tabCountTextView != null) {
