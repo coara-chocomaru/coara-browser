@@ -109,6 +109,10 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 public class SecretActivity extends AppCompatActivity {
+    private static volatile boolean DATA_DIR_SUFFIX_SET = false;
+    private static final Object DATA_DIR_LOCK = new Object();
+    private static String DATA_DIR_SUFFIX = "SecretActivity";
+
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|yahoo|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "SecretBrowserPrefs";
@@ -128,7 +132,7 @@ public class SecretActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     private static final String START_PAGE = "file:///android_asset/secret.html";
     private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 4;
+    private static final int MAX_TABS = 6;
     private static final int MAX_HISTORY_SIZE = 100;
     private static final String SENTINEL_FILENAME = "secret_cache_sentinel.txt";
     private static Method sSetSaveFormDataMethod;
@@ -228,7 +232,16 @@ public class SecretActivity extends AppCompatActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            WebView.setDataDirectorySuffix("SecretActivity");
+            synchronized (DATA_DIR_LOCK) {
+                if (!DATA_DIR_SUFFIX_SET) {
+                    try {
+                        WebView.setDataDirectorySuffix(DATA_DIR_SUFFIX);
+                        DATA_DIR_SUFFIX_SET = true;
+                    } catch (Throwable ignored) {
+                        DATA_DIR_SUFFIX_SET = true;
+                    }
+                }
+            }
         }
         super.onCreate(savedInstanceState);
     setContentView(R.layout.secret_main);
@@ -284,13 +297,20 @@ public class SecretActivity extends AppCompatActivity {
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
-        WebView initialWebView = createNewWebView();
+        try {
+            WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
+
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
+            } catch (Throwable t) {
+                try { clearAllSecretData(); } catch (Exception ignored) {}
+                finish();
+                return;
+            }
         updateTabCount();
         boolean shouldClear = getIntent()
             .getBooleanExtra(MainActivity.EXTRA_CLEAR_HISTORY, false);
@@ -535,7 +555,7 @@ public class SecretActivity extends AppCompatActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        clearAllSecretData();
+        try { clearAllSecretData(); } catch (Exception ignored) {}
         handleIntent(intent);
     }
 
@@ -593,6 +613,11 @@ public class SecretActivity extends AppCompatActivity {
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
+            } catch (Throwable t) {
+                try { clearAllSecretData(); } catch (Exception ignored) {}
+                finish();
+                return;
+            }
         } else {
             boolean found = false;
             for (int i = 0; i < webViews.size(); i++) {
@@ -618,6 +643,11 @@ public class SecretActivity extends AppCompatActivity {
         webViewContainer.removeAllViews();
         webViewContainer.addView(initialWebView);
         initialWebView.loadUrl(START_PAGE);
+            } catch (Throwable t) {
+                try { clearAllSecretData(); } catch (Exception ignored) {}
+                finish();
+                return;
+            }
     }
     updateTabCount();
 }
