@@ -801,7 +801,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
-        webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
+        webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -1062,7 +1062,7 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                urlEditText.setText(url);
+                if (view == getCurrentWebView()) { urlEditText.setText(url); }
                 super.onPageStarted(view, url, favicon);
             }
             @Override
@@ -1558,16 +1558,32 @@ public class MainActivity extends AppCompatActivity {
       }
     }
     private class AndroidBridge {
+    private final WebView owner;
+    public AndroidBridge(WebView owner) {
+        this.owner = owner;
+    }
     @JavascriptInterface
     public void onUrlChange(final String url) {
-        new Handler(Looper.getMainLooper()).post(() -> { 
-            addHistory(url, getCurrentWebView().getTitle()); 
-            if (url.startsWith("https://m.youtube.com/watch") ||
-                url.startsWith("https://chatgpt.com/") ||
-                url.startsWith("https://365sns.f5.si/") ||
-                url.startsWith("https://m.youtube.com/shorts/")) {
-                swipeRefreshLayout.setEnabled(false);
-            } else {
+        new Handler(Looper.getMainLooper()).post(() -> {
+            try {
+                if (owner == getCurrentWebView()) {
+                    if (url.startsWith("https://m.youtube.com/watch") ||
+                        url.startsWith("https://chatgpt.com/") ||
+                        url.startsWith("https://365sns.f5.si/") ||
+                        url.startsWith("https://m.youtube.com/shorts/")) {
+                        swipeRefreshLayout.setEnabled(false);
+                    } else {
+                        swipeRefreshLayout.setEnabled(true);
+                    }
+                    urlEditText.setText(url);
+                    addHistory(url, owner.getTitle());
+                } else {
+                    // Do not modify the URL bar or visible UI for background tabs.
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+} else {
                 swipeRefreshLayout.setEnabled(true);
             }
             urlEditText.setText(url);
