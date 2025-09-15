@@ -47,6 +47,7 @@ import android.webkit.WebViewDatabase;
 import android.webkit.HttpAuthHandler;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
+import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.PermissionRequest;
