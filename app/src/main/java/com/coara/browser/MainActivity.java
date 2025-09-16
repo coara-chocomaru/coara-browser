@@ -2522,8 +2522,12 @@ private void showHistoryDialog() {
             return s;
         }
         private int dpToPx(int dp) {
-            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
-        }
+        return (int) TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp,
+            getResources().getDisplayMetrics()
+         );
+       }
         private Bitmap roundedCorner(Bitmap src, int radius) {
             if (src == null) return null;
             Bitmap output = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
