@@ -1544,7 +1544,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.main_menu, menu);
+        getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
         menu.findItem(R.id.action_zoom_toggle).setChecked(zoomEnabled);
         menu.findItem(R.id.action_js).setChecked(jsEnabled);
         menu.findItem(R.id.action_img).setChecked(imgBlockEnabled);
