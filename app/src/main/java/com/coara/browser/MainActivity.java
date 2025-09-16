@@ -1250,8 +1250,7 @@ public class MainActivity extends AppCompatActivity {
         int index = webViews.indexOf(webView);
         if (index != -1) {
             Object tag = webView.getTag();
-            int id = -1;
-            if (tag instanceof Integer) id = (Integer) tag;
+            final int id = (tag instanceof Integer) ? (Integer) tag : -1;
             if (webViews.size() > 1) {
                 webViews.remove(index);
                 Bitmap bm = tabSnapshots.remove(webView);
@@ -1886,8 +1885,7 @@ public class MainActivity extends AppCompatActivity {
             if (i != currentTabIndex) {
                 WebView w = webViews.get(i);
                 Object tag = w.getTag();
-                int id = -1;
-                if (tag instanceof Integer) id = (Integer) tag;
+                final int id = (tag instanceof Integer) ? (Integer) tag : -1;
                 Bitmap bm = tabSnapshots.remove(w);
                 if (bm != null && !bm.isRecycled()) {
                     try { bm.recycle(); } catch (Exception ignored) {}
@@ -2645,8 +2643,7 @@ private void showHistoryDialog() {
     private void captureTabSnapshot(WebView webView) {
         if (webView == null) return;
         Object tag = webView.getTag();
-        int id = -1;
-        if (tag instanceof Integer) id = (Integer) tag;
+        final int id = (tag instanceof Integer) ? (Integer) tag : -1;
         int w = webView.getWidth();
         int h = webView.getHeight();
         if (w <= 0 || h <= 0) return;
