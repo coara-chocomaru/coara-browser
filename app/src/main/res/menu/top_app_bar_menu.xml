@@ -8,7 +8,7 @@
         <item android:title="ブックマーク管理">
             <menu>
                 <item
-                    android:id="@+id/action_bookmark_management"
+                    android:id="@+id/action_bookmarks"
                     android:title="ブックマーク" />
                 <item
                     android:id="@+id/action_export"
@@ -69,3 +69,4 @@
     </group>
 
 </menu>
+
