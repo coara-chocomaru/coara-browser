@@ -2255,7 +2255,6 @@ private void showHistoryDialog() {
         closeAll.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
         closeAll.setBackgroundColor(Color.TRANSPARENT);
         closeAll.setOnClickListener(v -> {
-            // close dialog handled below
         });
         header.addView(closeAll, new LinearLayout.LayoutParams(dpToPx(44), dpToPx(44)));
         card.addView(header);
@@ -2522,7 +2521,9 @@ private void showHistoryDialog() {
             if (s.length() > 32) return s.substring(0, 29) + "...";
             return s;
         }
-
+        private int dpToPx(int dp) {
+            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+        }
         private Bitmap roundedCorner(Bitmap src, int radius) {
             if (src == null) return null;
             Bitmap output = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
