@@ -37,6 +37,7 @@ import android.view.ViewGroup;
 import android.view.animation.AlphaAnimation;
 import android.view.animation.Animation;
 import android.view.animation.DecelerateInterpolator;
+import android.view.animation.RotateAnimation;
 import android.view.animation.ScaleAnimation;
 import android.view.animation.TranslateAnimation;
 import android.view.inputmethod.EditorInfo;
@@ -74,6 +75,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
 import androidx.core.content.ContextCompat;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
@@ -476,7 +478,9 @@ public class MainActivity extends AppCompatActivity {
         String action = intent.getAction();
         String type = intent.getType();
 
-        if (Intent.ACTION_VIEW.equals(action)) {
+        if (Intent.ACTION_MAIN.equals(action)) {
+            createNewTab(START_PAGE);
+        } else if (Intent.ACTION_VIEW.equals(action)) {
             Uri data = intent.getData();
             if (data != null) {
                 String url = data.toString();
@@ -504,12 +508,50 @@ public class MainActivity extends AppCompatActivity {
                 if (imageUri != null) {
                     createNewTab(imageUri.toString());
                 }
+            } else if (type.startsWith("video/")) {
+                Uri videoUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (videoUri != null) {
+                    createNewTab(videoUri.toString());
+                }
+            } else if (type.startsWith("audio/")) {
+                Uri audioUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (audioUri != null) {
+                    createNewTab(audioUri.toString());
+                }
+            } else if (type.startsWith("application/")) {
+                Uri fileUri = intent.getParcelableExtra(Intent.EXTRA_STREAM);
+                if (fileUri != null) {
+                    createNewTab(fileUri.toString());
+                }
             }
-        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action) && type != null && type.startsWith("image/")) {
-            ArrayList<Uri> imageUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
-            if (imageUris != null && !imageUris.isEmpty()) {
-                for (Uri uri : imageUris) {
-                    createNewTab(uri.toString());
+        } else if (Intent.ACTION_SEND_MULTIPLE.equals(action) && type != null) {
+            if (type.startsWith("image/")) {
+                ArrayList<Uri> imageUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (imageUris != null && !imageUris.isEmpty()) {
+                    for (Uri uri : imageUris) {
+                        createNewTab(uri.toString());
+                    }
+                }
+            } else if (type.startsWith("video/")) {
+                ArrayList<Uri> videoUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (videoUris != null && !videoUris.isEmpty()) {
+                    for (Uri uri : videoUris) {
+                        createNewTab(uri.toString());
+                    }
+                }
+            } else if (type.startsWith("audio/")) {
+                ArrayList<Uri> audioUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (audioUris != null && !audioUris.isEmpty()) {
+                    for (Uri uri : audioUris) {
+                        createNewTab(uri.toString());
+                    }
+                }
+            } else if (type.startsWith("application/")) {
+                ArrayList<Uri> fileUris = intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM);
+                if (fileUris != null && !fileUris.isEmpty()) {
+                    for (Uri uri : fileUris) {
+                        createNewTab(uri.toString());
+                    }
                 }
             }
         } else if (Intent.ACTION_WEB_SEARCH.equals(action)) {
@@ -536,8 +578,34 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if ("android.intent.action.VIEW".equals(action) && intent.getData() != null) {
             String scheme = intent.getData().getScheme();
-            if ("file".equals(scheme) || "content".equals(scheme)) {
+            if ("file".equals(scheme) || "content".equals(scheme) || "http".equals(scheme) || "https".equals(scheme)) {
                 createNewTab(intent.getDataString());
+            }
+        } else if (Intent.ACTION_SEARCH.equals(action)) {
+            String query = intent.getStringExtra("query");
+            if (query != null) {
+                try {
+                    String encodedQuery = URLEncoder.encode(query, "UTF-8");
+                    String searchUrl = "https://www.google.com/search?q=" + encodedQuery;
+                    createNewTab(searchUrl);
+                } catch (UnsupportedEncodingException e) {
+                    Toast.makeText(this, "検索クエリのエンコードに失敗しました", Toast.LENGTH_SHORT).show();
+                }
+            }
+        } else if (Intent.ACTION_GET_CONTENT.equals(action)) {
+            Uri data = intent.getData();
+            if (data != null) {
+                createNewTab(data.toString());
+            }
+        } else if (Intent.ACTION_PICK.equals(action)) {
+            Uri data = intent.getData();
+            if (data != null) {
+                createNewTab(data.toString());
+            }
+        } else if (Intent.ACTION_CHOOSER.equals(action)) {
+            Intent targetIntent = intent.getParcelableExtra(Intent.EXTRA_INTENT);
+            if (targetIntent != null) {
+                handleIntent(targetIntent);
             }
         }
         setIntent(new Intent());
@@ -599,7 +667,7 @@ public class MainActivity extends AppCompatActivity {
                         try {
                             File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
                             try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                                finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                finalSnap.compress(Bitmap.CompressFormat.PNG, 100, fos);
                                 fos.flush();
                             }
                         } catch (Exception e) {
@@ -1370,103 +1438,84 @@ public class MainActivity extends AppCompatActivity {
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
         request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
         DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        try {
-            long downloadId = dm.enqueue(request);
-            String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    .getAbsolutePath() + "/" + fileName;
-            DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
-            DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
-            Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
-        }
-    }
-    private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        String js = "javascript:(function(){" +
-                "fetch('" + url + "').then(function(response){return response.blob();}).then(function(blob){" +
-                "var reader=new FileReader();" +
-                "reader.onloadend=function(){var base64data=reader.result;" +
-                "var fileName='" + generateBlobFileName(mimeType) + "';" +
-                "window.BlobDownloader.onBlobDownloaded(base64data,'" + (mimeType != null ? mimeType : "application/octet-stream") + "',fileName);" +
-                "};" +
-                "reader.readAsDataURL(blob);" +
-                "}).catch(function(error){window.BlobDownloader.onBlobDownloadError(error.toString());});" +
-                "})();"; 
-        getCurrentWebView().evaluateJavascript(js, null);
+        dm.enqueue(request);
+        Toast.makeText(this, "ダウンロードを開始しました", Toast.LENGTH_SHORT).show();
     }
 
-    private String generateBlobFileName(String mimeType) {
-        String ext = "";
-        if (mimeType != null) {
-            if (mimeType.contains("pdf")) {
-                ext = ".pdf";
-            } else if (mimeType.contains("image/png")) {
-                ext = ".png";
-            } else if (mimeType.contains("image/jpeg")) {
-                ext = ".jpg";
-            } else if (mimeType.contains("text/html")) {
-                ext = ".html";
+    private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        getCurrentWebView().evaluateJavascript(
+            "(function() { " +
+            "var xhr = new XMLHttpRequest(); " +
+            "xhr.open('GET', '" + url + "', true); " +
+            "xhr.responseType = 'blob'; " +
+            "xhr.onload = function() { " +
+            "    var blob = xhr.response; " +
+            "    var reader = new FileReader(); " +
+            "    reader.readAsDataURL(blob); " +
+            "    reader.onloadend = function() { " +
+            "        BlobDownloader.download(reader.result); " +
+            "    }; " +
+            "}; " +
+            "xhr.send(); " +
+            "})();", null);
+    }
+
+    public class BlobDownloadInterface {
+        @JavascriptInterface
+        public void download(String base64Data) {
+            int commaIndex = base64Data.indexOf(",");
+            if (commaIndex != -1) {
+                String data = base64Data.substring(commaIndex + 1);
+                byte[] decodedBytes = Base64.decode(data, Base64.DEFAULT);
+                String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+                String fileName = "blob_" + timeStamp + ".bin";
+                File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                File file = new File(downloadDir, fileName);
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    fos.write(decodedBytes);
+                    Toast.makeText(MainActivity.this, "Blobを保存しました: " + fileName, Toast.LENGTH_SHORT).show();
+                } catch (IOException e) {
+                    Toast.makeText(MainActivity.this, "Blob保存エラー", Toast.LENGTH_SHORT).show();
+                    e.printStackTrace();
+                }
             }
         }
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-        return "blob_download_" + timeStamp + ext;
     }
 
-    
-    private class BlobDownloadInterface {
-        @JavascriptInterface
-        public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        int commaIndex = base64Data.indexOf(",");
-                        String pureBase64 = base64Data.substring(commaIndex + 1);
-                        byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
-                        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                        if (!downloadDir.exists()) {
-                            downloadDir.mkdirs();
-                        }
-                        File file = new File(downloadDir, fileName);
-                        FileOutputStream fos = new FileOutputStream(file);
-                        fos.write(data);
-                        fos.close();
-                        Toast.makeText(MainActivity.this, "Blobをダウンロードしました: " + fileName, Toast.LENGTH_SHORT).show();
-                    } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "Blobダウンロードエラー", Toast.LENGTH_SHORT).show();
-                        e.printStackTrace();
-                    }
-                }
-            });
+    public class AndroidBridge {
+        private final WebView webView;
+        public AndroidBridge(WebView webView) {
+            this.webView = webView;
         }
         @JavascriptInterface
-        public void onBlobDownloadError(String error) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(MainActivity.this, "Blobダウンロードエラー: " + error, Toast.LENGTH_SHORT).show();
+        public void onUrlChange(String url) {
+            runOnUiThread(() -> {
+                if (webView == getCurrentWebView()) {
+                    urlEditText.setText(url);
                 }
             });
         }
     }
 
-    private void switchToTab(int index) {
-        if (index < 0 || index >= webViews.size()) return;
-        WebView newWebView = webViews.get(index);
-        webViewContainer.removeAllViews();
-        webViewContainer.addView(newWebView);
-        currentTabIndex = index;
-        urlEditText.setText(newWebView.getUrl());
-        faviconImageView.setImageBitmap(webViewFavicons.get(newWebView));
-        applyTabSwitchAnimation(webViewContainer);
-        updateTabCount();
-    }
-
-    private void applyTabSwitchAnimation(View view) {
-        AlphaAnimation fadeIn = new AlphaAnimation(0f, 1f);
-        fadeIn.setDuration(300);
-        fadeIn.setInterpolator(new DecelerateInterpolator());
-        view.startAnimation(fadeIn);
+    private void loadUrl() {
+        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+        if (imm != null) {
+            imm.hideSoftInputFromWindow(urlEditText.getWindowToken(), 0);
+        }
+        urlEditText.clearFocus();
+        String input = urlEditText.getText().toString().trim();
+        if (input.isEmpty()) return;
+        if (URLUtil.isValidUrl(input)) {
+            getCurrentWebView().loadUrl(input);
+        } else {
+            try {
+                String query = URLEncoder.encode(input, "UTF-8");
+                String searchUrl = "https://www.google.com/search?q=" + query;
+                getCurrentWebView().loadUrl(searchUrl);
+            } catch (UnsupportedEncodingException e) {
+                Toast.makeText(this, "検索クエリのエンコードに失敗しました", Toast.LENGTH_SHORT).show();
+            }
+        }
     }
 
     private void createNewTab() {
@@ -1482,113 +1531,76 @@ public class MainActivity extends AppCompatActivity {
         newWebView.setTag(nextTabId);
         nextTabId++;
         webViews.add(newWebView);
-        currentTabIndex = webViews.size() - 1;
         webViewContainer.removeAllViews();
         webViewContainer.addView(newWebView);
-        newWebView.loadUrl(url);
+        currentTabIndex = webViews.size() - 1;
         updateTabCount();
-        applyNewTabAnimation(webViewContainer);
+        newWebView.loadUrl(url);
     }
 
-    private void applyNewTabAnimation(View view) {
-        ScaleAnimation scale = new ScaleAnimation(0.8f, 1f, 0.8f, 1f, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
-        scale.setDuration(200);
-        scale.setInterpolator(new DecelerateInterpolator());
-        view.startAnimation(scale);
+    private void switchToTab(int index) {
+        if (index < 0 || index >= webViews.size()) return;
+        currentTabIndex = index;
+        webViewContainer.removeAllViews();
+        webViewContainer.addView(webViews.get(index));
+        String url = webViews.get(index).getUrl();
+        if (url != null) {
+            urlEditText.setText(url);
+        }
+        Bitmap favicon = webViewFavicons.get(webViews.get(index));
+        if (favicon != null) {
+            faviconImageView.setImageBitmap(favicon);
+        }
     }
 
-    private void loadUrl() {
-        String input = urlEditText.getText().toString().trim();
-        if (input.isEmpty()) return;
-        String url;
-        if (input.startsWith("http://") || input.startsWith("https://") || input.startsWith("intent:")) {
-            url = input;
-        } else if (input.contains(" ") || !input.contains(".")) {
-            try {
-                String query = URLEncoder.encode(input, "UTF-8");
-                url = "https://www.google.com/search?q=" + query;
-            } catch (UnsupportedEncodingException e) {
-                Toast.makeText(this, "エンコードエラー", Toast.LENGTH_SHORT).show();
-                return;
-            }
-        } else {
-            url = "http://" + input;
-        }
-        WebView current = getCurrentWebView();
-        if (current != null) {
-            current.loadUrl(url);
-        }
-    }
-    private class AndroidBridge {
-        private final WebView owner;
-        public AndroidBridge(WebView owner) {
-            this.owner = owner;
-        }
-        @JavascriptInterface
-        public void onUrlChange(final String url) {
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        if (owner == getCurrentWebView()) {
-                            if (url.startsWith("https://m.youtube.com/watch") ||
-                                url.startsWith("https://chatgpt.com/") ||
-                                url.startsWith("https://365sns.f5.si/") ||
-                                url.startsWith("https://m.youtube.com/shorts/")) {
-                                swipeRefreshLayout.setEnabled(false);
-                            } else {
-                                swipeRefreshLayout.setEnabled(true);
-                            }
-                            urlEditText.setText(url);
-                            addHistory(url, owner.getTitle());
-                        }
-                    } catch (Exception ignored) {}
-                }
-            });
-        }
-    }
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
+        getMenuInflater().inflate(R.menu.menu_main, menu);
+        MenuItem darkModeItem = menu.findItem(R.id.action_dark_mode);
+        if (darkModeItem != null) {
+            darkModeItem.setChecked(darkModeEnabled);
+        }
+        MenuItem zoomItem = menu.findItem(R.id.action_zoom_toggle);
+        if (zoomItem != null) {
+            zoomItem.setChecked(zoomEnabled);
+        }
+        MenuItem jsItem = menu.findItem(R.id.action_js);
+        if (jsItem != null) {
+            jsItem.setChecked(jsEnabled);
+        }
+        MenuItem imgItem = menu.findItem(R.id.action_img);
+        if (imgItem != null) {
+            imgItem.setChecked(imgBlockEnabled);
+        }
+        MenuItem uaItem = menu.findItem(R.id.action_ua);
+        if (uaItem != null) {
+            uaItem.setChecked(uaEnabled);
+        }
+        MenuItem deskuaItem = menu.findItem(R.id.action_deskua);
+        if (deskuaItem != null) {
+            deskuaItem.setChecked(deskuaEnabled);
+        }
+        MenuItem ct3uaItem = menu.findItem(R.id.action_ct3ua);
+        if (ct3uaItem != null) {
+            ct3uaItem.setChecked(ct3uaEnabled);
+        }
+        MenuItem basicAuthItem = menu.findItem(R.id.action_basic_auth);
+        if (basicAuthItem != null) {
+            basicAuthItem.setChecked(basicAuthEnabled);
+        }
         return true;
     }
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        MenuItem darkModeItem = menu.findItem(R.id.action_dark_mode);
-        darkModeItem.setVisible(Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q);
-        darkModeItem.setCheckable(true);
-        darkModeItem.setChecked(darkModeEnabled);
-        MenuItem uaItem = menu.findItem(R.id.action_ua);
-        if (uaItem != null) uaItem.setChecked(uaEnabled);
-        MenuItem deskuaItem = menu.findItem(R.id.action_deskua);
-        if (deskuaItem != null) deskuaItem.setChecked(deskuaEnabled);
-        MenuItem ct3uaItem = menu.findItem(R.id.action_ct3ua);
-        if (ct3uaItem != null) ct3uaItem.setChecked(ct3uaEnabled);
-        MenuItem zoomItem = menu.findItem(R.id.action_zoom_toggle);
-        if (zoomItem != null) zoomItem.setChecked(zoomEnabled);
-        MenuItem jsItem = menu.findItem(R.id.action_js);
-        if (jsItem != null) jsItem.setChecked(jsEnabled);
-        MenuItem imgItem = menu.findItem(R.id.action_img);
-        if (imgItem != null) imgItem.setChecked(imgBlockEnabled);
-        MenuItem basicAuthItem = menu.findItem(R.id.action_basic_auth);
-        if (basicAuthItem != null) basicAuthItem.setChecked(basicAuthEnabled);
-        return super.onPrepareOptionsMenu(menu);
-    }
+
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_tabs) {
-            showTabsDialog();
-        } else if (id == R.id.action_dark_mode) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                darkModeEnabled = !darkModeEnabled;
-                item.setChecked(darkModeEnabled);
-                updateDarkMode();
-                pref.edit().putBoolean(KEY_DARK_MODE, darkModeEnabled).apply();
-                Toast.makeText(this, "ダークモード " + (darkModeEnabled ? "ON" : "OFF"), Toast.LENGTH_SHORT).show();
-            } else {
-                Toast.makeText(this, "この機能はAndroid 10以上で利用可能です", Toast.LENGTH_SHORT).show();
-            }
+        if (id == R.id.action_dark_mode) {
+            darkModeEnabled = !darkModeEnabled;
+            pref.edit().putBoolean(KEY_DARK_MODE, darkModeEnabled).apply();
+            item.setChecked(darkModeEnabled);
+            updateDarkMode();
+        } else if (id == R.id.action_bookmarks) {
+            showBookmarksDialog();
         } else if (id == R.id.action_Settings) {
             startActivity(new Intent(MainActivity.this, SettingsActivity.class));
         } else if (id == R.id.action_Secret) {
@@ -2174,6 +2186,19 @@ private void showHistoryDialog() {
         dialog.show();
     }
 
+private void showBookmarksDialog() {
+    RecyclerView recyclerView = new RecyclerView(this);
+    recyclerView.setLayoutManager(new LinearLayoutManager(this));
+    AlertDialog dialog = new MaterialAlertDialogBuilder(this)
+            .setTitle("ブックマーク")
+            .setPositiveButton("閉じる", null)
+            .setView(recyclerView)
+            .create();
+    BookmarkAdapter adapter = new BookmarkAdapter(bookmarks, false, dialog);
+    recyclerView.setAdapter(adapter);
+    dialog.show();
+}
+
     
     private void showTabsDialog() {
         LinearLayout container = new LinearLayout(this);
@@ -2222,6 +2247,11 @@ private void showHistoryDialog() {
         slide.setDuration(200);
         slide.setInterpolator(new DecelerateInterpolator());
         view.startAnimation(slide);
+
+        RotateAnimation rotate = new RotateAnimation(0, 360, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+        rotate.setDuration(500);
+        rotate.setInterpolator(new DecelerateInterpolator());
+        view.startAnimation(rotate);
     }
 
     private void applyAddTabAnimation(View view) {
@@ -2229,6 +2259,11 @@ private void showHistoryDialog() {
         fadeIn.setDuration(300);
         fadeIn.setInterpolator(new DecelerateInterpolator());
         view.startAnimation(fadeIn);
+
+        ScaleAnimation scale = new ScaleAnimation(0.5f, 1f, 0.5f, 1f, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+        scale.setDuration(300);
+        scale.setInterpolator(new DecelerateInterpolator());
+        view.startAnimation(scale);
     }
 
     private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
@@ -2339,7 +2374,7 @@ private void showHistoryDialog() {
                         WebView w = webViews.get(tabIndex);
                         Bitmap bm = tabSnapshots.get(w);
                         if (bm != null) {
-                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
+                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, bm.getWidth(), bm.getHeight(), true));
                         } else {
                             img.setImageDrawable(null);
                         }
@@ -2410,6 +2445,12 @@ private void showHistoryDialog() {
             scale.setRepeatMode(Animation.REVERSE);
             scale.setRepeatCount(1);
             view.startAnimation(scale);
+
+            TranslateAnimation translate = new TranslateAnimation(0, 10, 0, 0);
+            translate.setDuration(100);
+            translate.setRepeatMode(Animation.REVERSE);
+            translate.setRepeatCount(1);
+            view.startAnimation(translate);
         }
 
         private void applyCloseTabAnimation(View view) {
@@ -2417,6 +2458,11 @@ private void showHistoryDialog() {
             fadeOut.setDuration(200);
             fadeOut.setInterpolator(new DecelerateInterpolator());
             view.startAnimation(fadeOut);
+
+            RotateAnimation rotate = new RotateAnimation(0, -90, Animation.RELATIVE_TO_SELF, 0.5f, Animation.RELATIVE_TO_SELF, 0.5f);
+            rotate.setDuration(200);
+            rotate.setInterpolator(new DecelerateInterpolator());
+            view.startAnimation(rotate);
         }
 
         private class PageViewHolder extends RecyclerView.ViewHolder {
@@ -2453,7 +2499,7 @@ private void captureTabSnapshot(WebView webView) {
                 try {
                     File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
                     try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
                         fos.flush();
                     }
                 } catch (Exception e) {
@@ -2477,6 +2523,28 @@ private void captureTabSnapshot(WebView webView) {
             .create();
         BookmarkAdapter adapter = new BookmarkAdapter(bookmarks, true, dialog);
         recyclerView.setAdapter(adapter);
+        ItemTouchHelper helper = new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(
+                ItemTouchHelper.UP | ItemTouchHelper.DOWN, ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT) {
+            @Override
+            public boolean onMove(RecyclerView recyclerView, RecyclerView.ViewHolder viewHolder, RecyclerView.ViewHolder target) {
+                int from = viewHolder.getAdapterPosition();
+                int to = target.getAdapterPosition();
+                Collections.swap(bookmarks, from, to);
+                adapter.notifyItemMoved(from, to);
+                saveBookmarks();
+                return true;
+            }
+
+            @Override
+            public void onSwiped(RecyclerView.ViewHolder viewHolder, int direction) {
+                int position = viewHolder.getAdapterPosition();
+                bookmarks.remove(position);
+                adapter.notifyItemRemoved(position);
+                saveBookmarks();
+                Toast.makeText(MainActivity.this, "削除しました", Toast.LENGTH_SHORT).show();
+            }
+        });
+        helper.attachToRecyclerView(recyclerView);
         dialog.show();
     }
 
