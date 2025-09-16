@@ -2319,6 +2319,16 @@ private void showHistoryDialog() {
             getResources().getDisplayMetrics()
        );
      }
+    private static String shortTitle(String s) {
+        if (s == null) return "";
+        s = s.trim();
+        s = s.replaceAll("\\s+", " ");
+        final int MAX = 40;
+        if (s.length() <= MAX) return s;
+        int cut = Math.max(0, MAX - 3);
+        String t = s.substring(0, cut).trim();
+        return t + "...";
+    }
     private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
         private AlertDialog parentDialog;
         public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
@@ -2521,13 +2531,6 @@ private void showHistoryDialog() {
                 int n = webViews.size();
                 return (n + 3) / 4;
             }
-        }
-
-        private String shortTitle(String s) {
-            if (s == null) return "";
-            s = s.trim();
-            if (s.length() > 32) return s.substring(0, 29) + "...";
-            return s;
         }
         private Bitmap roundedCorner(Bitmap src, int radius) {
             if (src == null) return null;
