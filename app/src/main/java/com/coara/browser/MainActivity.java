@@ -998,32 +998,16 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.startsWith("tel:")) {
-                    startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("mailto:")) {
-                    startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("intent:")) {
-                    try {
-                        Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                        if (intent != null) {
-                            if (intent.resolveActivity(getPackageManager()) != null) {
-                                startActivity(intent);
-                            } else {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    view.loadUrl(fallbackUrl);
-                                }
-                            }
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                   String url = request.getUrl().toString();
+                   String scheme = request.getUrl().getScheme();
+        if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
+            return false;
+          } else {
+                   Intent serviceIntent = new Intent(MainActivity.this, urlSchemeService.class);
+                   serviceIntent.setData(request.getUrl());
+                   startService(serviceIntent);
+                   return true;
                 }
-                return false;
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
