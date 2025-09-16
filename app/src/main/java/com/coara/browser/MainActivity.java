@@ -1555,7 +1555,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu_main, menu);
+        getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
         MenuItem darkModeItem = menu.findItem(R.id.action_dark_mode);
         if (darkModeItem != null) {
             darkModeItem.setChecked(darkModeEnabled);
