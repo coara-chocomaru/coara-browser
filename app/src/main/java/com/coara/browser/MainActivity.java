@@ -273,6 +273,12 @@ public class MainActivity extends AppCompatActivity {
              }
            }
         };
+        private int dpToPx(int dp) {
+        return (int) TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp,
+            getResources().getDisplayMetrics()
+        );
         loadBookmarks();
         loadHistory();
         if (!historyItems.isEmpty()) {
@@ -2312,13 +2318,6 @@ private void showHistoryDialog() {
         tabsDialog = dialog;
         dialog.show();
     }
-    private int dpToPx(int dp) {
-    return (int) TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            dp,
-            getResources().getDisplayMetrics()
-    );
-  }
     private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
         private AlertDialog parentDialog;
         public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
