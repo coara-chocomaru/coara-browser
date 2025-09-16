@@ -467,17 +467,23 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void handleIntent(Intent intent) {
-        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
-            Uri data = intent.getData();
-            if (data != null) {
+    if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+        Uri data = intent.getData();
+        if (data != null) {
+            String scheme = data.getScheme();
+            if ("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme)) {
                 String url = data.toString();
                 createNewTab(url);
                 getCurrentWebView().setTag("external");
+            } else {
+                Intent serviceIntent = new Intent(this, urlSchemeService.class);
+                serviceIntent.setData(data);
+                startService(serviceIntent);
             }
-            setIntent(new Intent());
         }
-    }
-
+        setIntent(new Intent());
+      }
+   }
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
