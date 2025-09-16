@@ -4,6 +4,10 @@
     <uses-feature
         android:name="android.hardware.camera"
         android:required="false" />
+
+    <permission
+        android:name="com.coara.browser.permission.URL_SCHEME"
+        android:protectionLevel="signature" />
     
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
@@ -69,7 +73,34 @@
 
         <service
             android:name=".urlSchemeService"
-            android:exported="false" />
+            android:exported="true"
+            android:permission="com.coara.browser.permission.URL_SCHEME">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:scheme="tel" />
+                <data android:scheme="mailto" />
+                <data android:scheme="sms" />
+                <data android:scheme="geo" />
+                <data android:scheme="file" />
+                <data android:scheme="content" />
+                <data android:scheme="about" />
+                <data android:scheme="intent" />
+                <data android:scheme="market" />
+                <data android:scheme="fb" />
+                <data android:scheme="instagram" />
+                <data android:scheme="tiktok" />
+                <data android:scheme="twitter" />
+                <data android:scheme="whatsapp" />
+                <data android:scheme="youtube" />
+                <data android:scheme="spotify" />
+                <data android:scheme="bitcoin" />
+                <data android:scheme="zxing" />
+            </intent-filter>
+        </service>
         
         <activity
             android:name=".SecretActivity"
