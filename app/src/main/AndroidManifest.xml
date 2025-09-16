@@ -70,6 +70,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="http" />
                 <data android:scheme="https" />
+                <data android:scheme="file" />
             </intent-filter>
             <meta-data
             android:name="android.app.shortcuts"
@@ -90,7 +91,6 @@
                 <data android:scheme="mailto" />
                 <data android:scheme="sms" />
                 <data android:scheme="geo" />
-                <data android:scheme="file" />
                 <data android:scheme="content" />
                 <data android:scheme="about" />
                 <data android:scheme="intent" />
