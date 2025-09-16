@@ -66,6 +66,10 @@
             android:name="android.webkit.WebView.EnableSafeBrowsing"
             android:value="true"/>
         </activity>
+
+        <service
+            android:name=".urlSchemeService"
+            android:exported="false" />
         
         <activity
             android:name=".SecretActivity"
