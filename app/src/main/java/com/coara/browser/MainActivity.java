@@ -2312,7 +2312,13 @@ private void showHistoryDialog() {
         tabsDialog = dialog;
         dialog.show();
     }
-
+    private int dpToPx(int dp) {
+    return (int) TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            dp,
+            getResources().getDisplayMetrics()
+    );
+  }
     private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
         private AlertDialog parentDialog;
         public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
@@ -2523,13 +2529,6 @@ private void showHistoryDialog() {
             if (s.length() > 32) return s.substring(0, 29) + "...";
             return s;
         }
-        private int dpToPx(int dp) {
-        return (int) TypedValue.applyDimension(
-            TypedValue.COMPLEX_UNIT_DIP,
-            dp,
-            getResources().getDisplayMetrics()
-         );
-       }
         private Bitmap roundedCorner(Bitmap src, int radius) {
             if (src == null) return null;
             Bitmap output = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
