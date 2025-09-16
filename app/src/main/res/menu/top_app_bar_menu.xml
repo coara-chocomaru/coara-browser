@@ -38,7 +38,6 @@
     <group>
         <item android:id="@+id/action_tabs" android:title="タブ一覧" />
         <item android:id="@+id/action_clear_tabs" android:title="タブをクリア" />
-        <item android:id="@+id/action_exit" android:title="ブラウザを終了" />
     </group>
 
     <item android:title="表示設定">
@@ -70,5 +69,3 @@
     </group>
 
 </menu>
-
-
