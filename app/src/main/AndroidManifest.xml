@@ -28,6 +28,14 @@
         <intent>
             <action android:name="android.provider.MediaStore.RECORD_SOUND" />
         </intent>
+        <package android:name="com.facebook.katana" />
+        <package android:name="com.instagram.android" />
+        <package android:name="com.twitter.android" />
+        <package android:name="com.whatsapp" />
+        <package android:name="com.google.android.youtube" />
+        <package android:name="com.spotify.music" />
+        <package android:name="com.tiktok" />
+        <package android:name="org.zxing.client.android" />
     </queries>
     
     <application
@@ -78,9 +86,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="http" />
-                <data android:scheme="https" />
                 <data android:scheme="tel" />
                 <data android:scheme="mailto" />
                 <data android:scheme="sms" />
