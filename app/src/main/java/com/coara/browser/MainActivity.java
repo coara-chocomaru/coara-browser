@@ -1577,9 +1577,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_exit) {
-            finish();
-            System.exit(0);
         if (id == R.id.action_tabs) {
             showTabsDialog();
         } else if (id == R.id.action_dark_mode) {
