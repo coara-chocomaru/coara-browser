@@ -188,6 +188,8 @@ public class MainActivity extends AppCompatActivity {
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
+    private AlertDialog tabsDialog;
+
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
@@ -1363,7 +1365,180 @@ public class MainActivity extends AppCompatActivity {
                         }
                         File file = new File(downloadDir, fileName);
                         FileOutputStream fos = new FileOutputStream(file);
-                       ...(truncated 7219 characters)...lEditText.getText().toString().trim();
+                        try {
+                            fos.write(data);
+                            fos.flush();
+                        } finally {
+                            try { fos.close(); } catch (Exception ignored) {}
+                        }
+                        Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void onBlobDownloadError(final String errorMessage) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+    }
+
+    private void saveImage(String imageUrl) {
+    try {
+        if (imageUrl != null && imageUrl.startsWith("data:")) {
+            int commaIndex = imageUrl.indexOf(',');
+            if (commaIndex == -1) {
+                Toast.makeText(MainActivity.this, "無効なデータURL", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            String metadata = imageUrl.substring(5, commaIndex); 
+            boolean isBase64 = metadata.contains("base64");
+            String mimeType = "image/*";
+            if (metadata.contains(";")) {
+                mimeType = metadata.split(";")[0];
+            }
+            byte[] imageData;
+            if (isBase64) {
+                String base64Data = imageUrl.substring(commaIndex + 1);
+                imageData = Base64.decode(base64Data, Base64.DEFAULT);
+            } else {
+                String dataPart = imageUrl.substring(commaIndex + 1);
+                imageData = dataPart.getBytes("UTF-8");
+            }
+            String fileName = "saved_image_" + System.currentTimeMillis();
+            if (mimeType.equalsIgnoreCase("image/png")) {
+                fileName += ".png";
+            } else if (mimeType.equalsIgnoreCase("image/jpeg")) {
+                fileName += ".jpg";
+            } else if (mimeType.equalsIgnoreCase("image/bmp")) {
+                fileName += ".bmp";
+            } else if (mimeType.equalsIgnoreCase("image/gif")) {
+                fileName += ".gif";
+            } else if (mimeType.equalsIgnoreCase("image/img")) {
+                fileName += ".img";
+            }
+            File picturesDir = Environment.getExternalStoragePublicDirectory(
+                Environment.DIRECTORY_PICTURES);
+            File file = new File(picturesDir, fileName);
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(imageData);
+                fos.flush();
+            }
+            Toast.makeText(MainActivity.this,
+                "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
+                Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(MainActivity.this,
+                Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            != PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(MainActivity.this,
+                "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        DownloadManager.Request request =
+            new DownloadManager.Request(Uri.parse(imageUrl));
+        request.setMimeType("image/*");
+        String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
+        request.setTitle(fileName);
+        request.setDescription("画像を保存中...");
+        request.setNotificationVisibility(
+            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setDestinationInExternalPublicDir(
+            Environment.DIRECTORY_PICTURES, fileName);
+        dm.enqueue(request);
+        Toast.makeText(MainActivity.this,
+            "画像の保存の開始しました", Toast.LENGTH_SHORT).show();
+    } catch (Exception e) {
+        Toast.makeText(MainActivity.this,
+            "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
+        e.printStackTrace();
+    }
+}
+    private void exportBookmarksToFile() {
+        final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
+        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!downloadDir.exists()) {
+            downloadDir.mkdirs();
+        }
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        final File file;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            file = new File(downloadDir, "JSON-bookmark" + timeStamp + ".txt");
+        } else {
+            file = new File(downloadDir, timeStamp + "-bookmark.json");
+        }
+        backgroundExecutor.execute(() -> {
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(bookmarksJson.getBytes("UTF-8"));
+                fos.flush();
+                runOnUiThread(() ->
+                    Toast.makeText(MainActivity.this, "ブックマークをエクスポートしました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show()
+                );
+            } catch (Exception e) {
+                runOnUiThread(() ->
+                    Toast.makeText(MainActivity.this, "ブックマークのエクスポートに失敗しました: " + e.getMessage(), Toast.LENGTH_SHORT).show()
+                );
+                e.printStackTrace();
+            }
+        });
+    }
+    private void createNewTab() {
+        if (webViews.size() >= MAX_TABS) {
+            WebView removed = webViews.remove(0);
+            removed.destroy();
+            if (currentTabIndex > 0) {
+                currentTabIndex--;
+            }
+        }
+        WebView newWebView = createNewWebView();
+        newWebView.setTag(nextTabId);
+        nextTabId++;
+        webViews.add(newWebView);
+        updateTabCount();
+        switchToTab(webViews.size() - 1);
+        getCurrentWebView().loadUrl(START_PAGE);
+        captureTabSnapshot(newWebView);
+    }
+    private void createNewTab(String url) {
+        if (webViews.size() >= MAX_TABS) {
+            Toast.makeText(this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        WebView newWebView = createNewWebView();
+        webViews.add(newWebView);
+        updateTabCount();
+        switchToTab(webViews.size() - 1);
+        newWebView.loadUrl(url);
+        captureTabSnapshot(newWebView);
+    }
+
+    private void switchToTab(int index) {
+        if (index < 0 || index >= webViews.size()) return;
+        WebView current = getCurrentWebView();
+        if (current != null) {
+            captureTabSnapshot(current);
+        }
+        webViewContainer.removeAllViews();
+        currentTabIndex = index;
+        webViewContainer.addView(getCurrentWebView());
+        urlEditText.setText(getCurrentWebView().getUrl());
+    }
+
+    private WebView getCurrentWebView() {
+        return webViews.get(currentTabIndex);
+    }
+    private void loadUrl() {
+    String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
     String url;
     if (input.startsWith("http://") || input.startsWith("https://") || input.startsWith("intent:")) {
@@ -2041,69 +2216,115 @@ private void showHistoryDialog() {
     }
 
     
+    
     private void showTabsDialog() {
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
-        ViewPager2 viewPager = new ViewPager2(this);
-        viewPager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
-        viewPager.setBackgroundColor(Color.parseColor("#FFFAFA")); 
-        viewPager.setClipToPadding(false);
-        viewPager.setPadding(dpToPx(16), dpToPx(16), dpToPx(16), dpToPx(16));
-        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
-        viewPager.setAdapter(adapter);
-        LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1);
-        container.addView(viewPager, pagerParams);
-
-        MaterialButton addTabButton = new MaterialButton(this);
-        addTabButton.setText("新しいタブを開く");
-        addTabButton.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#FF69B4"))); 
-        addTabButton.setTextColor(Color.WHITE);
-        addTabButton.setCornerRadius(dpToPx(24));
-        addTabButton.setElevation(dpToPx(4));
-        addTabButton.setOnClickListener(v -> {
+        FrameLayout overlay = new FrameLayout(this);
+        overlay.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        View scrim = new View(this);
+        scrim.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        scrim.setBackgroundColor(Color.argb(180, 10, 10, 10));
+        overlay.addView(scrim);
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        int margin = dpToPx(18);
+        FrameLayout.LayoutParams cardParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        cardParams.setMargins(margin, margin, margin, margin);
+        card.setLayoutParams(cardParams);
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setCornerRadius(dpToPx(12));
+        gd.setColor(Color.argb(240, 250, 250, 250));
+        card.setBackground(gd);
+        card.setElevation(dpToPx(14));
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setPadding(dpToPx(12), dpToPx(12), dpToPx(12), dpToPx(6));
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = new TextView(this);
+        title.setTextSize(18);
+        title.setText("タブ (" + webViews.size() + ")");
+        title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(title);
+        ImageButton add = new ImageButton(this);
+        add.setImageResource(android.R.drawable.ic_input_add);
+        add.setBackgroundColor(Color.TRANSPARENT);
+        add.setOnClickListener(v -> {
             createNewTab();
-            adapter.notifyDataSetChanged();
-            ObjectAnimator.ofFloat(addTabButton, "scaleX", 1f, 1.1f, 1f).setDuration(300).start();
-            ObjectAnimator.ofFloat(addTabButton, "scaleY", 1f, 1.1f, 1f).setDuration(300).start();
         });
-        LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        );
-        buttonParams.gravity = Gravity.CENTER_HORIZONTAL;
-        buttonParams.setMargins(0, dpToPx(16), 0, dpToPx(16));
-        container.addView(addTabButton, buttonParams);
-
+        header.addView(add, new LinearLayout.LayoutParams(dpToPx(44), dpToPx(44)));
+        ImageButton closeAll = new ImageButton(this);
+        closeAll.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+        closeAll.setBackgroundColor(Color.TRANSPARENT);
+        closeAll.setOnClickListener(v -> {
+            // close dialog handled below
+        });
+        header.addView(closeAll, new LinearLayout.LayoutParams(dpToPx(44), dpToPx(44)));
+        card.addView(header);
+        View divider = new View(this);
+        LinearLayout.LayoutParams dvParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(1));
+        dvParams.topMargin = dpToPx(6);
+        dvParams.bottomMargin = dpToPx(6);
+        divider.setLayoutParams(dvParams);
+        divider.setBackgroundColor(Color.argb(40, 0, 0, 0));
+        card.addView(divider);
+        ViewPager2 pager = new ViewPager2(this);
+        pager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
+        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
+        pager.setAdapter(adapter);
+        LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+        pagerParams.leftMargin = dpToPx(12);
+        pagerParams.rightMargin = dpToPx(12);
+        pager.setLayoutParams(pagerParams);
+        card.addView(pager);
+        RecyclerView strip = new RecyclerView(this);
+        strip.setLayoutManager(new LinearLayoutManager(this, RecyclerView.HORIZONTAL, false));
+        MiniTabsAdapter miniAdapter = new MiniTabsAdapter();
+        strip.setAdapter(miniAdapter);
+        LinearLayout.LayoutParams stripParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(92));
+        stripParams.topMargin = dpToPx(10);
+        stripParams.bottomMargin = dpToPx(10);
+        strip.setLayoutParams(stripParams);
+        card.addView(strip);
+        LinearLayout footer = new LinearLayout(this);
+        footer.setOrientation(LinearLayout.HORIZONTAL);
+        footer.setGravity(Gravity.END);
+        footer.setPadding(dpToPx(8), dpToPx(6), dpToPx(8), dpToPx(8));
+        MaterialButton done = new MaterialButton(this);
+        done.setText("完了");
+        done.setOnClickListener(v -> {
+            if (tabsDialog != null && tabsDialog.isShowing()) tabsDialog.dismiss();
+        });
+        footer.addView(done);
+        card.addView(footer);
+        overlay.addView(card);
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("タブ一覧")
-                .setView(container)
-                .setNegativeButton("タブ一覧を閉じる", null)
+                .setView(overlay)
                 .create();
-        dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.parseColor("#FFE4E1"))); 
-        adapter.setParentDialog(dialog);
+        dialog.setOnShowListener(d -> {
+            card.setScaleX(0.96f);
+            card.setScaleY(0.96f);
+            card.setAlpha(0f);
+            card.animate().scaleX(1f).scaleY(1f).alpha(1f).setDuration(280).setInterpolator(new android.view.animation.DecelerateInterpolator()).start();
+            closeAll.setOnClickListener(v -> dialog.dismiss());
+            adapter.notifyDataSetChanged();
+            miniAdapter.notifyDataSetChanged();
+        });
+        tabsDialog = dialog;
         dialog.show();
     }
 
     private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
         private AlertDialog parentDialog;
         public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
-        public TabSnapshotAdapter() { }
+        public TabSnapshotAdapter() {}
 
         @Override
         public PageViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            FrameLayout root = new FrameLayout(this);
-            root.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            FrameLayout root = new FrameLayout(MainActivity.this);
+            root.setLayoutParams(new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
             LinearLayout container = new LinearLayout(MainActivity.this);
             container.setOrientation(LinearLayout.VERTICAL);
-            FrameLayout.LayoutParams containerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            container.setLayoutParams(containerParams);
+            container.setPadding(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+            container.setClipToPadding(false);
             LinearLayout row1 = new LinearLayout(MainActivity.this);
             row1.setOrientation(LinearLayout.HORIZONTAL);
             LinearLayout row2 = new LinearLayout(MainActivity.this);
@@ -2111,29 +2332,17 @@ private void showHistoryDialog() {
             LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
             row1.setLayoutParams(rowParams);
             row2.setLayoutParams(rowParams);
-            int tileMargin = dpToPx(12);
+            int tileMargin = dpToPx(8);
             LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
             tileParams.setMargins(tileMargin, tileMargin, tileMargin, tileMargin);
-            CardView tile00 = new CardView(MainActivity.this);
-            CardView tile01 = new CardView(MainActivity.this);
-            CardView tile10 = new CardView(MainActivity.this);
-            CardView tile11 = new CardView(MainActivity.this);
+            FrameLayout tile00 = new FrameLayout(MainActivity.this);
+            FrameLayout tile01 = new FrameLayout(MainActivity.this);
+            FrameLayout tile10 = new FrameLayout(MainActivity.this);
+            FrameLayout tile11 = new FrameLayout(MainActivity.this);
             tile00.setLayoutParams(tileParams);
             tile01.setLayoutParams(tileParams);
             tile10.setLayoutParams(tileParams);
             tile11.setLayoutParams(tileParams);
-            tile00.setCardBackgroundColor(Color.WHITE);
-            tile01.setCardBackgroundColor(Color.WHITE);
-            tile10.setCardBackgroundColor(Color.WHITE);
-            tile11.setCardBackgroundColor(Color.WHITE);
-            tile00.setRadius(dpToPx(16));
-            tile01.setRadius(dpToPx(16));
-            tile10.setRadius(dpToPx(16));
-            tile11.setRadius(dpToPx(16));
-            tile00.setCardElevation(dpToPx(8));
-            tile01.setCardElevation(dpToPx(8));
-            tile10.setCardElevation(dpToPx(8));
-            tile11.setCardElevation(dpToPx(8));
             ImageView img00 = new ImageView(MainActivity.this);
             ImageView img01 = new ImageView(MainActivity.this);
             ImageView img10 = new ImageView(MainActivity.this);
@@ -2143,27 +2352,22 @@ private void showHistoryDialog() {
             img10.setScaleType(ImageView.ScaleType.CENTER_CROP);
             img11.setScaleType(ImageView.ScaleType.CENTER_CROP);
             FrameLayout.LayoutParams imgParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            tile00.addView(img00, imgParams);
-            tile01.addView(img01, imgParams);
-            tile10.addView(img10, imgParams);
-            tile11.addView(img11, imgParams);
-            LinearLayout titleContainer00 = new LinearLayout(MainActivity.this);
-            LinearLayout titleContainer01 = new LinearLayout(MainActivity.this);
-            LinearLayout titleContainer10 = new LinearLayout(MainActivity.this);
-            LinearLayout titleContainer11 = new LinearLayout(MainActivity.this);
-            titleContainer00.setOrientation(LinearLayout.VERTICAL);
-            titleContainer01.setOrientation(LinearLayout.VERTICAL);
-            titleContainer10.setOrientation(LinearLayout.VERTICAL);
-            titleContainer11.setOrientation(LinearLayout.VERTICAL);
-            titleContainer00.setBackground(gradientDrawable(Color.parseColor("#FF69B4"), Color.parseColor("#FFB6C1")));
-            titleContainer01.setBackground(gradientDrawable(Color.parseColor("#FF69B4"), Color.parseColor("#FFB6C1")));
-            titleContainer10.setBackground(gradientDrawable(Color.parseColor("#FF69B4"), Color.parseColor("#FFB6C1")));
-            titleContainer11.setBackground(gradientDrawable(Color.parseColor("#FF69B4"), Color.parseColor("#FFB6C1")));
-            FrameLayout.LayoutParams titleContainerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(48), Gravity.BOTTOM);
-            titleContainer00.setLayoutParams(titleContainerParams);
-            titleContainer01.setLayoutParams(titleContainerParams);
-            titleContainer10.setLayoutParams(titleContainerParams);
-            titleContainer11.setLayoutParams(titleContainerParams);
+            img00.setLayoutParams(imgParams);
+            img01.setLayoutParams(imgParams);
+            img10.setLayoutParams(imgParams);
+            img11.setLayoutParams(imgParams);
+            View overlay00 = new View(MainActivity.this);
+            View overlay01 = new View(MainActivity.this);
+            View overlay10 = new View(MainActivity.this);
+            View overlay11 = new View(MainActivity.this);
+            overlay00.setLayoutParams(imgParams);
+            overlay01.setLayoutParams(imgParams);
+            overlay10.setLayoutParams(imgParams);
+            overlay11.setLayoutParams(imgParams);
+            overlay00.setBackgroundColor(Color.argb(0, 0, 0, 0));
+            overlay01.setBackgroundColor(Color.argb(0, 0, 0, 0));
+            overlay10.setBackgroundColor(Color.argb(0, 0, 0, 0));
+            overlay11.setBackgroundColor(Color.argb(0, 0, 0, 0));
             TextView title00 = new TextView(MainActivity.this);
             TextView title01 = new TextView(MainActivity.this);
             TextView title10 = new TextView(MainActivity.this);
@@ -2172,52 +2376,44 @@ private void showHistoryDialog() {
             title01.setTextColor(Color.WHITE);
             title10.setTextColor(Color.WHITE);
             title11.setTextColor(Color.WHITE);
-            title00.setTextSize(14);
-            title01.setTextSize(14);
-            title10.setTextSize(14);
-            title11.setTextSize(14);
+            title00.setTextSize(12);
+            title01.setTextSize(12);
+            title10.setTextSize(12);
+            title11.setTextSize(12);
             title00.setGravity(Gravity.CENTER);
             title01.setGravity(Gravity.CENTER);
             title10.setGravity(Gravity.CENTER);
             title11.setGravity(Gravity.CENTER);
-            title00.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            title01.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            title10.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            title11.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
-            LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            titleContainer00.addView(title00, titleParams);
-            titleContainer01.addView(title01, titleParams);
-            titleContainer10.addView(title10, titleParams);
-            titleContainer11.addView(title11, titleParams);
-            tile00.addView(titleContainer00);
-            tile01.addView(titleContainer01);
-            tile10.addView(titleContainer10);
-            tile11.addView(titleContainer11);
-            MaterialButton close00 = new MaterialButton(MainActivity.this);
-            MaterialButton close01 = new MaterialButton(MainActivity.this);
-            MaterialButton close10 = new MaterialButton(MainActivity.this);
-            MaterialButton close11 = new MaterialButton(MainActivity.this);
-            close00.setIconResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close01.setIconResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close10.setIconResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close11.setIconResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close00.setIconTint(ColorStateList.valueOf(Color.RED));
-            close01.setIconTint(ColorStateList.valueOf(Color.RED));
-            close10.setIconTint(ColorStateList.valueOf(Color.RED));
-            close11.setIconTint(ColorStateList.valueOf(Color.RED));
-            close00.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
-            close01.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
-            close10.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
-            close11.setBackgroundTintList(ColorStateList.valueOf(Color.TRANSPARENT));
-            close00.setCornerRadius(dpToPx(20));
-            close01.setCornerRadius(dpToPx(20));
-            close10.setCornerRadius(dpToPx(20));
-            close11.setCornerRadius(dpToPx(20));
-            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dpToPx(48), dpToPx(48), Gravity.TOP | Gravity.END);
-            closeParams.setMargins(dpToPx(8), dpToPx(8), dpToPx(8), dpToPx(8));
+            android.graphics.drawable.GradientDrawable titleBg = new android.graphics.drawable.GradientDrawable();
+            titleBg.setColor(Color.argb(160, 0, 0, 0));
+            titleBg.setCornerRadius(dpToPx(6));
+            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+            titleParams.setMargins(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6));
+            ImageButton close00 = new ImageButton(MainActivity.this);
+            ImageButton close01 = new ImageButton(MainActivity.this);
+            ImageButton close10 = new ImageButton(MainActivity.this);
+            ImageButton close11 = new ImageButton(MainActivity.this);
+            close00.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close01.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close10.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close11.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dpToPx(36), dpToPx(36), Gravity.TOP | Gravity.END);
+            closeParams.setMargins(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6));
+            tile00.addView(img00);
+            tile00.addView(overlay00);
+            tile00.addView(title00, titleParams);
             tile00.addView(close00, closeParams);
+            tile01.addView(img01);
+            tile01.addView(overlay01);
+            tile01.addView(title01, titleParams);
             tile01.addView(close01, closeParams);
+            tile10.addView(img10);
+            tile10.addView(overlay10);
+            tile10.addView(title10, titleParams);
             tile10.addView(close10, closeParams);
+            tile11.addView(img11);
+            tile11.addView(overlay11);
+            tile11.addView(title11, titleParams);
             tile11.addView(close11, closeParams);
             row1.addView(tile00);
             row1.addView(tile01);
@@ -2226,7 +2422,9 @@ private void showHistoryDialog() {
             container.addView(row1);
             container.addView(row2);
             root.addView(container);
-            PageViewHolder vh = new PageViewHolder(root, img00, img01, img10, img11, title00, title01, title10, title11, close00, close01, close10, close11);
+            PageViewHolder vh = new PageViewHolder(root, img00, img01, img10, img11, title00, title01, title10, title11, close00, close01, close10, close11, overlay00, overlay01, overlay10, overlay11);
+            root.setClipToPadding(false);
+            root.setElevation(dpToPx(8));
             return vh;
         }
 
@@ -2239,36 +2437,46 @@ private void showHistoryDialog() {
                     final int tabIndex = baseIndex + i;
                     ImageView img = holder.images[i];
                     TextView title = holder.titles[i];
-                    MaterialButton close = holder.closes[i];
+                    ImageButton close = holder.closes[i];
+                    View overlay = holder.overlays[i];
+                    img.setScaleX(1f);
+                    img.setScaleY(1f);
+                    overlay.setAlpha(0f);
                     if (tabIndex < webViews.size()) {
                         WebView w = webViews.get(tabIndex);
-                        Bitmap bm = tabSnapshots.get(w);
-                        if (bm != null) {
-                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
+                        Bitmap snap = tabSnapshots.get(w);
+                        if (snap != null) {
+                            int tw = dpToPx(360);
+                            int th = dpToPx(220);
+                            Bitmap scaled = Bitmap.createScaledBitmap(snap, Math.max(1, snap.getWidth()/3), Math.max(1, snap.getHeight()/3), true);
+                            Bitmap rounded = roundedCorner(scaled, dpToPx(10));
+                            img.setImageBitmap(rounded);
                         } else {
-                            img.setImageDrawable(null);
+                            android.graphics.drawable.GradientDrawable pg = new android.graphics.drawable.GradientDrawable(
+                                    android.graphics.drawable.GradientDrawable.Orientation.TL_BR,
+                                    new int[]{Color.rgb(255, 183, 197), Color.rgb(255, 223, 186), Color.rgb(255, 250, 205)});
+                            pg.setCornerRadius(dpToPx(10));
+                            img.setImageDrawable(pg);
+                            android.animation.ObjectAnimator shimmer = android.animation.ObjectAnimator.ofFloat(holder.root, "translationX", -dpToPx(6), dpToPx(6));
+                            shimmer.setDuration(1200);
+                            shimmer.setRepeatCount(android.animation.ValueAnimator.INFINITE);
+                            shimmer.setRepeatMode(android.animation.ValueAnimator.REVERSE);
+                            shimmer.start();
                         }
-                        String t = w.getTitle();
-                        if (t == null || t.isEmpty()) t = w.getUrl();
-                        if (t == null) t = "";
-                        title.setText(shortTitle(t));
-                        img.setAlpha(1f);
+                        title.setText(shortTitle(w.getTitle() != null ? w.getTitle() : w.getUrl()));
                         img.setClickable(true);
                         img.setOnClickListener(v -> {
-                            synchronized (webViews) {
-                                currentTabIndex = tabIndex;
-                            }
-                            ObjectAnimator.ofFloat(v, "scaleX", 1f, 0.95f, 1f).setDuration(200).start();
-                            ObjectAnimator.ofFloat(v, "scaleY", 1f, 0.95f, 1f).setDuration(200).start();
-                            ObjectAnimator.ofFloat(v, "rotation", 0f, -2f, 2f, 0f).setDuration(300).start();
-                            runOnUiThread(() -> {
-                                try {
-                                    webViewContainer.removeAllViews();
-                                    webViewContainer.addView(getCurrentWebView());
-                                    updateTabCount();
-                                    if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
-                                } catch (Exception ignored) {}
-                            });
+                            switchToTab(tabIndex);
+                            if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
+                        });
+                        img.setOnLongClickListener(v -> {
+                            android.animation.ObjectAnimator scaleX = android.animation.ObjectAnimator.ofFloat(v, "scaleX", 1f, 1.06f, 1f);
+                            android.animation.ObjectAnimator scaleY = android.animation.ObjectAnimator.ofFloat(v, "scaleY", 1f, 1.06f, 1f);
+                            android.animation.AnimatorSet set = new android.animation.AnimatorSet();
+                            set.playTogether(scaleX, scaleY);
+                            set.setDuration(300);
+                            set.start();
+                            return true;
                         });
                         close.setVisibility(View.VISIBLE);
                         close.setOnClickListener(v -> {
@@ -2278,23 +2486,23 @@ private void showHistoryDialog() {
                                     target = webViews.get(tabIndex);
                                 } else return;
                             }
-                            ObjectAnimator.ofFloat(v, "alpha", 1f, 0f).setDuration(200).start();
-                            ObjectAnimator.ofFloat(v.getParent(), "scaleX", 1f, 0f).setDuration(300).start();
-                            ObjectAnimator.ofFloat(v.getParent(), "scaleY", 1f, 0f).setDuration(300).start();
-                            new Handler(Looper.getMainLooper()).postDelayed(() -> {
-                                closeTab(target);
-                                notifyDataSetChanged();
-                            }, 300);
+                            android.animation.ObjectAnimator fade = android.animation.ObjectAnimator.ofFloat(holder.root, "alpha", 1f, 0f);
+                            fade.setDuration(240);
+                            fade.addListener(new android.animation.AnimatorListenerAdapter() {
+                                @Override
+                                public void onAnimationEnd(android.animation.Animator animation) {
+                                    closeTab(target);
+                                    notifyDataSetChanged();
+                                }
+                            });
+                            fade.start();
                         });
-                        holder.tiles[i].setCardElevation(dpToPx(8));
-                        ObjectAnimator.ofFloat(holder.tiles[i], "translationZ", 0f, dpToPx(4)).setDuration(500).start();
                     } else {
                         img.setImageDrawable(null);
                         title.setText("");
                         img.setClickable(false);
                         img.setOnClickListener(null);
                         close.setVisibility(View.INVISIBLE);
-                        holder.tiles[i].setCardElevation(0);
                     }
                 }
             }
@@ -2308,83 +2516,204 @@ private void showHistoryDialog() {
             }
         }
 
-        private String shortTitle(String url) {
-            if (url == null) return "";
-            if (url.length() > 40) return url.substring(0, 37) + "...";
-            return url;
+        private String shortTitle(String s) {
+            if (s == null) return "";
+            s = s.trim();
+            if (s.length() > 32) return s.substring(0, 29) + "...";
+            return s;
         }
 
-        private int dpToPx(int dp) {
-            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
-        }
-
-        private GradientDrawable gradientDrawable(int startColor, int endColor) {
-            GradientDrawable gd = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM, new int[]{startColor, endColor});
-            gd.setCornerRadius(dpToPx(8));
-            return gd;
+        private Bitmap roundedCorner(Bitmap src, int radius) {
+            if (src == null) return null;
+            Bitmap output = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(output);
+            final android.graphics.Paint paint = new android.graphics.Paint();
+            paint.setAntiAlias(true);
+            android.graphics.RectF rectF = new android.graphics.RectF(0, 0, src.getWidth(), src.getHeight());
+            canvas.drawRoundRect(rectF, radius, radius, paint);
+            paint.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+            canvas.drawBitmap(src, 0, 0, paint);
+            return output;
         }
 
         private class PageViewHolder extends RecyclerView.ViewHolder {
+            public FrameLayout root;
             public ImageView[] images = new ImageView[4];
             public TextView[] titles = new TextView[4];
-            public MaterialButton[] closes = new MaterialButton[4];
-            public CardView[] tiles = new CardView[4];
+            public ImageButton[] closes = new ImageButton[4];
+            public View[] overlays = new View[4];
             public PageViewHolder(View itemView,
                                   ImageView img00, ImageView img01, ImageView img10, ImageView img11,
                                   TextView title00, TextView title01, TextView title10, TextView title11,
-                                  MaterialButton close00, MaterialButton close01, MaterialButton close10, MaterialButton close11,
-                                  CardView tile00, CardView tile01, CardView tile10, CardView tile11) {
+                                  ImageButton close00, ImageButton close01, ImageButton close10, ImageButton close11,
+                                  View ov00, View ov01, View ov10, View ov11) {
                 super(itemView);
+                root = (FrameLayout) itemView;
                 images[0] = img00; images[1] = img01; images[2] = img10; images[3] = img11;
                 titles[0] = title00; titles[1] = title01; titles[2] = title10; titles[3] = title11;
                 closes[0] = close00; closes[1] = close01; closes[2] = close10; closes[3] = close11;
-                tiles[0] = tile00; tiles[1] = tile01; tiles[2] = tile10; tiles[3] = tile11;
+                overlays[0] = ov00; overlays[1] = ov01; overlays[2] = ov10; overlays[3] = ov11;
+                root.setOutlineProvider(new ViewOutlineProvider() {
+                    @Override
+                    public void getOutline(View view, android.graphics.Outline outline) {
+                        outline.setRoundRect(0,0,view.getWidth(),view.getHeight(), dpToPx(12));
+                    }
+                });
+                root.setClipToPadding(false);
             }
         }
     }
-private void captureTabSnapshot(WebView webView) {
+
+    private class MiniTabsAdapter extends RecyclerView.Adapter<MiniTabsAdapter.MiniVH> {
+        private ViewPager2 pager;
+        public void setPager(ViewPager2 p) { this.pager = p; }
+        @Override
+        public MiniVH onCreateViewHolder(ViewGroup parent, int viewType) {
+            LinearLayout box = new LinearLayout(parent.getContext());
+            box.setOrientation(LinearLayout.VERTICAL);
+            box.setPadding(dpToPx(6), dpToPx(6), dpToPx(6), dpToPx(6));
+            ImageView img = new ImageView(parent.getContext());
+            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            LinearLayout.LayoutParams ip = new LinearLayout.LayoutParams(dpToPx(120), dpToPx(72));
+            box.addView(img, ip);
+            TextView t = new TextView(parent.getContext());
+            t.setTextSize(12);
+            t.setGravity(Gravity.CENTER);
+            LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(dpToPx(120), ViewGroup.LayoutParams.WRAP_CONTENT);
+            tp.topMargin = dpToPx(6);
+            box.addView(t, tp);
+            return new MiniVH(box, img, t);
+        }
+        @Override
+        public void onBindViewHolder(MiniVH holder, int position) {
+            synchronized (webViews) {
+                if (position < webViews.size()) {
+                    WebView w = webViews.get(position);
+                    Bitmap s = tabSnapshots.get(w);
+                    if (s != null) {
+                        Bitmap scaled = Bitmap.createScaledBitmap(s, dpToPx(120), dpToPx(72), true);
+                        holder.img.setImageBitmap(roundedStatic(scaled, dpToPx(6)));
+                    } else {
+                        holder.img.setImageDrawable(new android.graphics.drawable.ColorDrawable(Color.LTGRAY));
+                        holder.img.setAlpha(0.8f);
+                    }
+                    holder.title.setText(shortTitle(w.getTitle() != null ? w.getTitle() : w.getUrl()));
+                    holder.itemView.setOnClickListener(v -> {
+                        if (pager != null) pager.setCurrentItem(position / 4, true);
+                        if (tabsDialog != null && tabsDialog.isShowing()) tabsDialog.dismiss();
+                    });
+                } else {
+                    holder.img.setImageDrawable(null);
+                    holder.title.setText("");
+                    holder.itemView.setOnClickListener(null);
+                }
+            }
+        }
+        @Override
+        public int getItemCount() {
+            synchronized (webViews) {
+                return webViews.size();
+            }
+        }
+        class MiniVH extends RecyclerView.ViewHolder {
+            ImageView img; TextView title;
+            MiniVH(View v, ImageView img, TextView title) { super(v); this.img = img; this.title = title; }
+        }
+        private Bitmap roundedStatic(Bitmap src, int r) {
+            if (src == null) return null;
+            Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            android.graphics.Paint p = new android.graphics.Paint();
+            p.setAntiAlias(true);
+            android.graphics.RectF rf = new android.graphics.RectF(0,0,src.getWidth(), src.getHeight());
+            c.drawRoundRect(rf, r, r, p);
+            p.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+            c.drawBitmap(src,0,0,p);
+            return out;
+        }
+    }
+
+    private void captureTabSnapshot(WebView webView) {
         if (webView == null) return;
         Object tag = webView.getTag();
         int id = -1;
         if (tag instanceof Integer) id = (Integer) tag;
-        int width = webView.getWidth();
-        int height = webView.getHeight();
-        if (width <= 0 || height <= 0) return;
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        webView.draw(canvas);
-        Bitmap enhancedBitmap = addGraphicalEffects(bitmap);
-        tabSnapshots.put(webView, enhancedBitmap);
-        if (id != -1) {
-            final int finalId = id;
-            final Bitmap finalBitmap = enhancedBitmap;
-            backgroundExecutor.execute(() -> {
-                try {
-                    File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
-                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
-                        fos.flush();
+        int w = webView.getWidth();
+        int h = webView.getHeight();
+        if (w <= 0 || h <= 0) return;
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                final Bitmap bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                final int[] loc = new int[2];
+                webView.getLocationInWindow(loc);
+                android.graphics.Rect srcRect = new android.graphics.Rect(loc[0], loc[1], loc[0] + w, loc[1] + h);
+                android.view.PixelCopy.request(getWindow(), srcRect, bitmap, copyResult -> {
+                    if (copyResult == android.view.PixelCopy.SUCCESS) {
+                        Bitmap thumb = Bitmap.createScaledBitmap(bitmap, Math.max(1, w/3), Math.max(1, h/3), true);
+                        Bitmap rounded = roundedBitmap(thumb, dpToPx(8));
+                        tabSnapshots.put(webView, rounded);
+                        if (id != -1) {
+                            final int fid = id;
+                            final Bitmap fbitmap = rounded;
+                            backgroundExecutor.execute(() -> {
+                                try {
+                                    File out = new File(getFilesDir(), "tab_snapshot_" + fid + ".png");
+                                    try (FileOutputStream fos = new FileOutputStream(out)) {
+                                        fbitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                        fos.flush();
+                                    }
+                                } catch (Exception e) { e.printStackTrace(); }
+                            });
+                        }
+                    } else {
+                        fallbackCapture(webView, id, w, h);
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            });
+                }, new Handler(Looper.getMainLooper()));
+            } catch (Exception e) {
+                fallbackCapture(webView, id, w, h);
+            }
+        } else {
+            fallbackCapture(webView, id, w, h);
         }
-}
+    }
 
-private Bitmap addGraphicalEffects(Bitmap original) {
-    int width = original.getWidth();
-    int height = original.getHeight();
-    Bitmap enhanced = Bitmap.createBitmap(width + dpToPx(20), height + dpToPx(20), Bitmap.Config.ARGB_8888);
-    Canvas canvas = new Canvas(enhanced);
-    Paint paint = new Paint();
-    paint.setShadowLayer(dpToPx(8), dpToPx(4), dpToPx(4), Color.argb(128, 0, 0, 0));
-    RectF rect = new RectF(dpToPx(10), dpToPx(10), width + dpToPx(10), height + dpToPx(10));
-    canvas.drawRoundRect(rect, dpToPx(16), dpToPx(16), paint);
-    paint.setShadowLayer(0, 0, 0, 0);
-    canvas.drawBitmap(original, dpToPx(10), dpToPx(10), paint);
-    return enhanced;
-}
+    private void fallbackCapture(WebView webView, int id, int w, int h) {
+        try {
+            Bitmap bmp = Bitmap.createBitmap(Math.max(1, w/3), Math.max(1, h/3), Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(bmp);
+            c.scale(1f/3f, 1f/3f);
+            webView.draw(c);
+            Bitmap rounded = roundedBitmap(bmp, dpToPx(8));
+            tabSnapshots.put(webView, rounded);
+            if (id != -1) {
+                final int fid = id;
+                final Bitmap fbitmap = rounded;
+                backgroundExecutor.execute(() -> {
+                    try {
+                        File out = new File(getFilesDir(), "tab_snapshot_" + fid + ".png");
+                        try (FileOutputStream fos = new FileOutputStream(out)) {
+                            fbitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                            fos.flush();
+                        }
+                    } catch (Exception e) { e.printStackTrace(); }
+                });
+            }
+        } catch (Exception e) { e.printStackTrace(); }
+    }
+
+    private Bitmap roundedBitmap(Bitmap src, int radius) {
+        if (src == null) return null;
+        Bitmap out = Bitmap.createBitmap(src.getWidth(), src.getHeight(), Bitmap.Config.ARGB_8888);
+        Canvas c = new Canvas(out);
+        android.graphics.Paint p = new android.graphics.Paint();
+        p.setAntiAlias(true);
+        android.graphics.RectF rf = new android.graphics.RectF(0,0,src.getWidth(), src.getHeight());
+        c.drawRoundRect(rf, radius, radius, p);
+        p.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN));
+        c.drawBitmap(src, 0, 0, p);
+        return out;
+    }
+
 
     private void showBookmarksManagementDialog() {
         if (bookmarks.isEmpty()) {
