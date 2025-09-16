@@ -17,6 +17,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.Canvas;
 import android.net.Uri;
+import android.util.TypedValue;
+import android.view.ViewOutlineProvider;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
