@@ -46,7 +46,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:largeHeap="true"
-        android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar">
+        android:theme="@style/Theme.MaterialComponents.Light.NoActionBar.Bridge">
 
         <meta-data
             android:name="android.theme.customization.icon"
