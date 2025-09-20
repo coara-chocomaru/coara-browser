@@ -1615,7 +1615,6 @@ PageBg pg = new PageBg(this, webView);
             return false;
         }
     }
-    }
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
@@ -3049,3 +3048,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
+}
