@@ -95,11 +95,6 @@
             android:exported="true" />
         
         <activity
-            android:name=".BackgroundBrowserActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
-            android:exported="true" />
-
-        <activity
             android:name=".pagedl"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:noHistory="true"
