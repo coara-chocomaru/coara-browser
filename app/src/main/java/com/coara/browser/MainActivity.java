@@ -1,7 +1,5 @@
 package com.coara.browser;
 
-import java.io.ByteArrayInputStream;
-
 import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
@@ -111,14 +109,10 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
-
-    private static final String KEY_BACKGROUND_URI = "background_image_uri";
-    private ActivityResultLauncher<Intent> imagePickerLauncher;
-    private volatile String backgroundDataUri = null;
-
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
@@ -131,6 +125,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_UA_ENABLED = "ua_enabled";
     private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
     private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
+    private static final String KEY_BACKGROUND_URI = "background_image_uri";
+    private ActivityResultLauncher<Intent> imagePickerLauncher;
+    private volatile String backgroundDataUri = null;
+
     private static final String KEY_TABS = "tabs";
     private static final String KEY_CURRENT_TAB = "current_tab_index";
     private static final String KEY_BOOKMARKS = "bookmarks";
@@ -390,27 +388,20 @@ public class MainActivity extends AppCompatActivity {
         fileChooserLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
-                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
-                        Uri pickedUri = pickerResult.getData().getData();
-                        if (filePathCallback != null) {
-                            filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
-                        }
-                    } else if (filePathCallback != null) {
-                        filePathCallback.onReceiveValue(null);
-                    }
-                    filePathCallback = null;
-                });
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Uri dataUri = result.getData().getData();
+                        
         imagePickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
-                        Uri pickedUri = result.getData().getData();
-                        if (pickedUri != null) {
+                bgResult -> {
+                    if (bgResult.getResultCode() == Activity.RESULT_OK && bgResult.getData() != null) {
+                        Uri bgUri = bgResult.getData().getData();
+                        if (bgUri != null) {
                             try {
-                                final int takeFlags = result.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                getContentResolver().takePersistableUriPermission(pickedUri, takeFlags);
+                                final int takeFlags = bgResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().takePersistableUriPermission(bgUri, takeFlags);
                             } catch (Exception ignored) {}
-                            pref.edit().putString(KEY_BACKGROUND_URI, pickedUri.toString()).apply();
+                            pref.edit().putString(KEY_BACKGROUND_URI, bgUri.toString()).apply();
                             backgroundDataUri = loadBackgroundDataUriFromPrefs();
                             for (WebView w : webViews) {
                                 try { w.post(() -> w.reload()); } catch (Exception ignored) {}
@@ -419,7 +410,14 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
-
+if (filePathCallback != null) {
+                            filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
+                        }
+                    } else if (filePathCallback != null) {
+                        filePathCallback.onReceiveValue(null);
+                    }
+                    filePathCallback = null;
+                });
 
         urlEditText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
             if (actionId == EditorInfo.IME_ACTION_GO ||
@@ -460,22 +458,6 @@ public class MainActivity extends AppCompatActivity {
          }
      });
     }
-    private void saveBundleToFile(Bundle bundle, String fileName) {
-        File file = new File(getFilesDir(), fileName);
-        Parcel parcel = Parcel.obtain();
-        try {
-            bundle.writeToParcel(parcel, 0);
-            byte[] bytes = parcel.marshall();
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(bytes);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            parcel.recycle();
-        }
-    }
-
     
     private void chooseBackground() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -522,7 +504,23 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-private Bundle loadBundleFromFile(String fileName) {
+    private void saveBundleToFile(Bundle bundle, String fileName) {
+        File file = new File(getFilesDir(), fileName);
+        Parcel parcel = Parcel.obtain();
+        try {
+            bundle.writeToParcel(parcel, 0);
+            byte[] bytes = parcel.marshall();
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(bytes);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            parcel.recycle();
+        }
+    }
+
+    private Bundle loadBundleFromFile(String fileName) {
         File file = new File(getFilesDir(), fileName);
         if (!file.exists()) return null;
         try (FileInputStream fis = new FileInputStream(file)) {
@@ -1068,86 +1066,87 @@ private Bundle loadBundleFromFile(String fileName) {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                try {
-                    if (!request.isForMainFrame()) return super.shouldInterceptRequest(view, request);
-                    Uri url = request.getUrl();
-                    String scheme = url.getScheme();
-                    if (scheme == null) return super.shouldInterceptRequest(view, request);
-                    if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return super.shouldInterceptRequest(view, request);
-                    if (!"GET".equalsIgnoreCase(request.getMethod())) return super.shouldInterceptRequest(view, request);
-                    Map<String, String> requestHeaders = request.getRequestHeaders();
-                    HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
-                    conn.setInstanceFollowRedirects(true);
-                    conn.setRequestMethod("GET");
-                    if (requestHeaders != null) {
-                        for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
-                            try { conn.setRequestProperty(e.getKey(), e.getValue()); } catch (Exception ignored) {}
-                        }
-                    }
-                    String ua = view.getSettings().getUserAgentString();
-                    if (ua != null) conn.setRequestProperty("User-Agent", ua);
-                    conn.connect();
-                    String contentType = conn.getContentType();
-                    String mime = contentType;
-                    String charset = null;
-                    if (contentType != null) {
-                        String[] parts = contentType.split(";");
-                        if (parts.length > 0) mime = parts[0].trim();
-                        for (int i = 1; i < parts.length; i++) {
-                            String p = parts[i].trim();
-                            if (p.toLowerCase().startsWith("charset=")) {
-                                charset = p.substring(8).trim();
+                    try {
+                        if (!request.isForMainFrame()) return super.shouldInterceptRequest(view, request);
+                        Uri url = request.getUrl();
+                        String scheme = url.getScheme();
+                        if (scheme == null) return super.shouldInterceptRequest(view, request);
+                        if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return super.shouldInterceptRequest(view, request);
+                        String method = request.getMethod();
+                        if (!"GET".equalsIgnoreCase(method)) return super.shouldInterceptRequest(view, request);
+                        Map<String, String> requestHeaders = request.getRequestHeaders();
+                        HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
+                        conn.setInstanceFollowRedirects(true);
+                        conn.setRequestMethod("GET");
+                        if (requestHeaders != null) {
+                            for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
+                                try { conn.setRequestProperty(e.getKey(), e.getValue()); } catch (Exception ignored) {}
                             }
                         }
-                    }
-                    InputStream is = conn.getInputStream();
-                    if (mime != null && mime.toLowerCase().contains("text/html")) {
-                        if (charset == null) charset = "UTF-8";
-                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                        byte[] buf = new byte[8192];
-                        int r;
-                        while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
-                        String html = new String(baos.toByteArray(), charset);
-                        String injectCss = "";
-                        if (backgroundDataUri == null) backgroundDataUri = loadBackgroundDataUriFromPrefs();
-                        if (backgroundDataUri != null) {
-                            String css = "body{background-image:url('" + backgroundDataUri + "') !important; background-size:cover !important; background-position:center center !important; background-attachment:fixed !important;} html,body{height:100% !important;}";
-                            injectCss = "<style>" + css + "</style>";
+                        String ua = view.getSettings().getUserAgentString();
+                        if (ua != null) conn.setRequestProperty("User-Agent", ua);
+                        conn.connect();
+                        String contentType = conn.getContentType();
+                        String mime = contentType;
+                        String charset = null;
+                        if (contentType != null) {
+                            String[] parts = contentType.split(";");
+                            if (parts.length > 0) mime = parts[0].trim();
+                            for (int i = 1; i < parts.length; i++) {
+                                String p = parts[i].trim();
+                                if (p.toLowerCase().startsWith("charset=")) {
+                                    charset = p.substring(8).trim();
+                                }
+                            }
                         }
-                        String injectScript = "";
-                        String injection = injectCss + injectScript;
-                        String modified;
-                        int headIdx = -1;
-                        try {
-                            headIdx = html.toLowerCase().indexOf("<head");
-                        } catch (Exception ignored) {}
-                        if (headIdx != -1) {
-                            int gt = html.indexOf('>', headIdx);
-                            if (gt != -1) {
-                                modified = html.substring(0, gt+1) + injection + html.substring(gt+1);
+                        InputStream is = conn.getInputStream();
+                        if (mime != null && mime.toLowerCase().contains("text/html")) {
+                            if (charset == null) charset = "UTF-8";
+                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                            byte[] buf = new byte[8192];
+                            int r;
+                            while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
+                            String html = new String(baos.toByteArray(), charset);
+                            String injectCss = "";
+                            if (backgroundDataUri == null) backgroundDataUri = loadBackgroundDataUriFromPrefs();
+                            if (backgroundDataUri != null) {
+                                String css = "body{background-image:url('" + backgroundDataUri + "') !important; background-size:cover !important; background-position:center center !important; background-attachment:fixed !important;} html,body{height:100% !important;}";
+                                injectCss = "<style>" + css + "</style>";
+                            }
+                            String injectScript = "";
+                            String injection = injectCss + injectScript;
+                            String modified;
+                            int headIdx = -1;
+                            try {
+                                headIdx = html.toLowerCase().indexOf("<head");
+                            } catch (Exception ignored) {}
+                            if (headIdx != -1) {
+                                int gt = html.indexOf('>', headIdx);
+                                if (gt != -1) {
+                                    modified = html.substring(0, gt+1) + injection + html.substring(gt+1);
+                                } else {
+                                    modified = injection + html;
+                                }
                             } else {
                                 modified = injection + html;
                             }
+                            byte[] outBytes = modified.getBytes(charset);
+                            ByteArrayInputStream bais = new ByteArrayInputStream(outBytes);
+                            WebResourceResponse response = new WebResourceResponse("text/html", charset, bais);
+                            try {
+                                Map<String, String> headers = new HashMap<>();
+                                String enc = conn.getContentEncoding();
+                                if (enc != null) headers.put("Content-Encoding", enc);
+                                response.setResponseHeaders(headers);
+                            } catch (Exception ignored) {}
+                            return response;
                         } else {
-                            modified = injection + html;
+                            return super.shouldInterceptRequest(view, request);
                         }
-                        byte[] outBytes = modified.getBytes(charset);
-                        ByteArrayInputStream bais = new ByteArrayInputStream(outBytes);
-                        WebResourceResponse response = new WebResourceResponse("text/html", charset, bais);
-                        try {
-                            Map<String, String> headers = new HashMap<>();
-                            String enc = conn.getContentEncoding();
-                            if (enc != null) headers.put("Content-Encoding", enc);
-                            response.setResponseHeaders(headers);
-                        } catch (Exception ignored) {}
-                        return response;
-                    } else {
+                    } catch (Exception e) {
                         return super.shouldInterceptRequest(view, request);
                     }
-                } catch (Exception e) {
-                    return super.shouldInterceptRequest(view, request);
                 }
-            }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
