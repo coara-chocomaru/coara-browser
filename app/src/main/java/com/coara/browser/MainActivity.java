@@ -114,6 +114,11 @@ import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
 
+    private static final String KEY_BACKGROUND_URI = "background_image_uri";
+    private ActivityResultLauncher<Intent> imagePickerLauncher;
+    private volatile String backgroundDataUri = null;
+
+
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
     private static final String KEY_CURRENT_TAB_ID = "current_tab_id";
@@ -125,10 +130,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_UA_ENABLED = "ua_enabled";
     private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
     private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
-    private static final String KEY_BACKGROUND_URI = "background_image_uri";
-    private ActivityResultLauncher<Intent> imagePickerLauncher;
-    private volatile String backgroundDataUri = null;
-
     private static final String KEY_TABS = "tabs";
     private static final String KEY_CURRENT_TAB = "current_tab_index";
     private static final String KEY_BOOKMARKS = "bookmarks";
@@ -390,7 +391,7 @@ public class MainActivity extends AppCompatActivity {
                 result -> {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         Uri dataUri = result.getData().getData();
-                        
+
         imagePickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 bgResult -> {
@@ -410,7 +411,8 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
-if (filePathCallback != null) {
+
+                        if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
                     } else if (filePathCallback != null) {
@@ -1764,23 +1766,11 @@ if (filePathCallback != null) {
         return super.onPrepareOptionsMenu(menu);
     }
     @Override
-    
-public boolean onOptionsItemSelected(MenuItem item) {
-    int id = item.getItemId();
-    if (id == R.id.action_set_background) {
-        chooseBackground();
-        return true;
-    } else if (id == R.id.action_clear_background) {
-        clearBackground();
-        return true;
-    }
-    
-    try {
-        return super.onOptionsItemSelected(item);
-    } catch (Exception e) {
-        return false;
-    }
-} else if (id == R.id.action_dark_mode) {
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+        if (id == R.id.action_tabs) {
+            showTabsDialog();
+        } else if (id == R.id.action_dark_mode) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 darkModeEnabled = !darkModeEnabled;
                 item.setChecked(darkModeEnabled);
@@ -3099,4 +3089,18 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+        if (id == R.id.action_set_background) {
+            chooseBackground();
+            return true;
+        } else if (id == R.id.action_clear_background) {
+            clearBackground();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
 }
