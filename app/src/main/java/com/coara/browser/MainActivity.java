@@ -159,7 +159,11 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
-    private SharedPreferences pref;
+
+    private final Map<WebView, PageBg> pageBgMap = new HashMap<>();
+    private ActivityResultLauncher<String> bgPermissionLauncher;
+    private ActivityResultLauncher<String> bgImagePickerLauncher;
+private SharedPreferences pref;
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
@@ -236,6 +240,38 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        bgPermissionLauncher = registerForActivityResult(
+            new ActivityResultContracts.RequestPermission(),
+            isGranted -> {
+                if (isGranted) {
+                    bgImagePickerLauncher.launch("image/*");
+                } else {
+                    Toast.makeText(MainActivity.this, "画像へのアクセスが許可されていません", Toast.LENGTH_SHORT).show();
+                }
+            }
+        );
+        bgImagePickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.GetContent(),
+            uri -> {
+                if (uri != null) {
+                    PageBg pg = pageBgMap.get(getCurrentWebView());
+                    if (pg != null) {
+                        pg.handleImageSelection(uri);
+                    } else {
+                        // apply to current webview directly if no PageBg found
+                        try {
+                            PageBg tmp = new PageBg(MainActivity.this, getCurrentWebView());
+                            tmp.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
+                            tmp.handleImageSelection(uri);
+                            pageBgMap.put(getCurrentWebView(), tmp);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+            }
+        );
 
         toolbar = findViewById(R.id.topAppBar);
         setSupportActionBar(toolbar);
@@ -791,6 +827,19 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView createNewWebView() {
         WebView webView;
+        PageBg pg = new PageBg(this, webView);
+        pg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
+        pg.setOnImageSelectedCallback(() -> {
+            runOnUiThread(() -> {
+                try {
+                    if (webView == getCurrentWebView()) {
+                        webView.reload();
+                    }
+                } catch (Exception ignored) {}
+            });
+        });
+        pageBgMap.put(webView, pg);
+
         if (preloadedWebView != null) {
             webView = preloadedWebView;
             preloadedWebView = null;
@@ -1535,6 +1584,10 @@ public class MainActivity extends AppCompatActivity {
     private WebView getCurrentWebView() {
         return webViews.get(currentTabIndex);
     }
+
+    private PageBg getPageBgForWebView(WebView w) {
+        return pageBgMap.get(w);
+    }
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
@@ -1615,6 +1668,31 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
+
+        } else if (id == R.id.action_set_background) {
+            PageBg pg = getPageBgForWebView(getCurrentWebView());
+            if (pg != null) {
+                pg.selectAndSetBackground();
+            } else {
+                if (getCurrentWebView() != null) {
+                    PageBg tmp = new PageBg(MainActivity.this, getCurrentWebView());
+                    tmp.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
+                    pageBgMap.put(getCurrentWebView(), tmp);
+                    tmp.selectAndSetBackground();
+                }
+            }
+            return true;
+        } else if (id == R.id.action_clear_background) {
+            pref.edit().remove("background_image_uri").apply();
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                current.setBackgroundColor(Color.WHITE);
+                String js = "javascript:(function(){var styles=document.head.querySelectorAll('style'); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf('opacity: 0.5')!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity='1';})();";
+                try { current.evaluateJavascript(js, null); } catch (Exception ignored) {}
+            }
+            Toast.makeText(this, "背景画像を初期化しました", Toast.LENGTH_SHORT).show();
+            return true;
+
         if (id == R.id.action_tabs) {
             showTabsDialog();
         } else if (id == R.id.action_dark_mode) {
