@@ -150,7 +150,7 @@ public class MainActivity extends AppCompatActivity {
     private TextInputEditText urlEditText;
     private ImageView faviconImageView;
     private ImageView backgroundView;
-    private ActivityResultLauncher<String[]> pickImageLauncher;
+    private static final int PICK_IMAGE_REQUEST = 1001;
     private Handler handler;
     private Runnable transparencyRunnable;
 
@@ -301,16 +301,6 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         handler.post(transparencyRunnable);
-        pickImageLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), new ActivityResultCallback<Uri>() {
-            @Override
-            public void onActivityResult(Uri uri) {
-                if (uri != null) {
-                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
-                    getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putString("bg_uri", uri.toString()).apply();
-                    backgroundView.setImageURI(uri);
-                }
-            }
-        });
         loadBackgroundIfExists();
 
         tabCountTextView = findViewById(R.id.tabCountTextView);
@@ -2968,7 +2958,20 @@ private void addHistory(String url, String title) {
         return s != null && s.length() > 0;
     }
 
-    private void loadBackgroundIfExists() {
+    
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == PICK_IMAGE_REQUEST && resultCode == RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri != null) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
+                getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putString("bg_uri", uri.toString()).apply();
+                if (backgroundView != null) backgroundView.setImageURI(uri);
+            }
+        }
+    }
+private void loadBackgroundIfExists() {
         String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
         if (s != null) {
             try {
