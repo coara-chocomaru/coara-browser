@@ -116,12 +116,36 @@ public class PageBg {
         }
     }
 
+    public void clearBackground() {
+        try {
+            backgroundUri = null;
+            pref.edit().remove(KEY_BACKGROUND_IMAGE_URI).apply();
+        } catch (Exception ignored) {}
+        mainHandler.post(() -> {
+            try {
+                if (webView != null) {
+                    webView.setBackgroundColor(android.graphics.Color.WHITE);
+                    String js = "javascript:(function(){var styles=document.head.querySelectorAll('style'); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf('opacity: 0.5')!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity='1';})();";
+                    try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
     private void injectTransparencyJs() {
         String js = "javascript:(function() { " +
                 "var style = document.createElement('style'); " +
+                "style.setAttribute('data-pagebg','true'); " +
                 "style.innerHTML = 'body, body * { opacity: 0.5 !important; background: transparent !important; }'; " +
-                "document.head.appendChild(style); " +
+             "document.head.appendChild(style); " +
                 "})();";
+        try {
+            webView.evaluateJavascript(js, null);
+            } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+)();";
         webView.evaluateJavascript(js, null);
     }
 }

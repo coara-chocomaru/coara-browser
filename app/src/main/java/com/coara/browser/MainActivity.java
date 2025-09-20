@@ -114,6 +114,7 @@ public class MainActivity extends AppCompatActivity {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
+    private static final String KEY_BACKGROUND_IMAGE_URI = "background_image_uri";
     private static final String KEY_CURRENT_TAB_ID = "current_tab_id";
     private static final String KEY_DARK_MODE = "dark_mode";
     private static final String KEY_BASIC_AUTH = "basic_auth";
@@ -160,7 +161,6 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private final java.util.Map<WebView, PageBg> pageBgMap = new java.util.HashMap<>();
-    private final java.util.Set<WebView> bgSetViews = new java.util.HashSet<>();
     private ActivityResultLauncher<String> bgPermissionLauncher;
     private ActivityResultLauncher<String> bgImagePickerLauncher;
 
@@ -730,9 +730,7 @@ public class MainActivity extends AppCompatActivity {
                 "if(el.style.position!=='fixed'){el.style.position='fixed';}" +
                 "});" +
                 "})();";
-        if (!isBgImageSetFor(getCurrentWebView())) {
-                webView.evaluateJavascript(js, null);
-            }
+        webView.evaluateJavascript(js, null);
     }
     private void injectLazyLoading(WebView webView) {
         String js = "javascript:(function(){" +
@@ -786,9 +784,7 @@ public class MainActivity extends AppCompatActivity {
                 "loadImagesOnScroll();" +
                 "}" +
                 "})();";
-        if (!isBgImageSetFor(getCurrentWebView())) {
-                webView.evaluateJavascript(js, null);
-            }
+        webView.evaluateJavascript(js, null);
     }
     private void applyOptimizedSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
@@ -842,10 +838,12 @@ public class MainActivity extends AppCompatActivity {
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        if (!isBgImageSetFor(webView)) {
-            if (!isBgImageSetFor(webView)) {
+        boolean __hasSavedBg = false;
+        try {
+            if (pref != null) __hasSavedBg = pref.contains(KEY_BACKGROUND_IMAGE_URI);
+        } catch (Exception __e) { __hasSavedBg = false; }
+        if (!__hasSavedBg) {
             webView.setBackgroundColor(Color.WHITE);
-        }
         }
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
@@ -853,7 +851,6 @@ public class MainActivity extends AppCompatActivity {
 PageBg pg = new PageBg(this, webView);
         pg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
         pg.setOnImageSelectedCallback(() -> {
-            bgSetViews.add(webView);
             runOnUiThread(() -> {
                 try {
                     if (webView == getCurrentWebView()) {
@@ -1160,9 +1157,7 @@ PageBg pg = new PageBg(this, webView);
           "window.addEventListener('popstate',function(){notifyUrlChange();});" +
           "notifyUrlChange();" +
           "})();"; 
-            if (!isBgImageSetFor(getCurrentWebView())) {
-                view.evaluateJavascript(jsOverrideHistory, null);
-            } 
+            view.evaluateJavascript(jsOverrideHistory, null); 
             if (view == getCurrentWebView()) {
                 captureTabSnapshot(view);
             }
@@ -1601,20 +1596,6 @@ PageBg pg = new PageBg(this, webView);
     private PageBg getPageBgForWebView(WebView w) {
         return pageBgMap.get(w);
     }
-
-    
-    private boolean isBgImageSetFor(WebView w) {
-        if (w == null) return false;
-        try {
-            if (bgSetViews.contains(w)) return true;
-            PageBg pg = pageBgMap.get(w);
-            if (pg == null) return false;
-            try { pg.loadSavedBackground(); } catch (Exception ignored) {}
-            return bgSetViews.contains(w);
-        } catch (Exception e) {
-            return false;
-        }
-    }
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
@@ -1710,18 +1691,13 @@ PageBg pg = new PageBg(this, webView);
             }
             return true;
         } else if (id == R.id.action_clear_background) {
-            pref.edit().remove("background_image_uri").apply();
+            pref.edit().remove(KEY_BACKGROUND_IMAGE_URI).apply();
+            for (PageBg p : pageBgMap.values()) { try { p.clearBackground(); } catch (Exception ignored) {} }
             WebView current = getCurrentWebView();
             if (current != null) {
-                bgSetViews.remove(current);
-
-                if (!isBgImageSetFor(current)) {
-            current.setBackgroundColor(Color.WHITE);
-        }
+                current.setBackgroundColor(Color.WHITE);
                 String js = "javascript:(function(){var styles=document.head.querySelectorAll('style'); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf('opacity: 0.5')!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity='1';})();";
-                try { if (!isBgImageSetFor(getCurrentWebView())) {
-                current.evaluateJavascript(js, null);
-            } } catch (Exception ignored) {}
+                try { current.evaluateJavascript(js, null); } catch (Exception ignored) {}
             }
             Toast.makeText(this, "背景画像を初期化しました", Toast.LENGTH_SHORT).show();
             return true;
