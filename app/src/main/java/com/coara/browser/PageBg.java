@@ -131,7 +131,7 @@ public class PageBg {
                         String js = "javascript:(function(){"
                                 + "var styles = document.head.querySelectorAll('style[data-pagebg]');"
                                 + "for(var i=0;i<styles.length;i++){styles[i].parentNode.removeChild(styles[i]);}"
-                                + "document.body.style.opacity='1';"
+                                + "// restored background styles removed"
                                 + "})();";
                         try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
                     }
@@ -145,7 +145,7 @@ public class PageBg {
         String js = "javascript:(function() {"
                 + "var style = document.createElement('style');"
                 + "style.setAttribute('data-pagebg','true');"
-                + "style.innerHTML = 'body, body * { opacity: 0.5 !important; background: transparent !important; }';"
+                + "style.innerHTML = 'html, body, body * { background: transparent !important; }';"
                 + "document.head.appendChild(style);"
                 + "})();";
         try {

@@ -1295,7 +1295,16 @@ PageBg pg = new PageBg(this, webView);
                 closeTab(getCurrentWebView());
             }
         });
-        return webView;
+        
+            // Attach persistent background if saved
+            try {
+                if (pref != null && pref.contains(KEY_BACKGROUND_IMAGE_URI)) {
+                    PageBg tmpPg = new PageBg(MainActivity.this, webView);
+                    try { tmpPg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher); } catch (Exception ignored) {}
+                    pageBgMap.put(webView, tmpPg);
+                }
+            } catch (Exception ignored) {}
+return webView;
     }
 
     private void closeTab(WebView webView) {
