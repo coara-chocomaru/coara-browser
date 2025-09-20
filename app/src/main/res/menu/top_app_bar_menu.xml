@@ -42,6 +42,9 @@
 
     <item android:title="表示設定">
         <menu>
+            <item android:id="@+id/menu_set_background" android:title="背景画像の設定" />
+            <item android:id="@+id/menu_set_opacity" android:title="背景透過率" />
+            <item android:id="@+id/menu_clear_background" android:title="背景設定クリア" />
             <item android:id="@+id/action_dark_mode" android:title="ダークモード" android:checkable="true" />
             <item android:id="@+id/action_zoom_toggle" android:title="ズーム" android:checkable="true" />
             <item android:id="@+id/action_negapoji" android:title="ネガポジ" />
@@ -69,3 +72,4 @@
     </group>
 
 </menu>
+
