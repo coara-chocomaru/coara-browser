@@ -71,6 +71,7 @@ public class PageBg {
         if (uri != null) {
             backgroundUri = uri;
             saveBackgroundUri();
+            try { if (context instanceof MainActivity) ((MainActivity)context).setBackgroundImageUri(backgroundUri); } catch (Exception ignored) {}
             applyBackgroundAsync();
             if (onImageSelectedCallback != null) {
                 onImageSelectedCallback.run();
@@ -86,6 +87,7 @@ public class PageBg {
         String uriStr = pref.getString(KEY_BACKGROUND_IMAGE_URI, null);
         if (uriStr != null) {
             backgroundUri = Uri.parse(uriStr);
+            try { if (context instanceof MainActivity) ((MainActivity)context).setBackgroundImageUri(backgroundUri); } catch (Exception ignored) {}
             applyBackgroundAsync();
         }
     }
@@ -111,47 +113,17 @@ public class PageBg {
 
     private void applyBackgroundAndTransparency(Bitmap bitmap) {
         if (webView != null) {
-            webView.setBackground(new BitmapDrawable(context.getResources(), bitmap));
             injectTransparencyJs();
+            try { if (context instanceof MainActivity) ((MainActivity)context).setBackgroundImageUri(backgroundUri); } catch (Exception ignored) {}
         }
-    }
-
-    
-    public void clearBackground() {
-        try {
-            backgroundUri = null;
-            if (pref != null) pref.edit().remove(KEY_BACKGROUND_IMAGE_URI).apply();
-        } catch (Exception ignored) {}
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    if (webView != null) {
-                        webView.setBackgroundColor(android.graphics.Color.WHITE);
-                        String js = "javascript:(function(){"
-                                + "var styles = document.head.querySelectorAll('style[data-pagebg]');"
-                                + "for(var i=0;i<styles.length;i++){styles[i].parentNode.removeChild(styles[i]);}"
-                                + "// restored background styles removed"
-                                + "})();";
-                        try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
-                    }
-                } catch (Exception ignored) {}
-            }
-        });
     }
 
     private void injectTransparencyJs() {
-        if (webView == null) return;
-        String js = "javascript:(function() {"
-                + "var style = document.createElement('style');"
-                + "style.setAttribute('data-pagebg','true');"
-                + "style.innerHTML = 'html, body, body * { background: transparent !important; }';"
-                + "document.head.appendChild(style);"
-                + "})();";
-        try {
-            webView.evaluateJavascript(js, null);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        String js = "javascript:(function() { " +
+                "var style = document.createElement('style'); " +
+                "style.innerHTML = 'body, body * { opacity: 0.5 !important; background: transparent !important; }'; " +
+                "document.head.appendChild(style); " +
+                "})();";
+        webView.evaluateJavascript(js, null);
     }
 }

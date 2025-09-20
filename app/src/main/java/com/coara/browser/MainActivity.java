@@ -114,7 +114,6 @@ public class MainActivity extends AppCompatActivity {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
-    private static final String KEY_BACKGROUND_IMAGE_URI = "background_image_uri";
     private static final String KEY_CURRENT_TAB_ID = "current_tab_id";
     private static final String KEY_DARK_MODE = "dark_mode";
     private static final String KEY_BASIC_AUTH = "basic_auth";
@@ -172,7 +171,29 @@ public class MainActivity extends AppCompatActivity {
     private int currentHistoryIndex = -1;
     private int currentMatchIndex = 0;
     private int totalMatches = 0;
-    private boolean isBackNavigation = false;
+    
+    public void setBackgroundImageUri(final Uri uri) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    ImageView iv = findViewById(R.id.backgroundImageView);
+                    if (iv == null) return;
+                    if (uri == null) {
+                        iv.setImageDrawable(null);
+                        iv.setVisibility(View.GONE);
+                    } else {
+                        try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                        iv.setImageURI(uri);
+                        iv.setVisibility(View.VISIBLE);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
+    }
+private boolean isBackNavigation = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
     private final List<HistoryItem> historyItems = Collections.synchronizedList(new ArrayList<>());
     private boolean darkModeEnabled = false;
@@ -241,6 +262,15 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        try {
+            String uriStr = pref.getString(KEY_BACKGROUND_IMAGE_URI, null);
+            if (uriStr != null) {
+                Uri bg = Uri.parse(uriStr);
+                try { getContentResolver().takePersistableUriPermission(bg, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                setBackgroundImageUri(bg);
+            }
+        } catch (Exception ignored) {}
+
 
         bgPermissionLauncher = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(),
@@ -333,7 +363,7 @@ public class MainActivity extends AppCompatActivity {
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
-            webViewContainer.addView(initialWebView);
+            ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
         }
         updateTabCount();
@@ -645,7 +675,7 @@ public class MainActivity extends AppCompatActivity {
             nextTabId++;
             webViews.add(initialWebView);
             currentTabIndex = 0;
-            webViewContainer.addView(initialWebView);
+            ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
         } else {
             boolean found = false;
@@ -659,7 +689,7 @@ public class MainActivity extends AppCompatActivity {
             if (!found) {
                 currentTabIndex = 0;
             }
-            webViewContainer.addView(getCurrentWebView());
+            ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(getCurrentWebView());
         }
     } catch (JSONException e) {
         e.printStackTrace();
@@ -670,7 +700,7 @@ public class MainActivity extends AppCompatActivity {
         webViews.add(initialWebView);
         currentTabIndex = 0;
         webViewContainer.removeAllViews();
-        webViewContainer.addView(initialWebView);
+        ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(initialWebView);
         initialWebView.loadUrl(START_PAGE);
     }
     updateTabCount();
@@ -839,10 +869,11 @@ public class MainActivity extends AppCompatActivity {
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         boolean __hasSavedBg = false;
-        try {
-            if (pref != null) __hasSavedBg = pref.contains(KEY_BACKGROUND_IMAGE_URI);
-        } catch (Exception __e) { __hasSavedBg = false; }
-        if (!__hasSavedBg) {
+        try { __hasSavedBg = pref != null && pref.contains(KEY_BACKGROUND_IMAGE_URI); } catch (Exception ignored) {}
+        if (__hasSavedBg) {
+            webView.setBackgroundColor(Color.TRANSPARENT);
+            try { webView.setLayerType(View.LAYER_TYPE_SOFTWARE, null); } catch (Exception ignored) {}
+        } else {
             webView.setBackgroundColor(Color.WHITE);
         }
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
@@ -1295,16 +1326,7 @@ PageBg pg = new PageBg(this, webView);
                 closeTab(getCurrentWebView());
             }
         });
-        
-            // Attach persistent background if saved
-            try {
-                if (pref != null && pref.contains(KEY_BACKGROUND_IMAGE_URI)) {
-                    PageBg tmpPg = new PageBg(MainActivity.this, webView);
-                    try { tmpPg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher); } catch (Exception ignored) {}
-                    pageBgMap.put(webView, tmpPg);
-                }
-            } catch (Exception ignored) {}
-return webView;
+        return webView;
     }
 
     private void closeTab(WebView webView) {
@@ -1334,7 +1356,7 @@ return webView;
                 runOnUiThread(() -> {
                     try {
                         webViewContainer.removeAllViews();
-                        webViewContainer.addView(getCurrentWebView());
+                        ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(getCurrentWebView());
                         updateTabCount();
                     } catch (Exception ignored) {}
                 });
@@ -1594,7 +1616,7 @@ return webView;
         }
         webViewContainer.removeAllViews();
         currentTabIndex = index;
-        webViewContainer.addView(getCurrentWebView());
+        ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(getCurrentWebView());
         urlEditText.setText(getCurrentWebView().getUrl());
     }
 
@@ -1700,8 +1722,7 @@ return webView;
             }
             return true;
         } else if (id == R.id.action_clear_background) {
-            pref.edit().remove(KEY_BACKGROUND_IMAGE_URI).apply();
-            for (PageBg p : pageBgMap.values()) { try { p.clearBackground(); } catch (Exception ignored) {} }
+            pref.edit().remove("background_image_uri").apply();
             WebView current = getCurrentWebView();
             if (current != null) {
                 current.setBackgroundColor(Color.WHITE);
@@ -2010,7 +2031,7 @@ return webView;
         webViews.add(current);
         currentTabIndex = 0;
         webViewContainer.removeAllViews();
-        webViewContainer.addView(current);
+        ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(current);
         updateTabCount();
 }
         }
@@ -2470,7 +2491,7 @@ private void showHistoryDialog() {
                             runOnUiThread(() -> {
                                 try {
                                     webViewContainer.removeAllViews();
-                                    webViewContainer.addView(getCurrentWebView());
+                                    ViewGroup webArea = findViewById(R.id.webViewArea); if (webArea != null) webArea.addView(getCurrentWebView());
                                     updateTabCount();
                                     if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
                                 } catch (Exception ignored) {}
