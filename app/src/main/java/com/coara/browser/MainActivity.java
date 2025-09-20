@@ -835,7 +835,7 @@ public class MainActivity extends AppCompatActivity {
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        webView.setBackgroundColor(Color.WHITE);
+        if (!hasBackgroundImage()) webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -2990,7 +2990,12 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-    private void loadBackgroundIfExists() {
+    
+    private boolean hasBackgroundImage() {
+        String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
+        return s != null && s.length() > 0;
+    }
+private void loadBackgroundIfExists() {
         String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
         if (s != null) {
             try {
