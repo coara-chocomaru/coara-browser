@@ -88,6 +88,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -109,15 +110,8 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
-
-    private static final String KEY_BACKGROUND_URI = "background_image_uri";
-    private ActivityResultLauncher<Intent> imagePickerLauncher;
-    private volatile String backgroundDataUri = null;
-
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
@@ -167,6 +161,8 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
+    private BackgroundManager backgroundManager;
+    private androidx.activity.result.ActivityResultLauncher<Intent> backgroundPickerLauncher;
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
@@ -251,6 +247,21 @@ public class MainActivity extends AppCompatActivity {
         }
 
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        backgroundManager = new BackgroundManager(this);
+        backgroundPickerLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                Uri dataUri = result.getData().getData();
+                if (dataUri != null) {
+                    backgroundManager.setBackgroundUri(dataUri.toString());
+                    synchronized (webViews) {
+                        for (WebView w : webViews) {
+                            try { w.reload(); } catch (Exception ignored) {}
+                        }
+                    }
+                    Toast.makeText(MainActivity.this, "背景を設定しました", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
         checkSentinelAndClearTabsIfNecessary();
         ensureCacheSentinelExists();
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
@@ -391,27 +402,6 @@ public class MainActivity extends AppCompatActivity {
                 result -> {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         Uri dataUri = result.getData().getData();
-
-        imagePickerLauncher = registerForActivityResult(
-                new ActivityResultContracts.StartActivityForResult(),
-                bgResult -> {
-                    if (bgResult.getResultCode() == Activity.RESULT_OK && bgResult.getData() != null) {
-                        Uri bgUri = bgResult.getData().getData();
-                        if (bgUri != null) {
-                            try {
-                                final int takeFlags = bgResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                getContentResolver().takePersistableUriPermission(bgUri, takeFlags);
-                            } catch (Exception ignored) {}
-                            pref.edit().putString(KEY_BACKGROUND_URI, bgUri.toString()).apply();
-                            backgroundDataUri = loadBackgroundDataUriFromPrefs();
-                            for (WebView w : webViews) {
-                                try { w.post(() -> w.reload()); } catch (Exception ignored) {}
-                            }
-                            Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                });
-
                         if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
@@ -460,52 +450,6 @@ public class MainActivity extends AppCompatActivity {
          }
      });
     }
-    
-    private void chooseBackground() {
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-        intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("image/*");
-        try {
-            imagePickerLauncher.launch(intent);
-        } catch (Exception ignored) {}
-    }
-
-    private void clearBackground() {
-        String prev = pref.getString(KEY_BACKGROUND_URI, null);
-        if (prev != null) {
-            try {
-                Uri prevUri = Uri.parse(prev);
-                getContentResolver().releasePersistableUriPermission(prevUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            } catch (Exception ignored) {}
-            pref.edit().remove(KEY_BACKGROUND_URI).apply();
-        }
-        backgroundDataUri = null;
-        for (WebView w : webViews) {
-            try { w.post(() -> w.reload()); } catch (Exception ignored) {}
-        }
-        Toast.makeText(this, "背景設定をクリアしました", Toast.LENGTH_SHORT).show();
-    }
-
-    private String loadBackgroundDataUriFromPrefs() {
-        String uriStr = pref.getString(KEY_BACKGROUND_URI, null);
-        if (uriStr == null) return null;
-        Uri uri = Uri.parse(uriStr);
-        try (InputStream is = getContentResolver().openInputStream(uri)) {
-            if (is == null) return null;
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            byte[] buf = new byte[8192];
-            int r;
-            while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
-            byte[] bytes = baos.toByteArray();
-            String mime = getContentResolver().getType(uri);
-            if (mime == null) mime = "image/png";
-            String base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
-            return "data:" + mime + ";base64," + base64;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
     private void saveBundleToFile(Bundle bundle, String fileName) {
         File file = new File(getFilesDir(), fileName);
         Parcel parcel = Parcel.obtain();
@@ -756,7 +700,42 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-    private void applyCombinedOptimizations(WebView webView) {
+    
+    private String readStream(InputStream is, String charset) throws Exception {
+        if (is == null) return "";
+        if (charset == null || charset.isEmpty()) charset = "UTF-8";
+        BufferedReader br = new BufferedReader(new InputStreamReader(is, charset));
+        StringBuilder sb = new StringBuilder();
+        String line;
+        while ((line = br.readLine()) != null) {
+            sb.append(line);
+            sb.append('\n');
+        }
+        br.close();
+        return sb.toString();
+    }
+    private String injectIntoHead(String html, String injection) {
+        if (injection == null || injection.isEmpty()) return html;
+        String lower = html.toLowerCase();
+        int idx = lower.indexOf("<head");
+        if (idx != -1) {
+            int start = html.indexOf(">", idx);
+            if (start != -1) {
+                start++;
+                return html.substring(0, start) + injection + html.substring(start);
+            }
+        }
+        int htmlIdx = lower.indexOf("<html");
+        if (htmlIdx != -1) {
+            int start = html.indexOf(">", htmlIdx);
+            if (start != -1) {
+                start++;
+                return html.substring(0, start) + "<head>" + injection + "</head>" + html.substring(start);
+            }
+        }
+        return injection + html;
+    }
+private void applyCombinedOptimizations(WebView webView) {
         String js = "javascript:(function(){" +
                 "var animatedElements=document.querySelectorAll('.animated,.transition');" +
                 "animatedElements.forEach(function(el){" +
@@ -1068,87 +1047,48 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                    try {
-                        if (!request.isForMainFrame()) return super.shouldInterceptRequest(view, request);
-                        Uri url = request.getUrl();
-                        String scheme = url.getScheme();
-                        if (scheme == null) return super.shouldInterceptRequest(view, request);
-                        if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return super.shouldInterceptRequest(view, request);
-                        String method = request.getMethod();
-                        if (!"GET".equalsIgnoreCase(method)) return super.shouldInterceptRequest(view, request);
-                        Map<String, String> requestHeaders = request.getRequestHeaders();
-                        HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
+                try {
+                    String url = request.getUrl().toString();
+                    if (!"GET".equalsIgnoreCase(request.getMethod())) return super.shouldInterceptRequest(view, request);
+                    String injection = backgroundManager != null ? backgroundManager.getInjectionHtml() : "";
+                    if (injection == null) injection = "";
+                    if (url.startsWith("file:///android_asset/")) {
+                        String assetPath = url.substring("file:///android_asset/".length());
+                        InputStream is = getAssets().open(assetPath);
+                        String html = readStream(is, "UTF-8");
+                        if (!injection.isEmpty()) html = injectIntoHead(html, injection);
+                        return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(html.getBytes("UTF-8")));
+                    } else if (url.startsWith("http://") || url.startsWith("https://")) {
+                        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
                         conn.setInstanceFollowRedirects(true);
-                        conn.setRequestMethod("GET");
-                        if (requestHeaders != null) {
-                            for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
-                                try { conn.setRequestProperty(e.getKey(), e.getValue()); } catch (Exception ignored) {}
+                        conn.setConnectTimeout(5000);
+                        conn.setReadTimeout(8000);
+                        Map<String, String> headers = request.getRequestHeaders();
+                        if (headers != null) {
+                            for (Map.Entry<String, String> h : headers.entrySet()) {
+                                try { conn.setRequestProperty(h.getKey(), h.getValue()); } catch (Exception ignored) {}
                             }
                         }
-                        String ua = view.getSettings().getUserAgentString();
-                        if (ua != null) conn.setRequestProperty("User-Agent", ua);
                         conn.connect();
                         String contentType = conn.getContentType();
-                        String mime = contentType;
-                        String charset = null;
-                        if (contentType != null) {
-                            String[] parts = contentType.split(";");
-                            if (parts.length > 0) mime = parts[0].trim();
-                            for (int i = 1; i < parts.length; i++) {
-                                String p = parts[i].trim();
-                                if (p.toLowerCase().startsWith("charset=")) {
-                                    charset = p.substring(8).trim();
-                                }
+                        if (contentType != null && contentType.toLowerCase().contains("text/html")) {
+                            String charset = "UTF-8";
+                            String ct = contentType.toLowerCase();
+                            int cidx = ct.indexOf("charset=");
+                            if (cidx != -1) {
+                                charset = ct.substring(cidx + 8).trim();
                             }
+                            InputStream is = conn.getInputStream();
+                            String html = readStream(is, charset);
+                            if (!injection.isEmpty()) html = injectIntoHead(html, injection);
+                            return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(html.getBytes("UTF-8")));
                         }
-                        InputStream is = conn.getInputStream();
-                        if (mime != null && mime.toLowerCase().contains("text/html")) {
-                            if (charset == null) charset = "UTF-8";
-                            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                            byte[] buf = new byte[8192];
-                            int r;
-                            while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
-                            String html = new String(baos.toByteArray(), charset);
-                            String injectCss = "";
-                            if (backgroundDataUri == null) backgroundDataUri = loadBackgroundDataUriFromPrefs();
-                            if (backgroundDataUri != null) {
-                                String css = "body{background-image:url('" + backgroundDataUri + "') !important; background-size:cover !important; background-position:center center !important; background-attachment:fixed !important;} html,body{height:100% !important;}";
-                                injectCss = "<style>" + css + "</style>";
-                            }
-                            String injectScript = "";
-                            String injection = injectCss + injectScript;
-                            String modified;
-                            int headIdx = -1;
-                            try {
-                                headIdx = html.toLowerCase().indexOf("<head");
-                            } catch (Exception ignored) {}
-                            if (headIdx != -1) {
-                                int gt = html.indexOf('>', headIdx);
-                                if (gt != -1) {
-                                    modified = html.substring(0, gt+1) + injection + html.substring(gt+1);
-                                } else {
-                                    modified = injection + html;
-                                }
-                            } else {
-                                modified = injection + html;
-                            }
-                            byte[] outBytes = modified.getBytes(charset);
-                            ByteArrayInputStream bais = new ByteArrayInputStream(outBytes);
-                            WebResourceResponse response = new WebResourceResponse("text/html", charset, bais);
-                            try {
-                                Map<String, String> headers = new HashMap<>();
-                                String enc = conn.getContentEncoding();
-                                if (enc != null) headers.put("Content-Encoding", enc);
-                                response.setResponseHeaders(headers);
-                            } catch (Exception ignored) {}
-                            return response;
-                        } else {
-                            return super.shouldInterceptRequest(view, request);
-                        }
-                    } catch (Exception e) {
-                        return super.shouldInterceptRequest(view, request);
                     }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
+                return super.shouldInterceptRequest(view, request);
+            }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 String url = request.getUrl().toString();
@@ -1962,7 +1902,24 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
         }
-        return super.onOptionsItemSelected(item);
+
+        } else if (id == R.id.action_set_background) {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("image/*");
+            backgroundPickerLauncher.launch(intent);
+            return true;
+        } else if (id == R.id.action_clear_background) {
+            if (backgroundManager != null) backgroundManager.clearBackground();
+            synchronized (webViews) {
+                for (WebView w : webViews) {
+                    try { w.reload(); } catch (Exception ignored) {}
+                }
+            }
+            Toast.makeText(this, "背景をクリアしました", Toast.LENGTH_SHORT).show();
+            return true;
+
+                return super.onOptionsItemSelected(item);
     }
 
     private void clearBasicAuthCacheAndReload() {
@@ -3089,18 +3046,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        int id = item.getItemId();
-        if (id == R.id.action_set_background) {
-            chooseBackground();
-            return true;
-        } else if (id == R.id.action_clear_background) {
-            clearBackground();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
 }
