@@ -1615,14 +1615,6 @@ PageBg pg = new PageBg(this, webView);
             return false;
         }
     }
-            try { return pg.isBackgroundSet(); } catch (Exception ignored) {}
-            try {
-                Object val = pg.getBackgroundUri();
-                if (val instanceof String) return ((String)val).length() > 0;
-                return val != null;
-            } catch (Exception ignored) {}
-        } catch (Exception ignored) {}
-        return false;
     }
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
