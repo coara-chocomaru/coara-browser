@@ -1,5 +1,7 @@
 package com.coara.browser;
 
+import java.io.ByteArrayInputStream;
+
 import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
@@ -97,8 +99,6 @@ import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.io.ByteArrayOutputStream;
-import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -111,8 +111,14 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
+import java.io.ByteArrayOutputStream;
 
 public class MainActivity extends AppCompatActivity {
+
+    private static final String KEY_BACKGROUND_URI = "background_image_uri";
+    private ActivityResultLauncher<Intent> imagePickerLauncher;
+    private volatile String backgroundDataUri = null;
+
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "AdvancedBrowserPrefs";
@@ -125,10 +131,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_UA_ENABLED = "ua_enabled";
     private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
     private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
-    private static final String KEY_BACKGROUND_URI = "background_image_uri";
-    private ActivityResultLauncher<Intent> imagePickerLauncher;
-    private volatile String backgroundDataUri = null;
-
     private static final String KEY_TABS = "tabs";
     private static final String KEY_CURRENT_TAB = "current_tab_index";
     private static final String KEY_BOOKMARKS = "bookmarks";
@@ -385,29 +387,30 @@ public class MainActivity extends AppCompatActivity {
             pendingPermissionRequest = null;
         }
     );
-        
         fileChooserLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
-                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
-                        Uri dataUri = result.getData().getData();
+                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
+                        Uri pickedUri = pickerResult.getData().getData();
                         if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
+                    } else if (filePathCallback != null) {
+                        filePathCallback.onReceiveValue(null);
+                    }
+                    filePathCallback = null;
                 });
-
-        
         imagePickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
-                bgPickerResult -> {
-                    if (bgPickerResult.getResultCode() == RESULT_OK && bgPickerResult.getData() != null) {
-                        Uri bgPickedUri = bgPickerResult.getData().getData();
-                        if (bgPickedUri != null) {
+                result -> {
+                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                        Uri pickedUri = result.getData().getData();
+                        if (pickedUri != null) {
                             try {
-                                final int takeFlags = bgPickerResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                getContentResolver().takePersistableUriPermission(bgPickedUri, takeFlags);
+                                final int takeFlags = result.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().takePersistableUriPermission(pickedUri, takeFlags);
                             } catch (Exception ignored) {}
-                            pref.edit().putString(KEY_BACKGROUND_URI, bgPickedUri.toString()).apply();
+                            pref.edit().putString(KEY_BACKGROUND_URI, pickedUri.toString()).apply();
                             backgroundDataUri = loadBackgroundDataUriFromPrefs();
                             for (WebView w : webViews) {
                                 try { w.post(() -> w.reload()); } catch (Exception ignored) {}
@@ -457,6 +460,22 @@ public class MainActivity extends AppCompatActivity {
          }
      });
     }
+    private void saveBundleToFile(Bundle bundle, String fileName) {
+        File file = new File(getFilesDir(), fileName);
+        Parcel parcel = Parcel.obtain();
+        try {
+            bundle.writeToParcel(parcel, 0);
+            byte[] bytes = parcel.marshall();
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(bytes);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            parcel.recycle();
+        }
+    }
+
     
     private void chooseBackground() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
@@ -503,23 +522,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void saveBundleToFile(Bundle bundle, String fileName) {
-        File file = new File(getFilesDir(), fileName);
-        Parcel parcel = Parcel.obtain();
-        try {
-            bundle.writeToParcel(parcel, 0);
-            byte[] bytes = parcel.marshall();
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(bytes);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            parcel.recycle();
-        }
-    }
-
-    private Bundle loadBundleFromFile(String fileName) {
+private Bundle loadBundleFromFile(String fileName) {
         File file = new File(getFilesDir(), fileName);
         if (!file.exists()) return null;
         try (FileInputStream fis = new FileInputStream(file)) {
@@ -709,6 +712,7 @@ public class MainActivity extends AppCompatActivity {
         initialWebView.loadUrl(START_PAGE);
     }
     updateTabCount();
+}
         }
 
     private void updateTabCount() {
@@ -1070,8 +1074,7 @@ public class MainActivity extends AppCompatActivity {
                     String scheme = url.getScheme();
                     if (scheme == null) return super.shouldInterceptRequest(view, request);
                     if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return super.shouldInterceptRequest(view, request);
-                    String method = request.getMethod();
-                    if (!"GET".equalsIgnoreCase(method)) return super.shouldInterceptRequest(view, request);
+                    if (!"GET".equalsIgnoreCase(request.getMethod())) return super.shouldInterceptRequest(view, request);
                     Map<String, String> requestHeaders = request.getRequestHeaders();
                     HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
                     conn.setInstanceFollowRedirects(true);
