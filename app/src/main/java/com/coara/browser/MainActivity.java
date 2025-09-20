@@ -153,6 +153,8 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<String[]> pickImageLauncher;
     private Handler backgroundHandler;
     private Runnable transparencyRunnable;
+    private volatile boolean isBackgroundTaskRunning = false;
+
 
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
@@ -319,7 +321,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void run() {
                 try {
-                    injectTransparencyCss();
+                    if(!isBackgroundTaskRunning) { injectTransparencyCss(); }
                 } catch (Exception ignored) {}
                 backgroundHandler.postDelayed(this, 500);
             }
@@ -714,7 +716,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void applyCombinedOptimizations(WebView webView) {
-        String js = "javascript:(function(){" +
+        
+        isBackgroundTaskRunning = true;
+        try {
+String js = "javascript:(function(){" +
                 "var animatedElements=document.querySelectorAll('.animated,.transition');" +
                 "animatedElements.forEach(function(el){" +
                 "if(!el.style.transform){el.style.transform='translateZ(0)';}" +
@@ -726,9 +731,18 @@ public class MainActivity extends AppCompatActivity {
                 "});" +
                 "})();";
         webView.evaluateJavascript(js, null);
+    
+        } finally {
+            try { isBackgroundTaskRunning = false; } catch (Exception ignored) {}
+            try { injectTransparencyCss(); } catch (Exception ignored) {}
+        }
     }
+
     private void injectLazyLoading(WebView webView) {
-        String js = "javascript:(function(){" +
+        
+        isBackgroundTaskRunning = true;
+        try {
+String js = "javascript:(function(){" +
                 "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
                 "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
                 "if(images.length===0)return;" +
@@ -780,7 +794,13 @@ public class MainActivity extends AppCompatActivity {
                 "}" +
                 "})();";
         webView.evaluateJavascript(js, null);
+    
+        } finally {
+            try { isBackgroundTaskRunning = false; } catch (Exception ignored) {}
+            try { injectTransparencyCss(); } catch (Exception ignored) {}
+        }
     }
+
     private void applyOptimizedSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
         settings.setRenderPriority(WebSettings.RenderPriority.HIGH);
