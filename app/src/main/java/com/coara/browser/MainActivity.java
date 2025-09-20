@@ -385,17 +385,43 @@ public class MainActivity extends AppCompatActivity {
             pendingPermissionRequest = null;
         }
     );
+        
         fileChooserLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
-                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
-                        Uri pickedUri = pickerResult.getData().getData();
+                    if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                        Uri dataUri = result.getData().getData();
+                        if (filePathCallback != null) {
+                            filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
+                        }
+                    } else if (filePathCallback != null) {
+                        filePathCallback.onReceiveValue(null);
+                    }
+                    filePathCallback = null;
+                });
 
+
+        
         imagePickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
-                pickerResult -> {
-                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
-                        Uri pickedUri = pickerResult.getData().getData();
+                bgPickerResult -> {
+                    if (bgPickerResult.getResultCode() == RESULT_OK && bgPickerResult.getData() != null) {
+                        Uri bgPickedUri = bgPickerResult.getData().getData();
+                        if (bgPickedUri != null) {
+                            try {
+                                final int takeFlags = bgPickerResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().takePersistableUriPermission(bgPickedUri, takeFlags);
+                            } catch (Exception ignored) {}
+                            pref.edit().putString(KEY_BACKGROUND_URI, bgPickedUri.toString()).apply();
+                            backgroundDataUri = loadBackgroundDataUriFromPrefs();
+                            for (WebView w : webViews) {
+                                try { w.post(() -> w.reload()); } catch (Exception ignored) {}
+                            }
+                            Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
+
                         if (pickedUri != null) {
                             try {
                                 final int takeFlags = pickerResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
