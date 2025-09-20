@@ -155,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
     private Runnable transparencyRunnable;
     private volatile boolean isBackgroundTaskRunning = false;
 
+
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
     private MaterialToolbar toolbar;
@@ -315,15 +316,12 @@ public class MainActivity extends AppCompatActivity {
         }
         btnGo.setVisibility(View.GONE);
         backgroundView = findViewById(R.id.backgroundView);
-        if(backgroundView!=null) backgroundView.setVisibility(View.GONE);
         backgroundHandler = new Handler();
         transparencyRunnable = new Runnable() {
             @Override
             public void run() {
                 try {
-                    if(!isBackgroundTaskRunning) {
-                        injectTransparencyCss();
-                    }
+                    if(!isBackgroundTaskRunning) { injectTransparencyCss(); }
                 } catch (Exception ignored) {}
                 backgroundHandler.postDelayed(this, 500);
             }
@@ -334,12 +332,6 @@ public class MainActivity extends AppCompatActivity {
                 try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
                 pref.edit().putString("bg_uri", uri.toString()).apply();
                 backgroundView.setImageURI(uri);
-                backgroundView.setVisibility(View.VISIBLE);
-                backgroundView.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                WebView w = getCurrentWebView();
-                if (w != null) {
-                    try { ensureWebViewTransparent(w); } catch (Exception ignored) {}
-                }
             }
         });
         loadBackgroundIfExists();
@@ -529,9 +521,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        try {
-            if (backgroundExecutor != null) backgroundExecutor.shutdown();
-        } catch (Exception ignored) {}
+        backgroundExecutor.shutdown();
         try {
             if (backgroundHandler != null && transparencyRunnable != null) {
                 backgroundHandler.removeCallbacks(transparencyRunnable);
@@ -726,9 +716,10 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void applyCombinedOptimizations(WebView webView) {
+        
         isBackgroundTaskRunning = true;
         try {
-        String js = "javascript:(function(){" +
+String js = "javascript:(function(){" +
                 "var animatedElements=document.querySelectorAll('.animated,.transition');" +
                 "animatedElements.forEach(function(el){" +
                 "if(!el.style.transform){el.style.transform='translateZ(0)';}" +
@@ -746,10 +737,12 @@ public class MainActivity extends AppCompatActivity {
             try { injectTransparencyCss(); } catch (Exception ignored) {}
         }
     }
+
     private void injectLazyLoading(WebView webView) {
+        
         isBackgroundTaskRunning = true;
         try {
-        String js = "javascript:(function(){" +
+String js = "javascript:(function(){" +
                 "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
                 "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
                 "if(images.length===0)return;" +
@@ -807,6 +800,7 @@ public class MainActivity extends AppCompatActivity {
             try { injectTransparencyCss(); } catch (Exception ignored) {}
         }
     }
+
     private void applyOptimizedSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
         settings.setRenderPriority(WebSettings.RenderPriority.HIGH);
@@ -857,7 +851,7 @@ public class MainActivity extends AppCompatActivity {
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        webView.setBackgroundColor(Color.WHITE);
+        webView.setBackgroundColor(Color.TRANSPARENT);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1866,6 +1860,26 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
         }
+        
+        else if (id == R.id.menu_set_background) {
+            pickImageLauncher.launch(new String[]{"image/*"});
+            return true;
+        } else if (id == R.id.menu_set_opacity) {
+            final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
+            new MaterialAlertDialogBuilder(this).setTitle("Background Opacity").setItems(items, (d, i) -> {
+                float v = 1.0f - (i * 0.1f);
+                pref.edit().putFloat("bg_opacity", v).apply();
+                if (backgroundView != null) backgroundView.setAlpha(v);
+                injectTransparencyCss();
+            }).show();
+            return true;
+        } else if (id == R.id.menu_clear_background) {
+            pref.edit().remove("bg_uri").remove("bg_opacity").apply();
+            if (backgroundView != null) backgroundView.setImageDrawable(null);
+            injectTransparencyCss();
+            return true;
+        }
+
         return super.onOptionsItemSelected(item);
     }
 
@@ -1974,6 +1988,8 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
 }
         }
+
+    
     private void loadBackgroundIfExists() {
         try {
             String s = pref.getString("bg_uri", null);
@@ -1981,45 +1997,21 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     Uri uri = Uri.parse(s);
                     backgroundView.setImageURI(uri);
-                    backgroundView.setVisibility(View.VISIBLE);
-                    backgroundView.setScaleType(ImageView.ScaleType.CENTER_CROP);
                 } catch (Exception ignored) {}
             }
             float opacity = pref.getFloat("bg_opacity", 1.0f);
             backgroundView.setAlpha(opacity);
-            WebView w = getCurrentWebView();
-            if (w != null) {
-                try { ensureWebViewTransparent(w); } catch (Exception ignored) {}
-            }
         } catch (Exception ignored) {}
     }
+
     private void injectTransparencyCss() {
         try {
             WebView current = getCurrentWebView();
             if (current != null) {
-                try {
-                    ensureWebViewTransparent(current);
-                } catch (Exception ignored) {}
-                String js = "(function(){try{var id='__bg_transparent';var css='html, body, * { background: transparent !important; background-color: transparent !important; }';"
-                          + "var existing=document.getElementById(id); if(existing){ existing.innerHTML=css; } else { var s=document.createElement('style'); s.id=id; s.type='text/css'; s.innerHTML=css; (document.head||document.documentElement).appendChild(s);} }catch(e){} })();";
-                current.evaluateJavascript(js, null);
+                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
             }
         } catch (Exception ignored) {}
     }
-    private void ensureWebViewTransparent(WebView w) {
-        try {
-            w.setBackgroundColor(0);
-            w.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-            w.setBackgroundResource(0);
-            View parent = (View) w.getParent();
-            if (parent != null) {
-                parent.setBackgroundColor(0);
-            }
-        } catch (Exception ignored) {}
-    }
-
-
-
 
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
