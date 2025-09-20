@@ -394,12 +394,6 @@ public class MainActivity extends AppCompatActivity {
                         if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
-                    } else if (filePathCallback != null) {
-                        filePathCallback.onReceiveValue(null);
-                    }
-                    filePathCallback = null;
-                });
-
 
         
         imagePickerLauncher = registerForActivityResult(
@@ -435,14 +429,6 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
                         }
                     }
-                });
-                        if (filePathCallback != null) {
-                            filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
-                        }
-                    } else if (filePathCallback != null) {
-                        filePathCallback.onReceiveValue(null);
-                    }
-                    filePathCallback = null;
                 });
 
         urlEditText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
@@ -736,7 +722,7 @@ public class MainActivity extends AppCompatActivity {
         initialWebView.loadUrl(START_PAGE);
     }
     updateTabCount();
-}
+});
         }
 
     private void updateTabCount() {
