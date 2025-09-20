@@ -160,6 +160,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private final java.util.Map<WebView, PageBg> pageBgMap = new java.util.HashMap<>();
+    private final java.util.Set<WebView> bgSetViews = new java.util.HashSet<>();
     private ActivityResultLauncher<String> bgPermissionLauncher;
     private ActivityResultLauncher<String> bgImagePickerLauncher;
 
@@ -729,7 +730,9 @@ public class MainActivity extends AppCompatActivity {
                 "if(el.style.position!=='fixed'){el.style.position='fixed';}" +
                 "});" +
                 "})();";
-        webView.evaluateJavascript(js, null);
+        if (!isBgImageSetFor(getCurrentWebView())) {
+                webView.evaluateJavascript(js, null);
+            }
     }
     private void injectLazyLoading(WebView webView) {
         String js = "javascript:(function(){" +
@@ -783,7 +786,9 @@ public class MainActivity extends AppCompatActivity {
                 "loadImagesOnScroll();" +
                 "}" +
                 "})();";
-        webView.evaluateJavascript(js, null);
+        if (!isBgImageSetFor(getCurrentWebView())) {
+                webView.evaluateJavascript(js, null);
+            }
     }
     private void applyOptimizedSettings(WebSettings settings) {
         settings.setJavaScriptEnabled(true);
@@ -837,13 +842,18 @@ public class MainActivity extends AppCompatActivity {
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        webView.setBackgroundColor(Color.WHITE);
+        if (!isBgImageSetFor(webView)) {
+            if (!isBgImageSetFor(webView)) {
+            webView.setBackgroundColor(Color.WHITE);
+        }
+        }
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 PageBg pg = new PageBg(this, webView);
         pg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
         pg.setOnImageSelectedCallback(() -> {
+            bgSetViews.add(webView);
             runOnUiThread(() -> {
                 try {
                     if (webView == getCurrentWebView()) {
@@ -1150,7 +1160,9 @@ PageBg pg = new PageBg(this, webView);
           "window.addEventListener('popstate',function(){notifyUrlChange();});" +
           "notifyUrlChange();" +
           "})();"; 
-            view.evaluateJavascript(jsOverrideHistory, null); 
+            if (!isBgImageSetFor(getCurrentWebView())) {
+                view.evaluateJavascript(jsOverrideHistory, null);
+            } 
             if (view == getCurrentWebView()) {
                 captureTabSnapshot(view);
             }
@@ -1589,6 +1601,29 @@ PageBg pg = new PageBg(this, webView);
     private PageBg getPageBgForWebView(WebView w) {
         return pageBgMap.get(w);
     }
+
+    
+    private boolean isBgImageSetFor(WebView w) {
+        if (w == null) return false;
+        try {
+            if (bgSetViews.contains(w)) return true;
+            PageBg pg = pageBgMap.get(w);
+            if (pg == null) return false;
+            try { pg.loadSavedBackground(); } catch (Exception ignored) {}
+            return bgSetViews.contains(w);
+        } catch (Exception e) {
+            return false;
+        }
+    }
+            try { return pg.isBackgroundSet(); } catch (Exception ignored) {}
+            try {
+                Object val = pg.getBackgroundUri();
+                if (val instanceof String) return ((String)val).length() > 0;
+                return val != null;
+            } catch (Exception ignored) {}
+        } catch (Exception ignored) {}
+        return false;
+    }
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
@@ -1687,9 +1722,15 @@ PageBg pg = new PageBg(this, webView);
             pref.edit().remove("background_image_uri").apply();
             WebView current = getCurrentWebView();
             if (current != null) {
-                current.setBackgroundColor(Color.WHITE);
+                bgSetViews.remove(current);
+
+                if (!isBgImageSetFor(current)) {
+            current.setBackgroundColor(Color.WHITE);
+        }
                 String js = "javascript:(function(){var styles=document.head.querySelectorAll('style'); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf('opacity: 0.5')!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity='1';})();";
-                try { current.evaluateJavascript(js, null); } catch (Exception ignored) {}
+                try { if (!isBgImageSetFor(getCurrentWebView())) {
+                current.evaluateJavascript(js, null);
+            } } catch (Exception ignored) {}
             }
             Toast.makeText(this, "背景画像を初期化しました", Toast.LENGTH_SHORT).show();
             return true;
