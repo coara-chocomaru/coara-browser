@@ -10,7 +10,6 @@
         android:layout_height="match_parent"
         android:orientation="vertical">
 
-
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/topAppBar"
             android:layout_width="match_parent"
@@ -24,7 +23,6 @@
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
                 android:padding="4dp">
-
 
                 <LinearLayout
                     android:id="@+id/urlContainer"
@@ -72,7 +70,6 @@
                     android:backgroundTint="@android:color/holo_blue_dark"
                     android:textColor="@android:color/white" />
 
-
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnNewTab"
                     android:layout_width="37dp"
@@ -83,7 +80,8 @@
                     android:paddingRight="8dp"
                     android:backgroundTint="@android:color/white"
                     android:textColor="@android:color/holo_blue_dark" />
-              <TextView
+
+                <TextView
                     android:id="@+id/tabCountTextView"
                     android:layout_width="30dp"
                     android:layout_height="30dp"
@@ -95,7 +93,6 @@
                     android:layout_marginStart="4dp" />
             </LinearLayout>
         </com.google.android.material.appbar.MaterialToolbar>
-
 
         <androidx.swiperefreshlayout.widget.SwipeRefreshLayout
             android:id="@+id/swipeRefreshLayout"
@@ -113,8 +110,17 @@
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
                     android:scaleType="centerCrop"
-                    android:background="?attr/selectableItemBackgroundBorderless"
-                    android:contentDescription="Background Image" />
+                    android:contentDescription="Background Image"
+                    android:clickable="false"
+                    android:focusable="false"
+                    android:focusableInTouchMode="false" />
+
+                <WebView
+                    android:id="@+id/webview"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="#00000000"
+                    android:overScrollMode="never" />
 
             </FrameLayout>
 
