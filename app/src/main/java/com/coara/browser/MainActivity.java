@@ -87,8 +87,8 @@ import org.json.JSONObject;
 
 import java.io.BufferedReader;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.ByteArrayInputStream;
+import java.io.InputStreamReader;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -161,9 +161,10 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
+    
     private BackgroundManager backgroundManager;
-    private androidx.activity.result.ActivityResultLauncher<Intent> backgroundPickerLauncher;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
+    private ActivityResultLauncher<Intent> backgroundPickerLauncher;
+private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -247,22 +248,29 @@ public class MainActivity extends AppCompatActivity {
         }
 
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        
         backgroundManager = new BackgroundManager(this);
-        backgroundPickerLauncher = registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                Uri dataUri = result.getData().getData();
-                if (dataUri != null) {
-                    backgroundManager.setBackgroundUri(dataUri.toString());
-                    synchronized (webViews) {
-                        for (WebView w : webViews) {
-                            try { w.reload(); } catch (Exception ignored) {}
+        backgroundPickerLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null) {
+                    Uri uri = result.getData().getData();
+                    if (uri != null) {
+                        try {
+                            final int takeFlags = (result.getData().getFlags()
+                                    & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION));
+                            getContentResolver().takePersistableUriPermission(uri, takeFlags);
+                        } catch (Exception ignored) {}
+                        backgroundManager.setBackgroundUri(uri.toString());
+                        for (WebView wv : webViews) {
+                            wv.reload();
                         }
+                        Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
                     }
-                    Toast.makeText(MainActivity.this, "背景を設定しました", Toast.LENGTH_SHORT).show();
                 }
             }
-        });
-        checkSentinelAndClearTabsIfNecessary();
+        );
+checkSentinelAndClearTabsIfNecessary();
         ensureCacheSentinelExists();
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
         basicAuthEnabled = pref.getBoolean(KEY_BASIC_AUTH, false);
@@ -700,42 +708,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-    
-    private String readStream(InputStream is, String charset) throws Exception {
-        if (is == null) return "";
-        if (charset == null || charset.isEmpty()) charset = "UTF-8";
-        BufferedReader br = new BufferedReader(new InputStreamReader(is, charset));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = br.readLine()) != null) {
-            sb.append(line);
-            sb.append('\n');
-        }
-        br.close();
-        return sb.toString();
-    }
-    private String injectIntoHead(String html, String injection) {
-        if (injection == null || injection.isEmpty()) return html;
-        String lower = html.toLowerCase();
-        int idx = lower.indexOf("<head");
-        if (idx != -1) {
-            int start = html.indexOf(">", idx);
-            if (start != -1) {
-                start++;
-                return html.substring(0, start) + injection + html.substring(start);
-            }
-        }
-        int htmlIdx = lower.indexOf("<html");
-        if (htmlIdx != -1) {
-            int start = html.indexOf(">", htmlIdx);
-            if (start != -1) {
-                start++;
-                return html.substring(0, start) + "<head>" + injection + "</head>" + html.substring(start);
-            }
-        }
-        return injection + html;
-    }
-private void applyCombinedOptimizations(WebView webView) {
+    private void applyCombinedOptimizations(WebView webView) {
         String js = "javascript:(function(){" +
                 "var animatedElements=document.querySelectorAll('.animated,.transition');" +
                 "animatedElements.forEach(function(el){" +
@@ -1049,45 +1022,78 @@ private void applyCombinedOptimizations(WebView webView) {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
                     String url = request.getUrl().toString();
-                    if (!"GET".equalsIgnoreCase(request.getMethod())) return super.shouldInterceptRequest(view, request);
-                    String injection = backgroundManager != null ? backgroundManager.getInjectionHtml() : "";
-                    if (injection == null) injection = "";
-                    if (url.startsWith("file:///android_asset/")) {
-                        String assetPath = url.substring("file:///android_asset/".length());
-                        InputStream is = getAssets().open(assetPath);
-                        String html = readStream(is, "UTF-8");
-                        if (!injection.isEmpty()) html = injectIntoHead(html, injection);
-                        return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(html.getBytes("UTF-8")));
-                    } else if (url.startsWith("http://") || url.startsWith("https://")) {
-                        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
-                        conn.setInstanceFollowRedirects(true);
-                        conn.setConnectTimeout(5000);
-                        conn.setReadTimeout(8000);
-                        Map<String, String> headers = request.getRequestHeaders();
-                        if (headers != null) {
-                            for (Map.Entry<String, String> h : headers.entrySet()) {
-                                try { conn.setRequestProperty(h.getKey(), h.getValue()); } catch (Exception ignored) {}
-                            }
-                        }
-                        conn.connect();
-                        String contentType = conn.getContentType();
-                        if (contentType != null && contentType.toLowerCase().contains("text/html")) {
-                            String charset = "UTF-8";
-                            String ct = contentType.toLowerCase();
-                            int cidx = ct.indexOf("charset=");
-                            if (cidx != -1) {
-                                charset = ct.substring(cidx + 8).trim();
-                            }
-                            InputStream is = conn.getInputStream();
-                            String html = readStream(is, charset);
-                            if (!injection.isEmpty()) html = injectIntoHead(html, injection);
-                            return new WebResourceResponse("text/html", "UTF-8", new ByteArrayInputStream(html.getBytes("UTF-8")));
+                    if (url == null) return super.shouldInterceptRequest(view, request);
+                    if (!(url.startsWith("http://") || url.startsWith("https://"))) {
+                        return super.shouldInterceptRequest(view, request);
+                    }
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
+                    conn.setConnectTimeout(6000);
+                    conn.setReadTimeout(10000);
+                    Map<String, String> headers = request.getRequestHeaders();
+                    if (headers != null) {
+                        for (Map.Entry<String, String> e : headers.entrySet()) {
+                            try { conn.setRequestProperty(e.getKey(), e.getValue()); } catch (Exception ignored) {}
                         }
                     }
+                    conn.setInstanceFollowRedirects(true);
+                    conn.connect();
+                    String contentType = conn.getContentType();
+                    String lower = contentType != null ? contentType.toLowerCase() : "";
+                    boolean isHtml = lower.contains(\"text/html\") || lower.contains(\"application/xhtml+xml\") || url.matches(\".*\\.(html|htm|php|asp|aspx)([?#].*)?$\");
+                    if (!isHtml) {
+                        return super.shouldInterceptRequest(view, request);
+                    }
+                    String charset = \"UTF-8\";
+                    if (contentType != null) {
+                        String[] parts = contentType.split(\";\");
+                        for (String p : parts) {
+                            p = p.trim();
+                            if (p.startsWith(\"charset=\")) {
+                                charset = p.substring(8);
+                            }
+                        }
+                    }
+                    InputStream is = conn.getInputStream();
+                    StringBuilder sb = new StringBuilder();
+                    BufferedReader br = new BufferedReader(new InputStreamReader(is, charset));
+                    String line;
+                    while ((line = br.readLine()) != null) {
+                        sb.append(line).append('\n');
+                    }
+                    br.close();
+                    String html = sb.toString();
+                    String injection = backgroundManager != null ? backgroundManager.getInjectionHtml() : \"\";
+                    if (injection != null && !injection.isEmpty()) {
+                        int idxHeadClose = html.toLowerCase().indexOf(\"</head>\");
+                        if (idxHeadClose != -1) {
+                            html = html.substring(0, idxHeadClose) + injection + html.substring(idxHeadClose);
+                        } else {
+                            int idxHead = html.toLowerCase().indexOf(\"<head\");
+                            if (idxHead != -1) {
+                                int idx = html.indexOf('>', idxHead);
+                                if (idx != -1) {
+                                    html = html.substring(0, idx+1) + injection + html.substring(idx+1);
+                                } else {
+                                    html = injection + html;
+                                }
+                            } else {
+                                html = injection + html;
+                            }
+                        }
+                    }
+                    byte[] bytes = html.getBytes(charset);
+                    ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+                    WebResourceResponse response = new WebResourceResponse(\"text/html\", charset, bais);
+                    Map<String, String> respHeaders = new HashMap<>();
+                    String encoding = conn.getContentEncoding();
+                    if (encoding != null) respHeaders.put(\"Content-Encoding\", encoding);
+                    respHeaders.put(\"Access-Control-Allow-Origin\", \"*\");
+                    response.setResponseHeaders(respHeaders);
+                    conn.disconnect();
+                    return response;
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    return super.shouldInterceptRequest(view, request);
                 }
-                return super.shouldInterceptRequest(view, request);
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -1708,7 +1714,7 @@ private void applyCombinedOptimizations(WebView webView) {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (id == R.id.action_tabs) {
+if (id == R.id.action_tabs) {
             showTabsDialog();
         } else if (id == R.id.action_dark_mode) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -1901,23 +1907,26 @@ private void applyCombinedOptimizations(WebView webView) {
             clearTabs();
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
-        } else if (id == R.id.action_set_background) {
+        }
+        
+        else if (id == R.id.action_set_background) {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("image/*");
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             backgroundPickerLauncher.launch(intent);
             return true;
         } else if (id == R.id.action_clear_background) {
-            if (backgroundManager != null) backgroundManager.clearBackground();
-            synchronized (webViews) {
-                for (WebView w : webViews) {
-                    try { w.reload(); } catch (Exception ignored) {}
+            if (backgroundManager != null) {
+                backgroundManager.clearBackground();
+                for (WebView wv : webViews) {
+                    wv.reload();
                 }
+                Toast.makeText(this, "背景をクリアしました", Toast.LENGTH_SHORT).show();
             }
-            Toast.makeText(this, "背景をクリアしました", Toast.LENGTH_SHORT).show();
             return true;
-
-        return super.onOptionsItemSelected(item);
+        }
+return super.onOptionsItemSelected(item);
     }
 
     private void clearBasicAuthCacheAndReload() {
@@ -3044,6 +3053,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-}
-
 }
