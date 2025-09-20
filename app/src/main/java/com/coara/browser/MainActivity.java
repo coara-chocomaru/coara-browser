@@ -123,6 +123,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_UA_ENABLED = "ua_enabled";
     private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
     private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
+    private static final String KEY_BG_URI = "bg_uri";
+    private static final String KEY_BG_OPACITY = "bg_opacity";
     private static final String KEY_TABS = "tabs";
     private static final String KEY_CURRENT_TAB = "current_tab_index";
     private static final String KEY_BOOKMARKS = "bookmarks";
@@ -150,10 +152,9 @@ public class MainActivity extends AppCompatActivity {
     private TextInputEditText urlEditText;
     private ImageView faviconImageView;
     private ImageView backgroundView;
-    private static final int PICK_IMAGE_REQUEST = 1001;
-    private Handler handler;
+    private ActivityResultLauncher<String[]> pickImageLauncher;
+    private Handler backgroundHandler;
     private Runnable transparencyRunnable;
-
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
     private MaterialToolbar toolbar;
@@ -287,22 +288,12 @@ public class MainActivity extends AppCompatActivity {
         urlEditText = findViewById(R.id.urlEditText);
         urlEditText.setImeOptions(EditorInfo.IME_ACTION_GO);
         faviconImageView = findViewById(R.id.favicon);
+        backgroundView = findViewById(R.id.backgroundView);
+
         btnGo = findViewById(R.id.btnGo);
         btnNewTab = findViewById(R.id.btnNewTab);
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
         webViewContainer = findViewById(R.id.webViewContainer);
-        backgroundView = findViewById(R.id.backgroundView);
-        handler = new Handler();
-        transparencyRunnable = new Runnable() {
-            @Override
-            public void run() {
-                injectTransparencyCss();
-                handler.postDelayed(this, 500);
-            }
-        };
-        handler.post(transparencyRunnable);
-        loadBackgroundIfExists();
-
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
@@ -410,6 +401,32 @@ public class MainActivity extends AppCompatActivity {
                     filePathCallback = null;
                 });
 
+        pickImageLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
+                pref.edit().putString(KEY_BG_URI, uri.toString()).apply();
+                try { backgroundView.setImageURI(uri); } catch (Exception ignored) {}
+            }
+        });
+
+        backgroundHandler = new Handler(Looper.getMainLooper());
+        transparencyRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    WebView current = null;
+                    try { current = getCurrentWebView(); } catch (Exception ignored) {}
+                    if (current != null) {
+                        current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
+                    }
+                } catch (Exception ignored) {}
+                backgroundHandler.postDelayed(this, 500);
+            }
+        };
+        loadBackgroundIfExists();
+        backgroundHandler.post(transparencyRunnable);
+
+
         urlEditText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
             if (actionId == EditorInfo.IME_ACTION_GO ||
                (keyEvent != null && keyEvent.getKeyCode() == KeyEvent.KEYCODE_ENTER &&
@@ -511,6 +528,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         backgroundExecutor.shutdown();
+        try { if (backgroundHandler != null && transparencyRunnable != null) backgroundHandler.removeCallbacks(transparencyRunnable); } catch (Exception ignored) {}
     }
 
     private void saveTabsState() {
@@ -817,7 +835,7 @@ public class MainActivity extends AppCompatActivity {
         }
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
-        if (!hasBackgroundImage()) webView.setBackgroundColor(Color.WHITE); else webView.setBackgroundColor(Color.TRANSPARENT);
+        webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
@@ -1602,6 +1620,28 @@ public class MainActivity extends AppCompatActivity {
             });
         }
     }
+
+
+    private void loadBackgroundIfExists() {
+        try {
+            String sUri = pref.getString(KEY_BG_URI, null);
+            if (sUri != null) {
+                try { Uri uri = Uri.parse(sUri); backgroundView.setImageURI(uri); } catch (Exception ignored) {}
+            }
+            float opacity = pref.getFloat(KEY_BG_OPACITY, 1.0f);
+            try { backgroundView.setAlpha(opacity); } catch (Exception ignored) {}
+        } catch (Exception ignored) {}
+    }
+
+    private void injectTransparencyCss() {
+        try {
+            WebView current = null;
+            try { current = getCurrentWebView(); } catch (Exception ignored) {}
+            if (current != null) {
+                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
+            }
+        } catch (Exception ignored) {}
+    }
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
@@ -1827,28 +1867,24 @@ public class MainActivity extends AppCompatActivity {
             takeScreenshot();
         }
         
-        else if (id == R.id.menu_set_background) {
-            try {
-                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
-                intent.addCategory(Intent.CATEGORY_OPENABLE);
-                intent.setType("image/*");
-                startActivityForResult(intent, PICK_IMAGE_REQUEST);
-            } catch (Exception e) {}
+
+        if (id == R.id.menu_set_background) {
+            if (pickImageLauncher != null) pickImageLauncher.launch(new String[]{"image/*"});
             return true;
         } else if (id == R.id.menu_set_opacity) {
             final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
-            new android.app.AlertDialog.Builder(this)
+            new MaterialAlertDialogBuilder(MainActivity.this)
                 .setTitle("Background Opacity")
                 .setItems(items, (d, i) -> {
                     float v = 1.0f - (i * 0.1f);
-                    getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putFloat("bg_opacity", v).apply();
-                    if (backgroundView != null) backgroundView.setAlpha(v);
+                    pref.edit().putFloat(KEY_BG_OPACITY, v).apply();
+                    try { backgroundView.setAlpha(v); } catch (Exception ignored) {}
                     injectTransparencyCss();
                 }).show();
             return true;
         } else if (id == R.id.menu_clear_background) {
-            getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().remove("bg_uri").remove("bg_opacity").apply();
-            if (backgroundView != null) backgroundView.setImageDrawable(null);
+            pref.edit().remove(KEY_BG_URI).remove(KEY_BG_OPACITY).apply();
+            try { backgroundView.setImageDrawable(null); } catch (Exception ignored) {}
             injectTransparencyCss();
             return true;
         }
@@ -2979,45 +3015,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-    private boolean hasBackgroundImage() {
-        String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
-        return s != null && s.length() > 0;
-    }
-
-    
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == PICK_IMAGE_REQUEST && resultCode == RESULT_OK && data != null) {
-            Uri uri = data.getData();
-            if (uri != null) {
-                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
-                getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putString("bg_uri", uri.toString()).apply();
-                if (backgroundView != null) backgroundView.setImageURI(uri);
-            }
-        }
-    }
-private void loadBackgroundIfExists() {
-        String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
-        if (s != null) {
-            try {
-                Uri uri = Uri.parse(s);
-                backgroundView.setImageURI(uri);
-            } catch (Exception e) {}
-        }
-        float opacity = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getFloat("bg_opacity", 1.0f);
-        backgroundView.setAlpha(opacity);
-    }
-
-    private void injectTransparencyCss() {
-        try {
-            WebView current = getCurrentWebView();
-            if (current != null) {
-                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var b = document.body; if(b) b.style.background = 'transparent';})();", null);
-            } else if (webView != null) {
-                webView.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var b = document.body; if(b) b.style.background = 'transparent';})();", null);
-            }
-        } catch (Exception ignored) {}
-    }
-
 }
