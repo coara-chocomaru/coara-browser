@@ -88,9 +88,14 @@
             android:name=".htmlview"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true" />
-        
+
         <activity
             android:name=".DownloadHistoryActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:exported="true" />
+        
+        <activity
+            android:name=".BackgroundBrowserActivity"
             android:configChanges="keyboardHidden|orientation|screenSize"
             android:exported="true" />
 
