@@ -725,7 +725,7 @@ checkSentinelAndClearTabsIfNecessary();
     private void injectLazyLoading(WebView webView) {
         String js = "javascript:(function(){" +
                 "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
-                "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
+                "var images=document.querySelectorAll('img[src^="https://i.ytimg.com/"]:not([data-lazy-loaded])');" +
                 "if(images.length===0)return;" +
                 "images.forEach(function(img){" +
                 "img.setAttribute('data-lazy-loaded','true');" +
@@ -1039,16 +1039,16 @@ checkSentinelAndClearTabsIfNecessary();
                     conn.connect();
                     String contentType = conn.getContentType();
                     String lower = contentType != null ? contentType.toLowerCase() : "";
-                    boolean isHtml = lower.contains(\"text/html\") || lower.contains(\"application/xhtml+xml\") || url.matches(\".*\\.(html|htm|php|asp|aspx)([?#].*)?$\");
+                    boolean isHtml = lower.contains("text/html") || lower.contains("application/xhtml+xml") || url.matches(".*\\.(html|htm|php|asp|aspx)([?#].*)?$");
                     if (!isHtml) {
                         return super.shouldInterceptRequest(view, request);
                     }
-                    String charset = \"UTF-8\";
+                    String charset = "UTF-8";
                     if (contentType != null) {
-                        String[] parts = contentType.split(\";\");
+                        String[] parts = contentType.split(";");
                         for (String p : parts) {
                             p = p.trim();
-                            if (p.startsWith(\"charset=\")) {
+                            if (p.startsWith("charset=")) {
                                 charset = p.substring(8);
                             }
                         }
@@ -1062,13 +1062,13 @@ checkSentinelAndClearTabsIfNecessary();
                     }
                     br.close();
                     String html = sb.toString();
-                    String injection = backgroundManager != null ? backgroundManager.getInjectionHtml() : \"\";
+                    String injection = backgroundManager != null ? backgroundManager.getInjectionHtml() : "";
                     if (injection != null && !injection.isEmpty()) {
-                        int idxHeadClose = html.toLowerCase().indexOf(\"</head>\");
+                        int idxHeadClose = html.toLowerCase().indexOf("</head>");
                         if (idxHeadClose != -1) {
                             html = html.substring(0, idxHeadClose) + injection + html.substring(idxHeadClose);
                         } else {
-                            int idxHead = html.toLowerCase().indexOf(\"<head\");
+                            int idxHead = html.toLowerCase().indexOf("<head");
                             if (idxHead != -1) {
                                 int idx = html.indexOf('>', idxHead);
                                 if (idx != -1) {
@@ -1083,11 +1083,11 @@ checkSentinelAndClearTabsIfNecessary();
                     }
                     byte[] bytes = html.getBytes(charset);
                     ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-                    WebResourceResponse response = new WebResourceResponse(\"text/html\", charset, bais);
+                    WebResourceResponse response = new WebResourceResponse("text/html", charset, bais);
                     Map<String, String> respHeaders = new HashMap<>();
                     String encoding = conn.getContentEncoding();
-                    if (encoding != null) respHeaders.put(\"Content-Encoding\", encoding);
-                    respHeaders.put(\"Access-Control-Allow-Origin\", \"*\");
+                    if (encoding != null) respHeaders.put("Content-Encoding", encoding);
+                    respHeaders.put("Access-Control-Allow-Origin", "*");
                     response.setResponseHeaders(respHeaders);
                     conn.disconnect();
                     return response;
