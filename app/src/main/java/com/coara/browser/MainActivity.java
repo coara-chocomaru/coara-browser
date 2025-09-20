@@ -826,18 +826,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView createNewWebView() {
         WebView webView;
-        PageBg pg = new PageBg(this, webView);
-        pg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
-        pg.setOnImageSelectedCallback(() -> {
-            runOnUiThread(() -> {
-                try {
-                    if (webView == getCurrentWebView()) {
-                        webView.reload();
-                    }
-                } catch (Exception ignored) {}
-            });
-        });
-        pageBgMap.put(webView, pg);
+        
 
         if (preloadedWebView != null) {
             webView = preloadedWebView;
@@ -852,6 +841,19 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+PageBg pg = new PageBg(this, webView);
+        pg.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
+        pg.setOnImageSelectedCallback(() -> {
+            runOnUiThread(() -> {
+                try {
+                    if (webView == getCurrentWebView()) {
+                        webView.reload();
+                    }
+                } catch (Exception ignored) {}
+            });
+        });
+        pageBgMap.put(webView, pg);
+
 
         WebSettings settings = webView.getSettings();
         String defaultUA = settings.getUserAgentString();
