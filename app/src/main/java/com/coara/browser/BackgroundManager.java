@@ -17,19 +17,67 @@ public class BackgroundManager {
         prefs.edit().remove(KEY_BG_URI).apply();
     }
     public String getBackgroundUri(){
-        return prefs.getString(KEY_BG_URI, null);
+        return prefs.getString(KEY_BG_URI, "");
     }
     public String getInjectionHtml(){
-        String uri = getBackgroundUri();
-        if (uri == null || uri.isEmpty()) return "";
-        String esc = uri.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\\"").replace("'", "\\\\'");
-        StringBuilder sb = new StringBuilder();
-        sb.append("<style id=\\\"injected-bg\\\">html,body{min-height:100%;background-image:url(\\\"");
-        sb.append(esc);
-        sb.append("\\\");background-size:cover;background-position:center center;background-repeat:no-repeat;background-attachment:fixed;margin:0;padding:0;}</style>");
-        sb.append("<script>(function(){function reapply(){if(document.getElementById(\\\"injected-bg\\\"))return;var head=document.getElementsByTagName(\\\"head\\\")[0];if(head){var s=document.createElement(\\\"style\\\");s.id=\\\"injected-bg\\\";s.textContent='html,body{min-height:100%;background-image:url(\\\\\\\"");
-        sb.append(esc);
-        sb.append("\\\\\\\");background-size:cover;background-position:center center;background-repeat:no-repeat;background-attachment:fixed;margin:0;padding:0;}';head.insertBefore(s,head.firstChild);} }document.addEventListener(\\\"DOMContentLoaded\\\",reapply);var push=history.pushState;history.pushState=function(){push.apply(history,arguments);setTimeout(reapply,10);};var rep=history.replaceState;history.replaceState=function(){rep.apply(history,arguments);setTimeout(reapply,10);};window.addEventListener('popstate',reapply);reapply();})();</script>");
-        return sb.toString();
-    }
+    String uri = getBackgroundUri();
+    if (uri == null || uri.isEmpty()) return "";
+
+    String esc = uri.replace("\\", "\\\\").replace("\"", "\\\"").replace("'", "\\'");
+
+    StringBuilder sb = new StringBuilder();
+
+    sb.append("<style id=\"injected-bg-style\">");
+    sb.append("html::before, body::before {");
+    sb.append(" content: '';");
+    sb.append(" position: fixed;");
+    sb.append(" left: 0; top: 0; width: 100%; height: 100%;");
+    sb.append(" pointer-events: none;");
+    sb.append(" z-index: -9999999;");
+    sb.append(" background-repeat: no-repeat;");
+    sb.append(" background-position: center center;");
+    sb.append(" background-size: cover;");
+    sb.append(" background-image: url('").append(esc).append("');");
+    sb.append("}");
+    sb.append("html, body { background-color: transparent !important; }");
+    sb.append("</style>");
+
+    sb.append("<script>(function(){");
+    sb.append("var uri = '").append(esc).append("';");
+    sb.append("function apply(){");
+    sb.append(" try{");
+    sb.append("  var style = document.getElementById('injected-bg-style');");
+    sb.append("  if(style){");
+    sb.append("    style.innerHTML = style.innerHTML.replace(/background-image:\\s*url\\([^)]+\\)/i, \"background-image: url('\"+uri+\"')\");");
+    sb.append("  }");
+    sb.append("  var root = document.getElementById('injected-bg-root');");
+    sb.append("  if(!root){");
+    sb.append("    root = document.createElement('div');");
+    sb.append("    root.id = 'injected-bg-root';");
+    sb.append("    root.style.position = 'fixed';");
+    sb.append("    root.style.left = '0'; root.style.top = '0';");
+    sb.append("    root.style.width = '100%'; root.style.height = '100%';");
+    sb.append("    root.style.pointerEvents = 'none';");
+    sb.append("    root.style.zIndex = '-9999999';");
+    sb.append("    root.style.backgroundRepeat = 'no-repeat';");
+    sb.append("    root.style.backgroundPosition = 'center center';");
+    sb.append("    root.style.backgroundSize = 'cover';");
+    sb.append("    root.style.backgroundImage = \"url('\" + uri + \"')\";");
+    sb.append("    try{ document.documentElement.insertBefore(root, document.documentElement.firstChild); } catch(e){ if(document.body) document.body.appendChild(root); }");
+    sb.append("  } else {");
+    sb.append("    root.style.backgroundImage = \"url('\" + uri + \"')\";");
+    sb.append("  }");
+    sb.append(" } catch(e){}");
+    sb.append("}");
+    sb.append("var mo = new MutationObserver(function(){ if(!document.getElementById('injected-bg-root')) apply(); });");
+    sb.append("mo.observe(document.documentElement, { childList: true, subtree: true });");
+    sb.append("window.addEventListener('popstate', apply);");
+    sb.append("window.addEventListener('hashchange', apply);");
+    sb.append("document.addEventListener('DOMContentLoaded', apply);");
+    sb.append("apply();");
+    sb.append("})();</script>");
+
+    return sb.toString();
+}
+
 }
