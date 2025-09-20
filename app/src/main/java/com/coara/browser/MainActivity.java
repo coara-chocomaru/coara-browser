@@ -260,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         handler.post(transparencyRunnable);
-        pickImageLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), new ActivityResultCallback<android.net.Uri>() {
+        pickImageLauncher = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.OpenDocument(), new androidx.activity.result.ActivityResultCallback<android.net.Uri>() {
             @Override
             public void onActivityResult(android.net.Uri uri) {
                 if (uri != null) {
