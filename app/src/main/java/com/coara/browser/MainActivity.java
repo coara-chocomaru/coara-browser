@@ -160,6 +160,11 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
+    private ImageView backgroundView;
+    private ActivityResultLauncher<String[]> pickImageLauncher;
+    private Handler handler;
+    private Runnable transparencyRunnable;
+
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
@@ -280,6 +285,28 @@ public class MainActivity extends AppCompatActivity {
         initializePersistentFavicons();
 
         urlEditText = findViewById(R.id.urlEditText);
+        backgroundView = findViewById(R.id.backgroundView);
+        handler = new Handler();
+        transparencyRunnable = new Runnable() {
+            @Override
+            public void run() {
+                injectTransparencyCss();
+                handler.postDelayed(this, 500);
+            }
+        };
+        handler.post(transparencyRunnable);
+        pickImageLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), new ActivityResultCallback<Uri>() {
+            @Override
+            public void onActivityResult(Uri uri) {
+                if (uri != null) {
+                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
+                    getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putString("bg_uri", uri.toString()).apply();
+                    backgroundView.setImageURI(uri);
+                }
+            }
+        });
+        loadBackgroundIfExists();
+
         urlEditText.setImeOptions(EditorInfo.IME_ACTION_GO);
         faviconImageView = findViewById(R.id.favicon);
         btnGo = findViewById(R.id.btnGo);
@@ -1615,6 +1642,25 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
+        if (id == R.id.menu_set_background) {
+            pickImageLauncher.launch(new String[]{"image/*"});
+            return true;
+        } else if (id == R.id.menu_set_opacity) {
+            final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
+            new MaterialAlertDialogBuilder(this).setTitle("Background Opacity").setItems(items, (d, i) -> {
+                float v = 1.0f - (i * 0.1f);
+                getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putFloat("bg_opacity", v).apply();
+                if (backgroundView != null) backgroundView.setAlpha(v);
+                injectTransparencyCss();
+            }).show();
+            return true;
+        } else if (id == R.id.menu_clear_background) {
+            getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().remove("bg_uri").remove("bg_opacity").apply();
+            if (backgroundView != null) backgroundView.setImageDrawable(null);
+            injectTransparencyCss();
+            return true;
+        }
+
         if (id == R.id.action_tabs) {
             showTabsDialog();
         } else if (id == R.id.action_dark_mode) {
@@ -2936,4 +2982,26 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
+    private void loadBackgroundIfExists() {
+        String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
+        if (s != null) {
+            try {
+                Uri uri = Uri.parse(s);
+                backgroundView.setImageURI(uri);
+            } catch (Exception e) {}
+        }
+        float opacity = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getFloat("bg_opacity", 1.0f);
+        backgroundView.setAlpha(opacity);
+    }
+    private void injectTransparencyCss() {
+        try {
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
+            } else if (webView != null) {
+                webView.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
+            }
+        } catch (Exception ignored) {}
+    }
+
 }
