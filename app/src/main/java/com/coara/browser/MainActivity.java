@@ -1764,11 +1764,23 @@ if (filePathCallback != null) {
         return super.onPrepareOptionsMenu(menu);
     }
     @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        int id = item.getItemId();
-        if (id == R.id.action_tabs) {
-            showTabsDialog();
-        } else if (id == R.id.action_dark_mode) {
+    
+public boolean onOptionsItemSelected(MenuItem item) {
+    int id = item.getItemId();
+    if (id == R.id.action_set_background) {
+        chooseBackground();
+        return true;
+    } else if (id == R.id.action_clear_background) {
+        clearBackground();
+        return true;
+    }
+    
+    try {
+        return super.onOptionsItemSelected(item);
+    } catch (Exception e) {
+        return false;
+    }
+} else if (id == R.id.action_dark_mode) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 darkModeEnabled = !darkModeEnabled;
                 item.setChecked(darkModeEnabled);
