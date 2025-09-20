@@ -994,7 +994,63 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return super.shouldInterceptRequest(view, request);
+                try {
+                    if (!request.isForMainFrame()) return super.shouldInterceptRequest(view, request);
+                    String urlStr = request.getUrl().toString();
+                    URL url = new URL(urlStr);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestProperty("User-Agent", view.getSettings().getUserAgentString());
+                    conn.setInstanceFollowRedirects(true);
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(20000);
+                    conn.connect();
+                    String contentType = conn.getContentType();
+                    String encoding = conn.getContentEncoding();
+                    InputStream is = conn.getInputStream();
+                    if ("gzip".equalsIgnoreCase(encoding)) {
+                        is = new GZIPInputStream(new BufferedInputStream(is));
+                    } else {
+                        is = new BufferedInputStream(is);
+                    }
+                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192];
+                    int n;
+                    while ((n = is.read(buffer)) != -1) baos.write(buffer, 0, n);
+                    is.close();
+                    String html = baos.toString("UTF-8");
+                    String base64 = pref.getString(KEY_BG_BASE64, null);
+                    String injection = "";
+                    if (base64 != null && base64.length() > 0) {
+                        String dataUri = "data:image/jpeg;base64," + base64;
+                        String css = "html,body{background:transparent!important;}#coara_bg_div{position:fixed;top:0;left:0;width:100%;height:100%;z-index:-2147483648;pointer-events:none;background-image:url('" + dataUri + "');background-size:cover;background-repeat:no-repeat;background-position:center center;}";
+                        String js = "(function(){if(window.__coara_bg_installed)return;window.__coara_bg_installed=true;var d=document.createElement('div');d.id='coara_bg_div';document.documentElement.insertBefore(d,document.documentElement.firstChild);var s=document.createElement('style');s.id='coara_bg_style';s.innerHTML=" + quoted(css) + ";document.head?document.head.appendChild(s):document.documentElement.appendChild(s);var sweep=function(){var els=document.querySelectorAll('body *:not(script):not(style):not(canvas)');for(var i=0;i<els.length;i++){try{var el=els[i];var cs=window.getComputedStyle(el);if(cs && cs.backgroundColor && cs.backgroundColor!=='rgba(0, 0, 0, 0)' && cs.backgroundColor!=='transparent'){el.style.backgroundColor='transparent';}if(cs && cs.backgroundImage && cs.backgroundImage!=='none'){el.style.backgroundImage='none';}}catch(e){}}};sweep();var mo=new MutationObserver(function(){if(window.__coara_bg_scheduled)return;window.__coara_bg_scheduled=true;setTimeout(function(){sweep();window.__coara_bg_scheduled=false;},120);});mo.observe(document.documentElement,{attributes:true,childList:true,subtree:true});})();";
+                        injection = "<style id=\"coara_inject_css\">" + css + "</style><script id=\"coara_inject_js\">" + js + "</script>";
+                    }
+                    String modified;
+                    int headClose = html.indexOf("</head>");
+                    if (headClose != -1) {
+                        modified = html.substring(0, headClose) + injection + html.substring(headClose);
+                    } else {
+                        modified = injection + html;
+                    }
+                    Map<String, String> headers = new HashMap<>();
+                    for (Map.Entry<String, java.util.List<String>> e : conn.getHeaderFields().entrySet()) {
+                        if (e.getKey() == null) continue;
+                        String k = e.getKey();
+                        if (k.equalsIgnoreCase("content-security-policy") || k.equalsIgnoreCase("content-security-policy-report-only")) continue;
+                        String v = String.join(";", e.getValue());
+                        headers.put(k, v);
+                    }
+                    byte[] outBytes = modified.getBytes("UTF-8");
+                    ByteArrayInputStream newIs = new ByteArrayInputStream(outBytes);
+                    WebResourceResponse resp = new WebResourceResponse("text/html", "UTF-8", newIs);
+                    resp.setResponseHeaders(headers);
+                    return resp;
+                } catch (IOException ex) {
+                    return super.shouldInterceptRequest(view, request);
+                } catch (Exception ex) {
+                    return super.shouldInterceptRequest(view, request);
+                }
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
