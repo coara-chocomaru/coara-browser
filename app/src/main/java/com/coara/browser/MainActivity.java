@@ -725,7 +725,7 @@ checkSentinelAndClearTabsIfNecessary();
     private void injectLazyLoading(WebView webView) {
         String js = "javascript:(function(){" +
                 "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
-                "var images=document.querySelectorAll('img[src^="https://i.ytimg.com/"]:not([data-lazy-loaded])');" +
+                "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
                 "if(images.length===0)return;" +
                 "images.forEach(function(img){" +
                 "img.setAttribute('data-lazy-loaded','true');" +
