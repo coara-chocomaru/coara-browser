@@ -125,7 +125,7 @@ public class PageBg {
             try {
                 if (webView != null) {
                     webView.setBackgroundColor(android.graphics.Color.WHITE);
-                    String js = "javascript:(function(){var styles=document.head.querySelectorAll('style'); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf('opacity: 0.5')!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity='1';})();";
+                    String js = "javascript:(function(){var styles=document.head.querySelectorAll(\"style\"); for(var i=0;i<styles.length;i++){ if(styles[i].innerHTML && styles[i].innerHTML.indexOf(\"opacity: 0.5\")!==-1){ styles[i].parentNode.removeChild(styles[i]); } } document.body.style.opacity=\"1\";})})();";;
                     try { webView.evaluateJavascript(js, null); } catch (Exception ignored) {}
                 }
             } catch (Exception ignored) {}
@@ -138,14 +138,14 @@ public class PageBg {
                 "style.setAttribute('data-pagebg','true'); " +
                 "style.innerHTML = 'body, body * { opacity: 0.5 !important; background: transparent !important; }'; " +
              "document.head.appendChild(style); " +
-                "})();";
+                "})})();";
         try {
             webView.evaluateJavascript(js, null);
             } catch (Exception e) {
             e.printStackTrace();
         }
     }
-)();";
+)})();";
         webView.evaluateJavascript(js, null);
     }
 }
