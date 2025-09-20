@@ -98,6 +98,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.io.ByteArrayOutputStream;
+import java.io.ByteArrayInputStream;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -387,20 +388,20 @@ public class MainActivity extends AppCompatActivity {
         fileChooserLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
-                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                        Uri dataUri = result.getData().getData();
+                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
+                        Uri pickedUri = pickerResult.getData().getData();
 
         imagePickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
-                result -> {
-                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                        Uri dataUri = result.getData().getData();
-                        if (dataUri != null) {
+                pickerResult -> {
+                    if (pickerResult.getResultCode() == RESULT_OK && pickerResult.getData() != null) {
+                        Uri pickedUri = pickerResult.getData().getData();
+                        if (pickedUri != null) {
                             try {
-                                final int takeFlags = result.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                getContentResolver().takePersistableUriPermission(dataUri, takeFlags);
+                                final int takeFlags = pickerResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().takePersistableUriPermission(pickedUri, takeFlags);
                             } catch (Exception ignored) {}
-                            pref.edit().putString(KEY_BACKGROUND_URI, dataUri.toString()).apply();
+                            pref.edit().putString(KEY_BACKGROUND_URI, pickedUri.toString()).apply();
                             backgroundDataUri = loadBackgroundDataUriFromPrefs();
                             for (WebView w : webViews) {
                                 try { w.post(() -> w.reload()); } catch (Exception ignored) {}
