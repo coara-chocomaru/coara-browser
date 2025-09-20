@@ -149,6 +149,11 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private TextInputEditText urlEditText;
     private ImageView faviconImageView;
+    private ImageView backgroundView;
+    private ActivityResultLauncher<String[]> pickImageLauncher;
+    private Handler backgroundHandler;
+    private Runnable transparencyRunnable;
+
     private MaterialButton btnGo;
     private MaterialButton btnNewTab;
     private MaterialToolbar toolbar;
@@ -156,11 +161,6 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout webViewContainer;
     private TextView tabCountTextView;
     private ImageView copyButton;
-    private ImageView backgroundView;
-    private ActivityResultLauncher<String[]> pickImageLauncher;
-    private Handler handler;
-    private Runnable transparencyRunnable;
-
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
@@ -248,31 +248,6 @@ public class MainActivity extends AppCompatActivity {
             getSupportActionBar().setTitle("");
         }
 
-        backgroundView = findViewById(R.id.backgroundView);
-        handler = new Handler();
-        transparencyRunnable = new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    injectTransparencyCss();
-                } catch (Exception ignored) {}
-                handler.postDelayed(this, 500);
-            }
-        };
-        handler.post(transparencyRunnable);
-        pickImageLauncher = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.OpenDocument(), new androidx.activity.result.ActivityResultCallback<android.net.Uri>() {
-            @Override
-            public void onActivityResult(android.net.Uri uri) {
-                if (uri != null) {
-                    try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception e) {}
-                    getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putString("bg_uri", uri.toString()).apply();
-                    try { backgroundView.setImageURI(uri); } catch (Exception e) {}
-                }
-            }
-        });
-        loadBackgroundIfExists();
-
-
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
         checkSentinelAndClearTabsIfNecessary();
         ensureCacheSentinelExists();
@@ -338,6 +313,27 @@ public class MainActivity extends AppCompatActivity {
             defaultLoadsImagesAutomaticallyInitialized = true;
         }
         btnGo.setVisibility(View.GONE);
+        backgroundView = findViewById(R.id.backgroundView);
+        backgroundHandler = new Handler();
+        transparencyRunnable = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    injectTransparencyCss();
+                } catch (Exception ignored) {}
+                backgroundHandler.postDelayed(this, 500);
+            }
+        };
+        backgroundHandler.post(transparencyRunnable);
+        pickImageLauncher = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+            if (uri != null) {
+                try { getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION); } catch (Exception ignored) {}
+                pref.edit().putString("bg_uri", uri.toString()).apply();
+                backgroundView.setImageURI(uri);
+            }
+        });
+        loadBackgroundIfExists();
+
 
         copyButton = new ImageView(this);
         copyButton.setImageResource(R.drawable.ic_copy);
@@ -524,6 +520,11 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         backgroundExecutor.shutdown();
+        try {
+            if (backgroundHandler != null && transparencyRunnable != null) {
+                backgroundHandler.removeCallbacks(transparencyRunnable);
+            }
+        } catch (Exception ignored) {}
     }
 
     private void saveTabsState() {
@@ -1645,7 +1646,6 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
-        if (handleBackgroundMenu(item)) return true;
         if (id == R.id.action_tabs) {
             showTabsDialog();
         } else if (id == R.id.action_dark_mode) {
@@ -1840,6 +1840,26 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
         }
+        
+        else if (id == R.id.menu_set_background) {
+            pickImageLauncher.launch(new String[]{"image/*"});
+            return true;
+        } else if (id == R.id.menu_set_opacity) {
+            final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
+            new MaterialAlertDialogBuilder(this).setTitle("Background Opacity").setItems(items, (d, i) -> {
+                float v = 1.0f - (i * 0.1f);
+                pref.edit().putFloat("bg_opacity", v).apply();
+                if (backgroundView != null) backgroundView.setAlpha(v);
+                injectTransparencyCss();
+            }).show();
+            return true;
+        } else if (id == R.id.menu_clear_background) {
+            pref.edit().remove("bg_uri").remove("bg_opacity").apply();
+            if (backgroundView != null) backgroundView.setImageDrawable(null);
+            injectTransparencyCss();
+            return true;
+        }
+
         return super.onOptionsItemSelected(item);
     }
 
@@ -1948,6 +1968,30 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
 }
         }
+
+    
+    private void loadBackgroundIfExists() {
+        try {
+            String s = pref.getString("bg_uri", null);
+            if (s != null) {
+                try {
+                    Uri uri = Uri.parse(s);
+                    backgroundView.setImageURI(uri);
+                } catch (Exception ignored) {}
+            }
+            float opacity = pref.getFloat("bg_opacity", 1.0f);
+            backgroundView.setAlpha(opacity);
+        } catch (Exception ignored) {}
+    }
+
+    private void injectTransparencyCss() {
+        try {
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
+            }
+        } catch (Exception ignored) {}
+    }
 
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
@@ -2967,55 +3011,4 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
-
-    private void loadBackgroundIfExists() {
-        try {
-            String s = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getString("bg_uri", null);
-            if (s != null && backgroundView != null) {
-                try {
-                    android.net.Uri uri = android.net.Uri.parse(s);
-                    backgroundView.setImageURI(uri);
-                } catch (Exception ignored) {}
-            }
-            float opacity = getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).getFloat("bg_opacity", 1.0f);
-            if (backgroundView != null) backgroundView.setAlpha(opacity);
-        } catch (Exception ignored) {}
-    }
-
-    private void injectTransparencyCss() {
-        try {
-            WebView current = null;
-            if (webViews != null && !webViews.isEmpty()) {
-                current = getCurrentWebView();
-            }
-            if (current != null) {
-                current.evaluateJavascript("(function(){document.documentElement.style.background = 'transparent'; var body = document.body; if(body) body.style.background = 'transparent';})();", null);
-            }
-        } catch (Exception ignored) {}
-    }
-
-    private boolean handleBackgroundMenu(MenuItem item) {
-        int id = item.getItemId();
-        if (handleBackgroundMenu(item)) return true;
-        if (id == R.id.menu_set_background) {
-            if (pickImageLauncher != null) pickImageLauncher.launch(new String[]{"image/*"});
-            return true;
-        } else if (id == R.id.menu_set_opacity) {
-            final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
-            new MaterialAlertDialogBuilder(this).setTitle("Background Opacity").setItems(items, (d, i) -> {
-                float v = 1.0f - (i * 0.1f);
-                getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putFloat("bg_opacity", v).apply();
-                if (backgroundView != null) backgroundView.setAlpha(v);
-                injectTransparencyCss();
-            }).show();
-            return true;
-        } else if (id == R.id.menu_clear_background) {
-            getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().remove("bg_uri").remove("bg_opacity").apply();
-            if (backgroundView != null) backgroundView.setImageDrawable(null);
-            injectTransparencyCss();
-            return true;
-        }
-        return false;
-    }
-
 }
