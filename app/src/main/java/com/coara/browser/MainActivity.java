@@ -1826,7 +1826,33 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
         }
-        return super.onOptionsItemSelected(item);
+        
+        else if (id == R.id.menu_set_background) {
+            try {
+                Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+                intent.addCategory(Intent.CATEGORY_OPENABLE);
+                intent.setType("image/*");
+                startActivityForResult(intent, PICK_IMAGE_REQUEST);
+            } catch (Exception e) {}
+            return true;
+        } else if (id == R.id.menu_set_opacity) {
+            final CharSequence[] items = new CharSequence[]{"100%","90%","80%","70%","60%","50%","40%","30%","20%","10%"};
+            new android.app.AlertDialog.Builder(this)
+                .setTitle("Background Opacity")
+                .setItems(items, (d, i) -> {
+                    float v = 1.0f - (i * 0.1f);
+                    getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().putFloat("bg_opacity", v).apply();
+                    if (backgroundView != null) backgroundView.setAlpha(v);
+                    injectTransparencyCss();
+                }).show();
+            return true;
+        } else if (id == R.id.menu_clear_background) {
+            getSharedPreferences("simple_gview_prefs", MODE_PRIVATE).edit().remove("bg_uri").remove("bg_opacity").apply();
+            if (backgroundView != null) backgroundView.setImageDrawable(null);
+            injectTransparencyCss();
+            return true;
+        }
+return super.onOptionsItemSelected(item);
     }
 
     private void clearBasicAuthCacheAndReload() {
