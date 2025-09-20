@@ -110,6 +110,11 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
+
+import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.util.zip.GZIPInputStream;
 public class MainActivity extends AppCompatActivity {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
@@ -128,7 +133,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_BOOKMARKS = "bookmarks";
     private static final String KEY_HISTORY = "history";
     private static final String APPEND_STR = " CoaraBrowser";
-    private static final String START_PAGE = "file:///android_asset/index.html";
+    
+    private static final String KEY_BG_BASE64 = "bg_base64";
+private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
