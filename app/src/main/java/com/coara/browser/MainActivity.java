@@ -1901,15 +1901,13 @@ private void applyCombinedOptimizations(WebView webView) {
             clearTabs();
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
-        }
-
-        } else if (id == R.id.action_set_background) {
+        else if (id == R.id.action_set_background) {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("image/*");
             backgroundPickerLauncher.launch(intent);
             return true;
-        } else if (id == R.id.action_clear_background) {
+        else if (id == R.id.action_clear_background) {
             if (backgroundManager != null) backgroundManager.clearBackground();
             synchronized (webViews) {
                 for (WebView w : webViews) {

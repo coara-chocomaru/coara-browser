@@ -22,16 +22,14 @@ public class BackgroundManager {
     public String getInjectionHtml(){
         String uri = getBackgroundUri();
         if (uri == null || uri.isEmpty()) return "";
-        String esc = uri.replace("\\", "\\\\").replace(""", "\\"");
+        String esc = uri.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\\"").replace("'", "\\\\'");
         StringBuilder sb = new StringBuilder();
-        sb.append("<style id=\"injected-bg\">html,body{min-height:100%;background-image:url(\"");
-        sb.append(esc);
-        sb.append("\");background-size:cover;background-position:center center;background-repeat:no-repeat;background-attachment:fixed;margin:0;padding:0;}</style>");
-        sb.append("<script>(function(){function reapply(){if(document.getElementById('injected-bg'))return;var head=document.getElementsByTagName('head')[0];if(head){var div=document.createElement('div');div.innerHTML=\"");
         sb.append("<style id=\\\"injected-bg\\\">html,body{min-height:100%;background-image:url(\\\"");
         sb.append(esc);
         sb.append("\\\");background-size:cover;background-position:center center;background-repeat:no-repeat;background-attachment:fixed;margin:0;padding:0;}</style>");
-        sb.append("\\";head.insertBefore(div,head.firstChild);}}document.addEventListener('DOMContentLoaded',reapply);var push=history.pushState;history.pushState=function(){push.apply(history,arguments);setTimeout(reapply,10);};var rep=history.replaceState;history.replaceState=function(){rep.apply(history,arguments);setTimeout(reapply,10);};window.addEventListener('popstate',reapply);reapply();})();</script>");
+        sb.append("<script>(function(){function reapply(){if(document.getElementById(\\\"injected-bg\\\"))return;var head=document.getElementsByTagName(\\\"head\\\")[0];if(head){var s=document.createElement(\\\"style\\\");s.id=\\\"injected-bg\\\";s.textContent='html,body{min-height:100%;background-image:url(\\\\\\\"");
+        sb.append(esc);
+        sb.append("\\\\\\\");background-size:cover;background-position:center center;background-repeat:no-repeat;background-attachment:fixed;margin:0;padding:0;}';head.insertBefore(s,head.firstChild);} }document.addEventListener(\\\"DOMContentLoaded\\\",reapply);var push=history.pushState;history.pushState=function(){push.apply(history,arguments);setTimeout(reapply,10);};var rep=history.replaceState;history.replaceState=function(){rep.apply(history,arguments);setTimeout(reapply,10);};window.addEventListener('popstate',reapply);reapply();})();</script>");
         return sb.toString();
     }
 }
