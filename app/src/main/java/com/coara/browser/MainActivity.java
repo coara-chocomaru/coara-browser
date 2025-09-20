@@ -159,11 +159,11 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
-
-    private final Map<WebView, PageBg> pageBgMap = new HashMap<>();
+    private final java.util.Map<WebView, PageBg> pageBgMap = new java.util.HashMap<>();
     private ActivityResultLauncher<String> bgPermissionLauncher;
     private ActivityResultLauncher<String> bgImagePickerLauncher;
-private SharedPreferences pref;
+
+    private SharedPreferences pref;
     private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
@@ -259,7 +259,6 @@ private SharedPreferences pref;
                     if (pg != null) {
                         pg.handleImageSelection(uri);
                     } else {
-                        // apply to current webview directly if no PageBg found
                         try {
                             PageBg tmp = new PageBg(MainActivity.this, getCurrentWebView());
                             tmp.registerLaunchers(bgPermissionLauncher, bgImagePickerLauncher);
@@ -1669,7 +1668,7 @@ private SharedPreferences pref;
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
 
-        } else if (id == R.id.action_set_background) {
+        if (id == R.id.action_set_background) {
             PageBg pg = getPageBgForWebView(getCurrentWebView());
             if (pg != null) {
                 pg.selectAndSetBackground();
@@ -1692,6 +1691,7 @@ private SharedPreferences pref;
             }
             Toast.makeText(this, "背景画像を初期化しました", Toast.LENGTH_SHORT).show();
             return true;
+        }
 
         if (id == R.id.action_tabs) {
             showTabsDialog();
