@@ -394,6 +394,7 @@ public class MainActivity extends AppCompatActivity {
                         if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
+                });
 
         
         imagePickerLauncher = registerForActivityResult(
@@ -416,20 +417,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                        if (pickedUri != null) {
-                            try {
-                                final int takeFlags = pickerResult.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                getContentResolver().takePersistableUriPermission(pickedUri, takeFlags);
-                            } catch (Exception ignored) {}
-                            pref.edit().putString(KEY_BACKGROUND_URI, pickedUri.toString()).apply();
-                            backgroundDataUri = loadBackgroundDataUriFromPrefs();
-                            for (WebView w : webViews) {
-                                try { w.post(() -> w.reload()); } catch (Exception ignored) {}
-                            }
-                            Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
-                        }
-                    }
-                });
 
         urlEditText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
             if (actionId == EditorInfo.IME_ACTION_GO ||
@@ -722,7 +709,6 @@ public class MainActivity extends AppCompatActivity {
         initialWebView.loadUrl(START_PAGE);
     }
     updateTabCount();
-});
         }
 
     private void updateTabCount() {
