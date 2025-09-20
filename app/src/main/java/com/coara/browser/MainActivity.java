@@ -97,6 +97,7 @@ import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.io.ByteArrayOutputStream;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -110,11 +111,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
-
-import java.io.BufferedInputStream;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.util.zip.GZIPInputStream;
 public class MainActivity extends AppCompatActivity {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
@@ -128,29 +124,16 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_UA_ENABLED = "ua_enabled";
     private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
     private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
+    private static final String KEY_BACKGROUND_URI = "background_image_uri";
+    private ActivityResultLauncher<Intent> imagePickerLauncher;
+    private volatile String backgroundDataUri = null;
+
     private static final String KEY_TABS = "tabs";
     private static final String KEY_CURRENT_TAB = "current_tab_index";
     private static final String KEY_BOOKMARKS = "bookmarks";
     private static final String KEY_HISTORY = "history";
     private static final String APPEND_STR = " CoaraBrowser";
-    
-    private static final String KEY_BG_BASE64 = "bg_base64";
-
-
-    private static String quoted(String s) {
-        StringBuilder sb = new StringBuilder();
-        sb.append('"');
-        for (int i = 0; i < s.length(); i++) {
-            char c = s.charAt(i);
-            if (c == '\\' || c == '"') { sb.append('\\'); sb.append(c); }
-            else if (c == '\n') { sb.append("\\n"); }
-            else if (c == '\r') { sb.append("\\r"); }
-            else { sb.append(c); }
-        }
-        sb.append('"');
-        return sb.toString();
-    }
-private static final String START_PAGE = "file:///android_asset/index.html";
+    private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
     private static final int MAX_HISTORY_SIZE = 100;
@@ -406,6 +389,26 @@ private static final String START_PAGE = "file:///android_asset/index.html";
                 result -> {
                     if (result.getResultCode() == RESULT_OK && result.getData() != null) {
                         Uri dataUri = result.getData().getData();
+
+        imagePickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Uri dataUri = result.getData().getData();
+                        if (dataUri != null) {
+                            try {
+                                final int takeFlags = result.getData().getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                getContentResolver().takePersistableUriPermission(dataUri, takeFlags);
+                            } catch (Exception ignored) {}
+                            pref.edit().putString(KEY_BACKGROUND_URI, dataUri.toString()).apply();
+                            backgroundDataUri = loadBackgroundDataUriFromPrefs();
+                            for (WebView w : webViews) {
+                                try { w.post(() -> w.reload()); } catch (Exception ignored) {}
+                            }
+                            Toast.makeText(MainActivity.this, "背景画像を設定しました", Toast.LENGTH_SHORT).show();
+                        }
+                    }
+                });
                         if (filePathCallback != null) {
                             filePathCallback.onReceiveValue(dataUri != null ? new Uri[]{dataUri} : null);
                         }
@@ -454,6 +457,52 @@ private static final String START_PAGE = "file:///android_asset/index.html";
          }
      });
     }
+    
+    private void chooseBackground() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("image/*");
+        try {
+            imagePickerLauncher.launch(intent);
+        } catch (Exception ignored) {}
+    }
+
+    private void clearBackground() {
+        String prev = pref.getString(KEY_BACKGROUND_URI, null);
+        if (prev != null) {
+            try {
+                Uri prevUri = Uri.parse(prev);
+                getContentResolver().releasePersistableUriPermission(prevUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (Exception ignored) {}
+            pref.edit().remove(KEY_BACKGROUND_URI).apply();
+        }
+        backgroundDataUri = null;
+        for (WebView w : webViews) {
+            try { w.post(() -> w.reload()); } catch (Exception ignored) {}
+        }
+        Toast.makeText(this, "背景設定をクリアしました", Toast.LENGTH_SHORT).show();
+    }
+
+    private String loadBackgroundDataUriFromPrefs() {
+        String uriStr = pref.getString(KEY_BACKGROUND_URI, null);
+        if (uriStr == null) return null;
+        Uri uri = Uri.parse(uriStr);
+        try (InputStream is = getContentResolver().openInputStream(uri)) {
+            if (is == null) return null;
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int r;
+            while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
+            byte[] bytes = baos.toByteArray();
+            String mime = getContentResolver().getType(uri);
+            if (mime == null) mime = "image/png";
+            String base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP);
+            return "data:" + mime + ";base64," + base64;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     private void saveBundleToFile(Bundle bundle, String fileName) {
         File file = new File(getFilesDir(), fileName);
         Parcel parcel = Parcel.obtain();
@@ -1018,59 +1067,82 @@ private static final String START_PAGE = "file:///android_asset/index.html";
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 try {
                     if (!request.isForMainFrame()) return super.shouldInterceptRequest(view, request);
-                    String urlStr = request.getUrl().toString();
-                    URL url = new URL(urlStr);
-                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                    conn.setRequestProperty("User-Agent", view.getSettings().getUserAgentString());
+                    Uri url = request.getUrl();
+                    String scheme = url.getScheme();
+                    if (scheme == null) return super.shouldInterceptRequest(view, request);
+                    if (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https")) return super.shouldInterceptRequest(view, request);
+                    String method = request.getMethod();
+                    if (!"GET".equalsIgnoreCase(method)) return super.shouldInterceptRequest(view, request);
+                    Map<String, String> requestHeaders = request.getRequestHeaders();
+                    HttpURLConnection conn = (HttpURLConnection) new URL(url.toString()).openConnection();
                     conn.setInstanceFollowRedirects(true);
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(20000);
+                    conn.setRequestMethod("GET");
+                    if (requestHeaders != null) {
+                        for (Map.Entry<String, String> e : requestHeaders.entrySet()) {
+                            try { conn.setRequestProperty(e.getKey(), e.getValue()); } catch (Exception ignored) {}
+                        }
+                    }
+                    String ua = view.getSettings().getUserAgentString();
+                    if (ua != null) conn.setRequestProperty("User-Agent", ua);
                     conn.connect();
                     String contentType = conn.getContentType();
-                    String encoding = conn.getContentEncoding();
+                    String mime = contentType;
+                    String charset = null;
+                    if (contentType != null) {
+                        String[] parts = contentType.split(";");
+                        if (parts.length > 0) mime = parts[0].trim();
+                        for (int i = 1; i < parts.length; i++) {
+                            String p = parts[i].trim();
+                            if (p.toLowerCase().startsWith("charset=")) {
+                                charset = p.substring(8).trim();
+                            }
+                        }
+                    }
                     InputStream is = conn.getInputStream();
-                    if ("gzip".equalsIgnoreCase(encoding)) {
-                        is = new GZIPInputStream(new BufferedInputStream(is));
+                    if (mime != null && mime.toLowerCase().contains("text/html")) {
+                        if (charset == null) charset = "UTF-8";
+                        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                        byte[] buf = new byte[8192];
+                        int r;
+                        while ((r = is.read(buf)) != -1) baos.write(buf,0,r);
+                        String html = new String(baos.toByteArray(), charset);
+                        String injectCss = "";
+                        if (backgroundDataUri == null) backgroundDataUri = loadBackgroundDataUriFromPrefs();
+                        if (backgroundDataUri != null) {
+                            String css = "body{background-image:url('" + backgroundDataUri + "') !important; background-size:cover !important; background-position:center center !important; background-attachment:fixed !important;} html,body{height:100% !important;}";
+                            injectCss = "<style>" + css + "</style>";
+                        }
+                        String injectScript = "";
+                        String injection = injectCss + injectScript;
+                        String modified;
+                        int headIdx = -1;
+                        try {
+                            headIdx = html.toLowerCase().indexOf("<head");
+                        } catch (Exception ignored) {}
+                        if (headIdx != -1) {
+                            int gt = html.indexOf('>', headIdx);
+                            if (gt != -1) {
+                                modified = html.substring(0, gt+1) + injection + html.substring(gt+1);
+                            } else {
+                                modified = injection + html;
+                            }
+                        } else {
+                            modified = injection + html;
+                        }
+                        byte[] outBytes = modified.getBytes(charset);
+                        ByteArrayInputStream bais = new ByteArrayInputStream(outBytes);
+                        WebResourceResponse response = new WebResourceResponse("text/html", charset, bais);
+                        try {
+                            Map<String, String> headers = new HashMap<>();
+                            String enc = conn.getContentEncoding();
+                            if (enc != null) headers.put("Content-Encoding", enc);
+                            response.setResponseHeaders(headers);
+                        } catch (Exception ignored) {}
+                        return response;
                     } else {
-                        is = new BufferedInputStream(is);
+                        return super.shouldInterceptRequest(view, request);
                     }
-                    ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                    byte[] buffer = new byte[8192];
-                    int n;
-                    while ((n = is.read(buffer)) != -1) baos.write(buffer, 0, n);
-                    is.close();
-                    String html = baos.toString("UTF-8");
-                    String base64 = pref.getString(KEY_BG_BASE64, null);
-                    String injection = "";
-                    if (base64 != null && base64.length() > 0) {
-                        String dataUri = "data:image/jpeg;base64," + base64;
-                        String css = "html,body{background:transparent!important;}#coara_bg_div{position:fixed;top:0;left:0;width:100%;height:100%;z-index:-2147483648;pointer-events:none;background-image:url('" + dataUri + "');background-size:cover;background-repeat:no-repeat;background-position:center center;}";
-                        String js = "(function(){if(window.__coara_bg_installed)return;window.__coara_bg_installed=true;var d=document.createElement('div');d.id='coara_bg_div';document.documentElement.insertBefore(d,document.documentElement.firstChild);var s=document.createElement('style');s.id='coara_bg_style';s.innerHTML=" + quoted(css) + ";document.head?document.head.appendChild(s):document.documentElement.appendChild(s);var sweep=function(){var els=document.querySelectorAll('body *:not(script):not(style):not(canvas)');for(var i=0;i<els.length;i++){try{var el=els[i];var cs=window.getComputedStyle(el);if(cs && cs.backgroundColor && cs.backgroundColor!=='rgba(0, 0, 0, 0)' && cs.backgroundColor!=='transparent'){el.style.backgroundColor='transparent';}if(cs && cs.backgroundImage && cs.backgroundImage!=='none'){el.style.backgroundImage='none';}}catch(e){}}};sweep();var mo=new MutationObserver(function(){if(window.__coara_bg_scheduled)return;window.__coara_bg_scheduled=true;setTimeout(function(){sweep();window.__coara_bg_scheduled=false;},120);});mo.observe(document.documentElement,{attributes:true,childList:true,subtree:true});})();";
-                        injection = "<style id=\"coara_inject_css\">" + css + "</style><script id=\"coara_inject_js\">" + js + "</script>";
-                    }
-                    String modified;
-                    int headClose = html.indexOf("</head>");
-                    if (headClose != -1) {
-                        modified = html.substring(0, headClose) + injection + html.substring(headClose);
-                    } else {
-                        modified = injection + html;
-                    }
-                    Map<String, String> headers = new HashMap<>();
-                    for (Map.Entry<String, java.util.List<String>> e : conn.getHeaderFields().entrySet()) {
-                        if (e.getKey() == null) continue;
-                        String k = e.getKey();
-                        if (k.equalsIgnoreCase("content-security-policy") || k.equalsIgnoreCase("content-security-policy-report-only")) continue;
-                        String v = String.join(";", e.getValue());
-                        headers.put(k, v);
-                    }
-                    byte[] outBytes = modified.getBytes("UTF-8");
-                    ByteArrayInputStream newIs = new ByteArrayInputStream(outBytes);
-                    WebResourceResponse resp = new WebResourceResponse("text/html", "UTF-8", newIs);
-                    resp.setResponseHeaders(headers);
-                    return resp;
-                } catch (IOException ex) {
-                    return super.shouldInterceptRequest(view, request);
-                } catch (Exception ex) {
+                } catch (Exception e) {
                     return super.shouldInterceptRequest(view, request);
                 }
             }
