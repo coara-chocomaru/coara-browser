@@ -135,6 +135,21 @@ public class MainActivity extends AppCompatActivity {
     private static final String APPEND_STR = " CoaraBrowser";
     
     private static final String KEY_BG_BASE64 = "bg_base64";
+
+
+    private static String quoted(String s) {
+        StringBuilder sb = new StringBuilder();
+        sb.append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '\\' || c == '"') { sb.append('\\'); sb.append(c); }
+            else if (c == '\n') { sb.append("\\n"); }
+            else if (c == '\r') { sb.append("\\r"); }
+            else { sb.append(c); }
+        }
+        sb.append('"');
+        return sb.toString();
+    }
 private static final String START_PAGE = "file:///android_asset/index.html";
     private static final int FILE_SELECT_CODE = 1001;
     private static final int MAX_TABS = 30;
