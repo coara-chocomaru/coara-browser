@@ -3,14 +3,14 @@ plugins {
 }
 
 android {
-    compileSdk = 35 
+    compileSdk = 36
     namespace = 'com.coara.browser'
 
     defaultConfig {
         minSdk = 24
-        targetSdk = 30
-        versionCode = 220
-        versionName = "4.2.3"
+        targetSdk = 31
+        versionCode = 221
+        versionName = "4.2.4"
         multiDexEnabled = true
         vectorDrawables.useSupportLibrary = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
