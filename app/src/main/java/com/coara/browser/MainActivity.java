@@ -72,6 +72,7 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import androidx.viewpager2.widget.ViewPager2;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -186,6 +187,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView preloadedWebView = null;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
+    private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
@@ -495,6 +497,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
+        synchronized (webViews) {
         JSONArray tabsArray = new JSONArray();
         for (WebView webView : webViews) {
             Object tag = webView.getTag();
@@ -521,6 +524,24 @@ public class MainActivity extends AppCompatActivity {
             Bundle state = new Bundle();
             webView.saveState(state);
             saveBundleToFile(state, "tab_state_" + id + ".dat");
+            if (tabSnapshots.containsKey(webView)) {
+                Bitmap snap = tabSnapshots.get(webView);
+                if (snap != null) {
+                    final int finalIdForSnap = id;
+                    final Bitmap finalSnap = snap;
+                    backgroundExecutor.execute(() -> {
+                        try {
+                            File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
+                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                                finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                fos.flush();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
+                }
+            }
         }
         Object currentTag = getCurrentWebView().getTag();
         int currentTabId;
@@ -536,7 +557,10 @@ public class MainActivity extends AppCompatActivity {
                 .putInt(KEY_CURRENT_TAB_ID, currentTabId)
                 .apply();
     }
+        }
+
     private void loadTabsState() {
+        synchronized (webViews) {
     String tabsJsonStr = pref.getString(KEY_TABS, "[]");
     int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
     try {
@@ -551,6 +575,18 @@ public class MainActivity extends AppCompatActivity {
             WebView webView = createNewWebView();
             webView.setTag(id);
             webViews.add(webView);
+            File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+            if (snapFile.exists()) {
+                try {
+                    Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
+                    if (bm != null) {
+                        tabSnapshots.put(webView, bm);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+            try { restoreCookiesForTab(id, url); } catch (Exception ignored) {}
             if (id > maxId) maxId = id;
             if (id == currentTabId) {
                 webView.loadUrl(url);
@@ -603,28 +639,44 @@ public class MainActivity extends AppCompatActivity {
     }
     updateTabCount();
 }
+        }
+
     private void updateTabCount() {
         if (tabCountTextView != null) {
             tabCountTextView.setText(String.valueOf(webViews.size()));
         }
     }
     private void checkSentinelAndClearTabsIfNecessary() {
-        File cacheDir = getCacheDir();
-        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        File filesDir = getFilesDir();
+        File sentinel = new File(filesDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
+            try {
+                sentinel.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
             SharedPreferences.Editor editor = pref.edit();
             editor.remove(KEY_TABS);
-            editor.remove(KEY_CURRENT_TAB);
+            editor.remove(KEY_CURRENT_TAB_ID);
             editor.apply();
             webViews.clear();
         }
     }
     private void ensureCacheSentinelExists() {
-        File cacheDir = getCacheDir();
-        File sentinel = new File(cacheDir, SENTINEL_FILENAME);
+        File filesDir = getFilesDir();
+        File sentinel = new File(filesDir, SENTINEL_FILENAME);
         if (!sentinel.exists()) {
             try {
                 sentinel.createNewFile();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        File cacheDir = getCacheDir();
+        File cacheSentinel = new File(cacheDir, SENTINEL_FILENAME);
+        if (!cacheSentinel.exists()) {
+            try {
+                cacheSentinel.createNewFile();
             } catch (IOException e) {
                 e.printStackTrace();
             }
@@ -726,13 +778,14 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void preInitializeWebView() {
-        runOnUiThread(() -> {
+        runOnUiThread(new Runnable() { @Override public void run() {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
             String defaultUA = settings.getUserAgentString();
             settings.setUserAgentString(defaultUA + APPEND_STR);
             preloadedWebView = webView;
+        }
         });
     }
 
@@ -748,7 +801,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
-        webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
+        webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
         webView.setLayoutParams(new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -835,8 +888,7 @@ public class MainActivity extends AppCompatActivity {
                             } else if (which == 1) {
                                 if (isDataUrl) {
                                     if (webViews.size() >= MAX_TABS) {
-                                        Toast.makeText(MainActivity.this,
-                                            "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                     } else {
                                         WebView newWebView = createNewWebView();
                                         webViews.add(newWebView);
@@ -849,13 +901,10 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             } else if (which == 2) {
                                 if (isDataUrl) {
-                                    if (extra != null && !extra.isEmpty()) {
-                                        saveImage(extra);
-                                    }
+                                    saveImage(extra);
                                 } else {
                                     if (webViews.size() >= MAX_TABS) {
-                                        Toast.makeText(MainActivity.this,
-                                            "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                        Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                     } else {
                                         WebView newWebView = createNewWebView();
                                         webViews.add(newWebView);
@@ -864,10 +913,8 @@ public class MainActivity extends AppCompatActivity {
                                         newWebView.loadUrl(extra);
                                     }
                                 }
-                            } else if (which == 3 && !isDataUrl) {
-                                if (extra != null && !extra.isEmpty()) {
-                                    saveImage(extra);
-                                }
+                            } else if (which == 3) {
+                                saveImage(extra);
                             }
                         }).show();
                     return true;
@@ -886,8 +933,7 @@ public class MainActivity extends AppCompatActivity {
                                 handleDownload(extra, null, null, null, 0);
                             } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
-                                    Toast.makeText(MainActivity.this,
-                                        "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                 } else {
                                     WebView newWebView = createNewWebView();
                                     webViews.add(newWebView);
@@ -921,16 +967,13 @@ public class MainActivity extends AppCompatActivity {
                                 copyLink(extra);
                             } else if (which == 1) {
                                 if (isDataUrlLocal) {
-                                    if (extra != null && !extra.isEmpty()) {
-                                        saveImage(extra);
-                                    }
+                                    saveImage(extra);
                                 } else {
                                     handleDownload(extra, null, null, null, 0);
                                 }
-                            } else if (which == 2 && !isDataUrlLocal) {
+                            } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
-                                    Toast.makeText(MainActivity.this,
-                                        "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
                                 } else {
                                     WebView newWebView = createNewWebView();
                                     webViews.add(newWebView);
@@ -938,10 +981,8 @@ public class MainActivity extends AppCompatActivity {
                                     switchToTab(webViews.size() - 1);
                                     newWebView.loadUrl(extra);
                                 }
-                            } else if (which == 3 && !isDataUrlLocal) {
-                                if (extra != null && !extra.isEmpty()) {
-                                    saveImage(extra);
-                                }
+                            } else if (which == 3) {
+                                saveImage(extra);
                             }
                         }).show();
                     return true;
@@ -1021,16 +1062,16 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                urlEditText.setText(url);
+                if (view == getCurrentWebView()) { urlEditText.setText(url); }
                 super.onPageStarted(view, url, favicon);
             }
             @Override
             public void onPageFinished(WebView view, String url) {
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -1060,6 +1101,9 @@ public class MainActivity extends AppCompatActivity {
           "notifyUrlChange();" +
           "})();"; 
             view.evaluateJavascript(jsOverrideHistory, null); 
+            if (view == getCurrentWebView()) {
+                captureTabSnapshot(view);
+            }
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
@@ -1198,23 +1242,43 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void closeTab(WebView webView) {
+        synchronized (webViews) {
         int index = webViews.indexOf(webView);
         if (index != -1) {
+            Object tag = webView.getTag();
+            int id = -1;
+            if (tag instanceof Integer) id = (Integer) tag;
             if (webViews.size() > 1) {
                 webViews.remove(index);
+                Bitmap bm = tabSnapshots.remove(webView);
+                if (bm != null && !bm.isRecycled()) {
+                    try { bm.recycle(); } catch (Exception ignored) {}
+                }
+                if (id != -1) {
+                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    if (snapFile.exists()) {
+                        snapFile.delete();
+                    }
+                }
                 if (currentTabIndex > index) {
                     currentTabIndex--;
                 } else if (currentTabIndex >= webViews.size()) {
                     currentTabIndex = webViews.size() - 1;
                 }
-                webViewContainer.removeAllViews();
-                webViewContainer.addView(getCurrentWebView());
-                updateTabCount();
+                runOnUiThread(() -> {
+                    try {
+                        webViewContainer.removeAllViews();
+                        webViewContainer.addView(getCurrentWebView());
+                        updateTabCount();
+                    } catch (Exception ignored) {}
+                });
             } else {
                 webView.loadUrl(START_PAGE);
             }
         }
-    }
+}
+
+        }
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
@@ -1282,32 +1346,45 @@ public class MainActivity extends AppCompatActivity {
         return "blob_download_" + timeStamp + ext;
     }
 
+    
     private class BlobDownloadInterface {
         @JavascriptInterface
         public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(() -> {
-                try {
-                    int commaIndex = base64Data.indexOf(",");
-                    String pureBase64 = base64Data.substring(commaIndex + 1);
-                    byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadDir.exists()) {
-                        downloadDir.mkdirs();
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        int commaIndex = base64Data.indexOf(",");
+                        String pureBase64 = base64Data.substring(commaIndex + 1);
+                        byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
+                        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        if (!downloadDir.exists()) {
+                            downloadDir.mkdirs();
+                        }
+                        File file = new File(downloadDir, fileName);
+                        FileOutputStream fos = new FileOutputStream(file);
+                        try {
+                            fos.write(data);
+                            fos.flush();
+                        } finally {
+                            try { fos.close(); } catch (Exception ignored) {}
+                        }
+                        Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     }
-                    File file = new File(downloadDir, fileName);
-                    try (FileOutputStream fos = new FileOutputStream(file)) {
-                        fos.write(data);
-                        fos.flush();
-                    }
-                    Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                } catch (Exception e) {
-                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 }
             });
         }
+
         @JavascriptInterface
-        public void onBlobDownloadError(String errorMessage) {
-            runOnUiThread(() -> Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show());
+        public void onBlobDownloadError(final String errorMessage) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show();
+                }
+            });
         }
     }
 
@@ -1428,6 +1505,7 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         getCurrentWebView().loadUrl(START_PAGE);
+        captureTabSnapshot(newWebView);
     }
     private void createNewTab(String url) {
         if (webViews.size() >= MAX_TABS) {
@@ -1439,10 +1517,15 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         newWebView.loadUrl(url);
+        captureTabSnapshot(newWebView);
     }
 
     private void switchToTab(int index) {
         if (index < 0 || index >= webViews.size()) return;
+        WebView current = getCurrentWebView();
+        if (current != null) {
+            captureTabSnapshot(current);
+        }
         webViewContainer.removeAllViews();
         currentTabIndex = index;
         webViewContainer.addView(getCurrentWebView());
@@ -1475,22 +1558,33 @@ public class MainActivity extends AppCompatActivity {
       }
     }
     private class AndroidBridge {
-    @JavascriptInterface
-    public void onUrlChange(final String url) {
-        new Handler(Looper.getMainLooper()).post(() -> { 
-            addHistory(url, getCurrentWebView().getTitle()); 
-            if (url.startsWith("https://m.youtube.com/watch") ||
-                url.startsWith("https://chatgpt.com/") ||
-                url.startsWith("https://365sns.f5.si/") ||
-                url.startsWith("https://m.youtube.com/shorts/")) {
-                swipeRefreshLayout.setEnabled(false);
-            } else {
-                swipeRefreshLayout.setEnabled(true);
-            }
-            urlEditText.setText(url);
-        });
+        private final WebView owner;
+        public AndroidBridge(WebView owner) {
+            this.owner = owner;
+        }
+        @JavascriptInterface
+        public void onUrlChange(final String url) {
+            new Handler(Looper.getMainLooper()).post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        if (owner == getCurrentWebView()) {
+                            if (url.startsWith("https://m.youtube.com/watch") ||
+                                url.startsWith("https://chatgpt.com/") ||
+                                url.startsWith("https://365sns.f5.si/") ||
+                                url.startsWith("https://m.youtube.com/shorts/")) {
+                                swipeRefreshLayout.setEnabled(false);
+                            } else {
+                                swipeRefreshLayout.setEnabled(true);
+                            }
+                            urlEditText.setText(url);
+                            addHistory(url, owner.getTitle());
+                        }
+                    } catch (Exception ignored) {}
+                }
+            });
+        }
     }
-}
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.top_app_bar_menu, menu);
@@ -1781,11 +1875,38 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearTabs() {
+        synchronized (webViews) {
         WebView current = getCurrentWebView();
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
             if (i != currentTabIndex) {
-                webViews.get(i).destroy();
+                WebView w = webViews.get(i);
+                Object tag = w.getTag();
+                int id = -1;
+                if (tag instanceof Integer) id = (Integer) tag;
+                Bitmap bm = tabSnapshots.remove(w);
+                if (bm != null && !bm.isRecycled()) {
+                    try { bm.recycle(); } catch (Exception ignored) {}
+                }
+                if (id != -1) {
+                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    if (snapFile.exists()) snapFile.delete();
+                }
+                w.destroy();
+            }
+        }
+        WebView curr = getCurrentWebView();
+        if (curr != null) {
+            Object tag2 = curr.getTag();
+            int id2 = -1;
+            if (tag2 instanceof Integer) id2 = (Integer) tag2;
+            Bitmap cbm = tabSnapshots.remove(curr);
+            if (cbm != null && !cbm.isRecycled()) {
+                try { cbm.recycle(); } catch (Exception ignored) {}
+            }
+            if (id2 != -1) {
+                File snapFileCurr = new File(getFilesDir(), "tab_snapshot_" + id2 + ".png");
+                if (snapFileCurr.exists()) snapFileCurr.delete();
             }
         }
         webViews.clear();
@@ -1794,7 +1915,9 @@ public class MainActivity extends AppCompatActivity {
         webViewContainer.removeAllViews();
         webViewContainer.addView(current);
         updateTabCount();
-    }
+}
+        }
+
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
     int width = rootView.getWidth();
@@ -2090,18 +2213,255 @@ private void showHistoryDialog() {
         dialog.show();
     }
 
+    
     private void showTabsDialog() {
-        RecyclerView recyclerView = new RecyclerView(this);
-        recyclerView.setLayoutManager(new LinearLayoutManager(this));
+        LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        container.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        ViewPager2 viewPager = new ViewPager2(this);
+        viewPager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
+        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
+        viewPager.setAdapter(adapter);
+        LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1);
+        container.addView(viewPager, pagerParams);
+
+        Button addTabButton = new Button(this);
+        addTabButton.setText("新しいタブを開く");
+        addTabButton.setOnClickListener(v -> {
+            createNewTab();
+            adapter.notifyDataSetChanged();
+        });
+        container.addView(addTabButton);
+
         AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-            .setTitle("タブ")
-            .setNegativeButton("閉じる", null)
-            .setView(recyclerView)
-            .create();
-        TabAdapter adapter = new TabAdapter(webViews, dialog);
-        recyclerView.setAdapter(adapter);
+                .setTitle("タブ一覧")
+                .setView(container)
+                .setNegativeButton("タブ一覧を閉じる", null)
+                .create();
+        adapter.setParentDialog(dialog);
         dialog.show();
     }
+
+    private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
+        private AlertDialog parentDialog;
+        public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
+        public TabSnapshotAdapter() { }
+
+        @Override
+        public PageViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+            FrameLayout root = new FrameLayout(MainActivity.this);
+            root.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+            LinearLayout container = new LinearLayout(MainActivity.this);
+            container.setOrientation(LinearLayout.VERTICAL);
+            FrameLayout.LayoutParams containerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            container.setLayoutParams(containerParams);
+            LinearLayout row1 = new LinearLayout(MainActivity.this);
+            row1.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout row2 = new LinearLayout(MainActivity.this);
+            row2.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
+            row1.setLayoutParams(rowParams);
+            row2.setLayoutParams(rowParams);
+            int tileMargin = dpToPx(6);
+            LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            tileParams.setMargins(tileMargin, tileMargin, tileMargin, tileMargin);
+            FrameLayout tile00 = new FrameLayout(MainActivity.this);
+            FrameLayout tile01 = new FrameLayout(MainActivity.this);
+            FrameLayout tile10 = new FrameLayout(MainActivity.this);
+            FrameLayout tile11 = new FrameLayout(MainActivity.this);
+            tile00.setLayoutParams(tileParams);
+            tile01.setLayoutParams(tileParams);
+            tile10.setLayoutParams(tileParams);
+            tile11.setLayoutParams(tileParams);
+            ImageView img00 = new ImageView(MainActivity.this);
+            ImageView img01 = new ImageView(MainActivity.this);
+            ImageView img10 = new ImageView(MainActivity.this);
+            ImageView img11 = new ImageView(MainActivity.this);
+            img00.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img01.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img10.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            img11.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            FrameLayout.LayoutParams imgParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+            tile00.addView(img00, imgParams);
+            tile01.addView(img01, imgParams);
+            tile10.addView(img10, imgParams);
+            tile11.addView(img11, imgParams);
+            TextView title00 = new TextView(MainActivity.this);
+            TextView title01 = new TextView(MainActivity.this);
+            TextView title10 = new TextView(MainActivity.this);
+            TextView title11 = new TextView(MainActivity.this);
+            title00.setTextColor(Color.BLACK);
+            title01.setTextColor(Color.BLACK);
+            title10.setTextColor(Color.BLACK);
+            title11.setTextColor(Color.BLACK);
+            title00.setTextSize(12);
+            title01.setTextSize(12);
+            title10.setTextSize(12);
+            title11.setTextSize(12);
+            title00.setGravity(Gravity.CENTER);
+            title01.setGravity(Gravity.CENTER);
+            title10.setGravity(Gravity.CENTER);
+            title11.setGravity(Gravity.CENTER);
+            title00.setBackgroundColor(Color.argb(160,255,255,255));
+            title01.setBackgroundColor(Color.argb(160,255,255,255));
+            title10.setBackgroundColor(Color.argb(160,255,255,255));
+            title11.setBackgroundColor(Color.argb(160,255,255,255));
+            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
+            tile00.addView(title00, titleParams);
+            tile01.addView(title01, titleParams);
+            tile10.addView(title10, titleParams);
+            tile11.addView(title11, titleParams);
+            ImageButton close00 = new ImageButton(MainActivity.this);
+            ImageButton close01 = new ImageButton(MainActivity.this);
+            ImageButton close10 = new ImageButton(MainActivity.this);
+            ImageButton close11 = new ImageButton(MainActivity.this);
+            close00.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close01.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close10.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            close11.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
+            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dpToPx(36), dpToPx(36), Gravity.TOP | Gravity.END);
+            closeParams.setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
+            tile00.addView(close00, closeParams);
+            tile01.addView(close01, closeParams);
+            tile10.addView(close10, closeParams);
+            tile11.addView(close11, closeParams);
+            row1.addView(tile00);
+            row1.addView(tile01);
+            row2.addView(tile10);
+            row2.addView(tile11);
+            container.addView(row1);
+            container.addView(row2);
+            root.addView(container);
+            PageViewHolder vh = new PageViewHolder(root, img00, img01, img10, img11, title00, title01, title10, title11, close00, close01, close10, close11);
+            return vh;
+        }
+
+        @Override
+        public void onBindViewHolder(PageViewHolder holder, int position) {
+            int baseIndex;
+            synchronized (webViews) {
+                baseIndex = position * 4;
+                for (int i = 0; i < 4; i++) {
+                    final int tabIndex = baseIndex + i;
+                    ImageView img = holder.images[i];
+                    TextView title = holder.titles[i];
+                    ImageButton close = holder.closes[i];
+                    if (tabIndex < webViews.size()) {
+                        WebView w = webViews.get(tabIndex);
+                        Bitmap bm = tabSnapshots.get(w);
+                        if (bm != null) {
+                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
+                        } else {
+                            img.setImageDrawable(null);
+                        }
+                        String t = w.getTitle();
+                        if (t == null || t.isEmpty()) t = w.getUrl();
+                        if (t == null) t = "";
+                        title.setText(shortTitle(t));
+                        img.setAlpha(1f);
+                        img.setClickable(true);
+                        img.setOnClickListener(v -> {
+                            synchronized (webViews) {
+                                currentTabIndex = tabIndex;
+                            }
+                            runOnUiThread(() -> {
+                                try {
+                                    webViewContainer.removeAllViews();
+                                    webViewContainer.addView(getCurrentWebView());
+                                    updateTabCount();
+                                    if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
+                                } catch (Exception ignored) {}
+                            });
+                        });
+                        close.setVisibility(View.VISIBLE);
+                        close.setOnClickListener(v -> {
+                            WebView target;
+                            synchronized (webViews) {
+                                if (tabIndex >= 0 && tabIndex < webViews.size()) {
+                                    target = webViews.get(tabIndex);
+                                } else return;
+                            }
+                            closeTab(target);
+                            notifyDataSetChanged();
+                        });
+                    } else {
+                        img.setImageDrawable(null);
+                        title.setText("");
+                        img.setClickable(false);
+                        img.setOnClickListener(null);
+                        close.setVisibility(View.INVISIBLE);
+                    }
+                }
+            }
+        }
+
+        @Override
+        public int getItemCount() {
+            synchronized (webViews) {
+                int n = webViews.size();
+                return (n + 3) / 4;
+            }
+        }
+
+        private String shortTitle(String url) {
+            if (url == null) return "";
+            if (url.length() > 40) return url.substring(0, 37) + "...";
+            return url;
+        }
+
+        private int dpToPx(int dp) {
+            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+        }
+
+        private class PageViewHolder extends RecyclerView.ViewHolder {
+            public ImageView[] images = new ImageView[4];
+            public TextView[] titles = new TextView[4];
+            public ImageButton[] closes = new ImageButton[4];
+            public PageViewHolder(View itemView,
+                                  ImageView img00, ImageView img01, ImageView img10, ImageView img11,
+                                  TextView title00, TextView title01, TextView title10, TextView title11,
+                                  ImageButton close00, ImageButton close01, ImageButton close10, ImageButton close11) {
+                super(itemView);
+                images[0] = img00; images[1] = img01; images[2] = img10; images[3] = img11;
+                titles[0] = title00; titles[1] = title01; titles[2] = title10; titles[3] = title11;
+                closes[0] = close00; closes[1] = close01; closes[2] = close10; closes[3] = close11;
+            }
+        }
+    }
+private void captureTabSnapshot(WebView webView) {
+        if (webView == null) return;
+        Object tag = webView.getTag();
+        int id = -1;
+        if (tag instanceof Integer) id = (Integer) tag;
+        int width = webView.getWidth();
+        int height = webView.getHeight();
+        if (width <= 0 || height <= 0) return;
+        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bitmap);
+        webView.draw(canvas);
+        tabSnapshots.put(webView, bitmap);
+        if (id != -1) {
+            final int finalId = id;
+            final Bitmap finalBitmap = bitmap;
+            backgroundExecutor.execute(() -> {
+                try {
+                    File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                        fos.flush();
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        }
+}
 
     private void showBookmarksManagementDialog() {
         if (bookmarks.isEmpty()) {
@@ -2396,96 +2756,6 @@ private void addHistory(String url, String title) {
         }
     }
 
-    private class TabAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
-        private static final int VIEW_TYPE_TAB = 0;
-        private static final int VIEW_TYPE_ADD = 1;
-        private final List<WebView> tabs;
-        private final AlertDialog dialog;
-        public TabAdapter(List<WebView> tabs, AlertDialog dialog) {
-            this.tabs = tabs;
-            this.dialog = dialog;
-        }
-        @Override
-        public int getItemCount() {
-            return tabs.size() + 1;
-        }
-        @Override
-        public int getItemViewType(int position) {
-            return (position == tabs.size()) ? VIEW_TYPE_ADD : VIEW_TYPE_TAB;
-        }
-        @Override
-        public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            if (viewType == VIEW_TYPE_TAB) {
-                View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_tab, parent, false);
-                return new TabViewHolder(view);
-            } else {
-                View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_tab_add, parent, false);
-                return new AddTabViewHolder(view);
-            }
-        }
-        @Override
-        public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
-            if (holder.getItemViewType() == VIEW_TYPE_TAB) {
-                TabViewHolder tabHolder = (TabViewHolder) holder;
-                WebView webView = tabs.get(position);
-                String title = webView.getTitle();
-                if (title == null || title.isEmpty()) {
-                    title = "タブ " + (position + 1);
-                }
-                tabHolder.title.setText(title);
-                Bitmap icon = webViewFavicons.get(webView);
-                if (icon != null) {
-                    tabHolder.favicon.setImageBitmap(icon);
-                } else {
-                    tabHolder.favicon.setImageResource(R.drawable.transparent_vector);
-                }
-                tabHolder.itemView.setOnClickListener(v -> {
-                    switchToTab(position);
-                    dialog.dismiss();
-                });
-                tabHolder.closeButton.setOnClickListener(v -> {
-                    if (tabs.size() > 1) {
-                        tabs.remove(position);
-                        notifyItemRemoved(position);
-                        if (currentTabIndex >= tabs.size()) {
-                            currentTabIndex = tabs.size() - 1;
-                        }
-                        webViewContainer.removeAllViews();
-                        webViewContainer.addView(getCurrentWebView());
-                        updateTabCount();
-                    } else {
-                        Toast.makeText(MainActivity.this, "これ以上タブを閉じられません", Toast.LENGTH_SHORT).show();
-                    }
-                });
-            } else {
-                AddTabViewHolder addHolder = (AddTabViewHolder) holder;
-                addHolder.addButton.setOnClickListener(v -> {
-                    createNewTab();
-                    notifyItemInserted(tabs.size() - 1);
-                    dialog.dismiss();
-                });
-            }
-        }
-        class TabViewHolder extends RecyclerView.ViewHolder {
-            ImageView favicon;
-            TextView title;
-            ImageButton closeButton;
-            public TabViewHolder(View itemView) {
-                super(itemView);
-                favicon = itemView.findViewById(R.id.tabFavicon);
-                title = itemView.findViewById(R.id.tabTitle);
-                closeButton = itemView.findViewById(R.id.tabCloseButton);
-            }
-        }
-        class AddTabViewHolder extends RecyclerView.ViewHolder {
-            ImageView addButton;
-            public AddTabViewHolder(View itemView) {
-                super(itemView);
-                addButton = itemView.findViewById(R.id.tabAddButton);
-            }
-        }
-    }
-
     private class HistoryAdapter extends RecyclerView.Adapter<HistoryAdapter.HistoryViewHolder> {
         private final List<HistoryItem> items;
         private final AlertDialog dialog;
@@ -2611,5 +2881,59 @@ private void addHistory(String url, String title) {
                 url = itemView.findViewById(R.id.bookmarkUrl);
             }
         }
+    }
+
+    private void saveCookiesForTab(final int id, final String url) {
+        try {
+            if (id == -1 || url == null) return;
+            final CookieManager cm = CookieManager.getInstance();
+            final String cookie = cm.getCookie(url);
+            if (cookie == null) return;
+            backgroundExecutor.execute(() -> {
+                try {
+                    File out = new File(getFilesDir(), "tab_cookies_" + id + ".txt");
+                    try (FileOutputStream fos = new FileOutputStream(out)) {
+                        fos.write(cookie.getBytes("UTF-8"));
+                        fos.flush();
+                    }
+                    cm.flush();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void restoreCookiesForTab(final int id, final String url) {
+        try {
+            if (id == -1 || url == null) return;
+            File in = new File(getFilesDir(), "tab_cookies_" + id + ".txt");
+            if (!in.exists()) return;
+            String cookie = null;
+            try (FileInputStream fis = new FileInputStream(in)) {
+                byte[] data = new byte[(int) in.length()];
+                int r = fis.read(data);
+                if (r > 0) cookie = new String(data, "UTF-8");
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            if (cookie != null) {
+                final String finalCookie = cookie;
+                runOnUiThread(() -> {
+                    try {
+                        CookieManager.getInstance().setCookie(url, finalCookie);
+                        CookieManager.getInstance().flush();
+                    } catch (Exception ignored) {}
+                });
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void safeDeleteFile(File f) {
+        try {
+            if (f != null && f.exists()) {
+                f.delete();
+            }
+        } catch (Exception ignored) {}
     }
 }
