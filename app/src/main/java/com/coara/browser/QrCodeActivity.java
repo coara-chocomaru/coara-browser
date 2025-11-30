@@ -97,7 +97,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
     private AsyncTask<byte[], Void, Result> decodeTask;
     private boolean scanning = false;
 
-    private ExecutorService executorService = Executors.newSingleThreadExecutor(); // Optimized: Single thread executor for background tasks to reduce overhead
+    private ExecutorService executorService = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
