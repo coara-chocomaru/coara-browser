@@ -7,9 +7,9 @@ android {
     namespace = 'com.coara.browser'
 
     defaultConfig {
-        minSdk = 24
-        targetSdk = 30
-        versionCode = 221
+        minSdk = 26
+        targetSdk = 33
+        versionCode = 223
         versionName = "4.2.4"
         multiDexEnabled = true
         vectorDrawables.useSupportLibrary = true
