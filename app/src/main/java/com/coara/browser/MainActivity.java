@@ -335,7 +335,7 @@ public class MainActivity extends AppCompatActivity {
 
         swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> {
             WebView current = getCurrentWebView();
-            return (current != null && current.getScrollY() > 0);
+            return current != null && current.canScrollVertically(-1);
         });
         swipeRefreshLayout.setOnRefreshListener(() -> {
             WebView current = getCurrentWebView();
@@ -1101,9 +1101,7 @@ public class MainActivity extends AppCompatActivity {
           "notifyUrlChange();" +
           "})();"; 
             view.evaluateJavascript(jsOverrideHistory, null); 
-            if (view == getCurrentWebView()) {
-                captureTabSnapshot(view);
-            }
+            captureTabSnapshot(view);
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
@@ -1422,62 +1420,49 @@ public class MainActivity extends AppCompatActivity {
             } else if (mimeType.equalsIgnoreCase("image/img")) {
                 fileName += ".img";
             }
-            File picturesDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES);
+            File picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+            if (!picturesDir.exists()) {
+                picturesDir.mkdirs();
+            }
             File file = new File(picturesDir, fileName);
             try (FileOutputStream fos = new FileOutputStream(file)) {
                 fos.write(imageData);
                 fos.flush();
             }
-            Toast.makeText(MainActivity.this,
-                "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
-                Toast.LENGTH_LONG).show();
-            return;
+            Toast.makeText(MainActivity.this, "画像を保存しました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(MainActivity.this, "データURLのみ対応", Toast.LENGTH_SHORT).show();
         }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            ContextCompat.checkSelfPermission(MainActivity.this,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            != PackageManager.PERMISSION_GRANTED) {
-            Toast.makeText(MainActivity.this,
-                "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        DownloadManager.Request request =
-            new DownloadManager.Request(Uri.parse(imageUrl));
-        request.setMimeType("image/*");
-        String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
-        request.setTitle(fileName);
-        request.setDescription("画像を保存中...");
-        request.setNotificationVisibility(
-            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_PICTURES, fileName);
-        dm.enqueue(request);
-        Toast.makeText(MainActivity.this,
-            "画像の保存の開始しました", Toast.LENGTH_SHORT).show();
     } catch (Exception e) {
-        Toast.makeText(MainActivity.this,
-            "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
-        e.printStackTrace();
+        Toast.makeText(MainActivity.this, "画像保存エラー", Toast.LENGTH_SHORT).show();
     }
-}
+    }
     private void exportBookmarksToFile() {
-        final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
-        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (!downloadDir.exists()) {
-            downloadDir.mkdirs();
+        if (bookmarks.isEmpty()) {
+            Toast.makeText(this, "ブックマークがありません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        JSONArray bookmarksJson = new JSONArray();
+        for (Bookmark bm : bookmarks) {
+            JSONObject obj = new JSONObject();
+            try {
+                obj.put("title", bm.getTitle());
+                obj.put("url", bm.getUrl());
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            bookmarksJson.put(obj);
         }
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         final File file;
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            file = new File(downloadDir, "JSON-bookmark" + timeStamp + ".txt");
+            file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "JSON-bookmark" + timeStamp + ".txt");
         } else {
-            file = new File(downloadDir, timeStamp + "-bookmark.json");
+            file = new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), timeStamp + "-bookmark.json");
         }
         backgroundExecutor.execute(() -> {
             try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(bookmarksJson.getBytes("UTF-8"));
+                fos.write(bookmarksJson.toString().getBytes("UTF-8"));
                 fos.flush();
                 runOnUiThread(() ->
                     Toast.makeText(MainActivity.this, "ブックマークをエクスポートしました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show()
@@ -1984,107 +1969,127 @@ private void saveScreenshot(Bitmap bitmap) {
     }
 
     private void enableCT3UA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setUserAgentString("Mozilla/5.0 (Linux; Android 7.0; TAB-A03-BR3 Build/02.05.000; wv) " +
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            settings.setUserAgentString("Mozilla/5.0 (Linux; Android 7.0; TAB-A03-BR3 Build/02.05.000; wv) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
+        }
         Toast.makeText(MainActivity.this, "CT3UA適用", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
 
     private void disableCT3UA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        String originalUA = originalUserAgents.get(getCurrentWebView());
-        if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            String originalUA = originalUserAgents.get(webView);
+            if (originalUA != null) {
+                settings.setUserAgentString(originalUA + APPEND_STR);
+            } else {
+                settings.setUserAgentString(APPEND_STR.trim());
+            }
         }
         Toast.makeText(MainActivity.this, "CT3UA解除", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
 
     private void enabledeskUA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        String originalUA = originalUserAgents.get(getCurrentWebView());
-        if (originalUA == null) {
-            originalUA = settings.getUserAgentString();
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            String originalUA = originalUserAgents.get(webView);
+            if (originalUA == null) {
+                originalUA = settings.getUserAgentString();
+            }
+            String desktopUA = originalUA.replace("Mobile", "").replace("Android", "");
+            settings.setUserAgentString(desktopUA + APPEND_STR);
         }
-        String desktopUA = originalUA.replace("Mobile", "").replace("Android", "");
-        settings.setUserAgentString(desktopUA + APPEND_STR);
         Toast.makeText(MainActivity.this, "デスクトップ表示有効", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
 
     private void disabledeskUA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        String originalUA = originalUserAgents.get(getCurrentWebView());
-        if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            String originalUA = originalUserAgents.get(webView);
+            if (originalUA != null) {
+                settings.setUserAgentString(originalUA + APPEND_STR);
+            } else {
+                settings.setUserAgentString(APPEND_STR.trim());
+            }
         }
         reloadCurrentPage();
         Toast.makeText(MainActivity.this, "デスクトップ表示無効", Toast.LENGTH_SHORT).show();
     }
 
     private void enableUA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setUserAgentString("DoCoMo/2.0 SH902i(c100;TB)");
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            settings.setUserAgentString("DoCoMo/2.0 SH902i(c100;TB)");
+        }
         Toast.makeText(MainActivity.this, "ガラケーUA有効", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
 
     private void disableUA() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        String originalUA = originalUserAgents.get(getCurrentWebView());
-        if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            String originalUA = originalUserAgents.get(webView);
+            if (originalUA != null) {
+                settings.setUserAgentString(originalUA + APPEND_STR);
+            } else {
+                settings.setUserAgentString(APPEND_STR.trim());
+            }
         }
         Toast.makeText(MainActivity.this, "ガラケーUA解除", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
 
     private void disablejs() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setJavaScriptEnabled(true);
+        for (WebView webView : webViews) {
+            webView.getSettings().setJavaScriptEnabled(true);
+        }
         Toast.makeText(MainActivity.this, "JavaScript有効", Toast.LENGTH_SHORT).show();
     }
 
     private void enablejs() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setJavaScriptEnabled(false);
+        for (WebView webView : webViews) {
+            webView.getSettings().setJavaScriptEnabled(false);
+        }
         Toast.makeText(MainActivity.this, "JavaScript無効", Toast.LENGTH_SHORT).show();
     }
 
     private void enableZoom() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setBuiltInZoomControls(true);
-        settings.setSupportZoom(true);
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            settings.setBuiltInZoomControls(true);
+            settings.setSupportZoom(true);
+        }
         Toast.makeText(MainActivity.this, "ズームを有効にしました", Toast.LENGTH_SHORT).show();
     }
 
     private void disableZoom() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setBuiltInZoomControls(false);
-        settings.setSupportZoom(false);
+        for (WebView webView : webViews) {
+            WebSettings settings = webView.getSettings();
+            settings.setBuiltInZoomControls(false);
+            settings.setSupportZoom(false);
+        }
         reloadCurrentPage();
         Toast.makeText(MainActivity.this, "ズームを無効にしました", Toast.LENGTH_SHORT).show();
     }
 
     private void enableimgblock() {
-        WebSettings settings = getCurrentWebView().getSettings();
-        settings.setLoadsImagesAutomatically(false);
+        for (WebView webView : webViews) {
+            webView.getSettings().setLoadsImagesAutomatically(false);
+        }
         reloadCurrentPage();
         Toast.makeText(MainActivity.this, "画像ブロック有効", Toast.LENGTH_SHORT).show();
     }
 
     private void disableimgunlock() {
-        WebView webView = getCurrentWebView();
-        webView.getSettings().setLoadsImagesAutomatically(defaultLoadsImagesAutomatically);
-        webView.clearCache(true);
-        webView.reload();
+        for (WebView webView : webViews) {
+            webView.getSettings().setLoadsImagesAutomatically(defaultLoadsImagesAutomatically);
+            webView.clearCache(true);
+        }
+        reloadCurrentPage();
         Toast.makeText(MainActivity.this, "画像ブロック無効", Toast.LENGTH_SHORT).show();
     }
     private void showFindInPageBar() {
@@ -2442,8 +2447,12 @@ private void captureTabSnapshot(WebView webView) {
         int width = webView.getWidth();
         int height = webView.getHeight();
         if (width <= 0 || height <= 0) return;
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
+        int thumbWidth = 300;
+        int thumbHeight = (int) (thumbWidth * (float) height / width);
+        Bitmap bitmap = Bitmap.createBitmap(thumbWidth, thumbHeight, Bitmap.Config.RGB_565);
         Canvas canvas = new Canvas(bitmap);
+        float scaleFactor = (float) thumbWidth / width;
+        canvas.scale(scaleFactor, scaleFactor);
         webView.draw(canvas);
         tabSnapshots.put(webView, bitmap);
         if (id != -1) {
@@ -2453,7 +2462,7 @@ private void captureTabSnapshot(WebView webView) {
                 try {
                     File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
                     try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 70, fos);
                         fos.flush();
                     }
                 } catch (Exception e) {
