@@ -33,4 +33,4 @@ Apache License, Version 2.0
 #####
 [NOTICE](./NOTICE.md)  
 ---
-Copyright 2025 coara-chocomaru
+Copyright 2026 coara-chocomaru
