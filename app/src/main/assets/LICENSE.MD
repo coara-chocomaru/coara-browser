@@ -120,7 +120,7 @@
 
 ---
 
-Copyright 2025 coara-chocomaru
+Copyright 2026 coara-chocomaru
 
 ---
 
