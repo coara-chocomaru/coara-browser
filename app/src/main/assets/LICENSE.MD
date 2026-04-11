@@ -1,7 +1,7 @@
 # LICENSE
 
-私のアプリ「com.coara.browser」は、以下のサードパーティライブラリを使用しています。
-全ライブラリは Apache License, Version 2.0 に基づいてライセンスされています。
+- 私のアプリ「com.coara.browser」は、以下のサードパーティライブラリを使用しています。
+- 全ライブラリは Apache License, Version 2.0 に基づいてライセンスされています。
 
 1. **AndroidX Core**
 
