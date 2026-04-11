@@ -16,18 +16,16 @@ import android.widget.EditText;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.nio.charset.StandardCharsets;
 
 public class grepmd5appActivity extends Activity {
 
@@ -149,18 +147,45 @@ public class grepmd5appActivity extends Activity {
             return lastGrepResult;
         }
         StringBuilder result = new StringBuilder();
-        Pattern pattern = Pattern.compile(Pattern.quote(keyword), Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
         try (InputStream is = getContentResolver().openInputStream(uri)) {
             if (is == null) {
                 return "エラー: ファイルが開けません。";
             }
-            BufferedReader reader = new BufferedReader(new InputStreamReader(is), 8192); 
-            String line;
-            while ((line = reader.readLine()) != null) {
-                Matcher matcher = pattern.matcher(line);
-                if (matcher.find()) {
-                    result.append(line).append("\n\n"); 
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int len;
+            while ((len = is.read(buf)) != -1) {
+                baos.write(buf, 0, len);
+            }
+            byte[] fileBytes = baos.toByteArray();
+            byte[] searchBytes = keyword.getBytes(StandardCharsets.UTF_8);
+            if (searchBytes.length == 0) {
+                return "マッチする行が見つかりませんでした。";
+            }
+            int pos = 0;
+            while (true) {
+                boolean found = false;
+                for (int i = pos; i <= fileBytes.length - searchBytes.length; i++) {
+                    boolean matches = true;
+                    for (int j = 0; j < searchBytes.length; j++) {
+                        if (fileBytes[i + j] != searchBytes[j]) {
+                            matches = false;
+                            break;
+                        }
+                    }
+                    if (matches) {
+                        found = true;
+                        int contextStart = Math.max(0, i - 100);
+                        int contextEnd = Math.min(fileBytes.length, i + searchBytes.length + 100);
+                        byte[] context = new byte[contextEnd - contextStart];
+                        System.arraycopy(fileBytes, contextStart, context, 0, context.length);
+                        String contextStr = new String(context, StandardCharsets.UTF_8);
+                        result.append(contextStr).append("\n\n");
+                        pos = i + searchBytes.length;
+                        break;
+                    }
                 }
+                if (!found) break;
             }
         } catch (IOException e) {
             return "エラー: " + e.getMessage();
