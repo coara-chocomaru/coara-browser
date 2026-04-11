@@ -28,6 +28,8 @@ import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.core.content.FileProvider;
 
+import com.coara.browser.util.BrowserConstants;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -46,9 +48,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private DownloadAdapter adapter;
     private List<DownloadItem> downloadItems;
     private SharedPreferences pref;
-    private static final String PREF_NAME = "AdvancedBrowserPrefs";
-    private static final String KEY_DOWNLOAD_HISTORY = "download_history";
-
+    
     private DownloadManager downloadManager;
     private Handler updateHandler = new Handler(Looper.getMainLooper());
     private ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -60,6 +60,10 @@ public class DownloadHistoryActivity extends AppCompatActivity {
             if (downloadItems != null && adapter != null) {
                 for (int i = 0, size = downloadItems.size(); i < size; i++) {
                     DownloadItem currentItem = downloadItems.get(i);
+                    if (currentItem.status == DownloadManager.STATUS_SUCCESSFUL ||
+                            currentItem.status == DownloadManager.STATUS_FAILED) {
+                        continue;
+                    }
                     DownloadItem updated = getDownloadItem(currentItem.downloadId);
                     if (updated != null) {
                         if (currentItem.status != updated.status ||
@@ -94,7 +98,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         tvEmpty = findViewById(R.id.tvEmpty);
         recyclerView.setLayoutManager(new LinearLayoutManager(this));
         downloadManager = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        pref = getSharedPreferences(BrowserConstants.PREF_NAME, Context.MODE_PRIVATE);
 
         if (getIntent().getBooleanExtra("clear_history", false)) {
             clearDownloadHistory();
@@ -119,10 +123,17 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         super.onPause();
     }
 
+    @Override
+    protected void onDestroy() {
+        updateHandler.removeCallbacksAndMessages(null);
+        executor.shutdownNow();
+        super.onDestroy();
+    }
+
     private void loadDownloadHistory() {
         executor.execute(() -> {
             List<DownloadItem> items = new ArrayList<>();
-            String jsonStr = pref.getString(KEY_DOWNLOAD_HISTORY, "[]");
+            String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
             try {
                 JSONArray array = new JSONArray(jsonStr);
                 for (int i = 0, len = array.length(); i < len; i++) {
@@ -242,8 +253,62 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         return 0;
     }
 
+    private void removeHistoryRecord(long downloadId) {
+        try {
+            String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
+            JSONArray array = new JSONArray(jsonStr);
+            JSONArray updated = new JSONArray();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.getJSONObject(i);
+                if (obj.optLong("id", -1L) != downloadId) {
+                    updated.put(obj);
+                }
+            }
+            pref.edit().putString(BrowserConstants.KEY_DOWNLOAD_HISTORY, updated.toString()).apply();
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void replaceHistoryRecord(long oldId, long newId, String title, String path) {
+        try {
+            String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
+            JSONArray array = new JSONArray(jsonStr);
+            JSONArray updated = new JSONArray();
+
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject obj = array.getJSONObject(i);
+                if (obj.optLong("id", -1L) != oldId) {
+                    updated.put(obj);
+                }
+            }
+
+            JSONObject newObj = new JSONObject();
+            newObj.put("id", newId);
+            newObj.put("fileName", title != null ? title : "");
+            newObj.put("filePath", path != null ? path : "");
+            updated.put(newObj);
+
+            pref.edit().putString(BrowserConstants.KEY_DOWNLOAD_HISTORY, updated.toString()).apply();
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+    }
+
     public void clearDownloadHistory() {
-        pref.edit().remove(KEY_DOWNLOAD_HISTORY).apply();
+        pref.edit().remove(BrowserConstants.KEY_DOWNLOAD_HISTORY).apply();
+        if (downloadItems != null) {
+            downloadItems.clear();
+        }
+        if (adapter != null) {
+            adapter.notifyDataSetChanged();
+        }
+        if (tvEmpty != null) {
+            tvEmpty.setVisibility(View.VISIBLE);
+        }
+        if (recyclerView != null) {
+            recyclerView.setVisibility(View.GONE);
+        }
         Toast.makeText(this, "ダウンロード履歴を全消去しました", Toast.LENGTH_SHORT).show();
     }
 
@@ -393,6 +458,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                if (which == 0) {
                                    items.remove(position);
                                    notifyItemRemoved(position);
+                                   removeHistoryRecord(item.downloadId);
                                    Toast.makeText(context, "履歴から消去しました", Toast.LENGTH_SHORT).show();
                                }
                            })
@@ -411,6 +477,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                        }
                                        items.remove(position);
                                        notifyItemRemoved(position);
+                                       removeHistoryRecord(item.downloadId);
                                    }
                                })
                                .setNegativeButton("閉じる", null)
@@ -424,6 +491,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                            Toast.makeText(context, "ダウンロードをキャンセルしました", Toast.LENGTH_SHORT).show();
                                            items.remove(position);
                                            notifyItemRemoved(position);
+                                           removeHistoryRecord(item.downloadId);
                                        } else if (which == 1) {
                                            downloadManager.remove(item.downloadId);
                                            item.isPaused = true;
@@ -445,9 +513,11 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                            request.setTitle(item.title);
                                            request.setDescription(item.description != null ? item.description : "Downloading file...");
                                            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                                           long oldDownloadId = item.downloadId;
                                            long newDownloadId = downloadManager.enqueue(request);
                                            item.downloadId = newDownloadId;
                                            item.isPaused = false;
+                                           replaceHistoryRecord(oldDownloadId, newDownloadId, item.title, item.filePath);
                                            Toast.makeText(context, "ダウンロードを再開しました", Toast.LENGTH_SHORT).show();
                                            notifyItemChanged(position);
                                        }

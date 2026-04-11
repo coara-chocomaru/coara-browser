@@ -1,3 +1,16 @@
+-keepattributes *Annotation*,InnerClasses,EnclosingMethod,Signature
+
+# Keep model / util / webview packages explicitly for readability.
+-keep class com.coara.browser.model.** { *; }
+-keep class com.coara.browser.util.** { *; }
+-keep class com.coara.browser.webview.** { *; }
+
+# the blob download bridge and the MainActivity bridge used by injected JS.
+-keep class com.coara.browser.webview.BlobDownloadBridge { *; }
+-keep class com.coara.browser.MainActivity$AndroidBridge { *; }
+-keep class com.coara.browser.webview.TabOverviewDialog { *; }
+-keep class com.coara.browser.webview.TabOverviewDialog$* { *; }
+
 -verbose
 -dontusemixedcaseclassnames
 -dontskipnonpubliclibraryclasses

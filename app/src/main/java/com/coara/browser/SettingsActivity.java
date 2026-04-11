@@ -1,29 +1,23 @@
 package com.coara.browser;
 
 import android.app.AlertDialog;
-import android.content.Intent;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.net.Uri;
 import android.os.Bundle;
-import android.text.SpannableStringBuilder;
-import android.text.Spanned;
-import android.text.style.ForegroundColorSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
+
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
-import com.google.android.material.button.MaterialButton;
-import java.io.BufferedReader;
+
+import com.coara.browser.util.DeviceInfoProvider;
+import com.coara.browser.util.TextFileReader;
+
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+
 import io.noties.markwon.Markwon;
 
 public class SettingsActivity extends AppCompatActivity {
@@ -50,94 +44,27 @@ public class SettingsActivity extends AppCompatActivity {
     }
 
     private String getAppVersion() {
-        try {
-            PackageInfo pInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
-            return pInfo.versionName;
-        } catch (PackageManager.NameNotFoundException e) {
-            return "不明";
-        }
+        return DeviceInfoProvider.getAppVersion(this);
     }
 
     private void openAppInfo() {
-        Intent intent = new Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
-        intent.setData(Uri.parse("package:" + getPackageName()));
-        startActivity(intent);
+        startActivity(DeviceInfoProvider.createAppInfoIntent(this));
     }
 
     private void showDeviceInfo() {
-        SpannableStringBuilder result = new SpannableStringBuilder();
-        try {
-            Process process = Runtime.getRuntime().exec("getprop");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-            String[][] props = {
-                    {"ro.product.model", "model"},
-                    {"ro.product.manufacturer", "manufacturer"},
-                    {"ro.product.brand", "carrier"},
-                    {"ro.system.build.id", "Build id"},
-                    {"ro.system.build.version.release", "OS version"},
-                    {"ro.vndk.version", "VNDK"},
-                    {"ro.system.build.version.sdk", "SDK"},
-                    {"ro.hardware", "soc"},
-                    {"ro.build.type", "Build Type"},
-                    {"ro.product.locale", "Language"},
-                    {"ro.sf.lcd_density", "Density"},
-                    {"ro.boot.baseband", "baseband"},
-                    {"ro.boot.slot_suffix", "slot"}
-            };
-
-            Map<String, String> propValues = new HashMap<>();
-
-            while ((line = reader.readLine()) != null) {
-                if (!line.startsWith("[")) continue;
-                int keyStart = line.indexOf('[') + 1;
-                int keyEnd = line.indexOf(']');
-                int valueStart = line.indexOf('[', keyEnd) + 1;
-                int valueEnd = line.indexOf(']', valueStart);
-
-                if (keyStart < 0 || keyEnd < 0 || valueStart < 0 || valueEnd < 0) continue;
-                String key = line.substring(keyStart, keyEnd).trim();
-                String value = line.substring(valueStart, valueEnd).trim();
-
-                if (key.startsWith("ro.")) {
-                    propValues.put(key, value);
-                }
-            }
-            reader.close();
-
-            for (String[] prop : props) {
-                String label = prop[1] + "  ";
-                String val = propValues.getOrDefault(prop[0], "不明");
-
-                result.append(label);
-                int start = result.length();
-                result.append(val).append("\n");
-                int end = result.length();
-                result.setSpan(
-                        new ForegroundColorSpan(0xFF448AFF),
-                        start, end,
-                        Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-                );
-            }
-        } catch (Exception e) {
-            result.append("取得失敗");
-        }
-        showTextDialog("端末情報", result);
+        showTextDialog("端末情報", DeviceInfoProvider.collectDeviceInfo());
     }
+
     private void showLicense() {
-        StringBuilder licenseText = new StringBuilder();
-        try {
-            InputStream inputStream = getAssets().open("LICENSE.MD");
-            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
-            String line;
-            while ((line = reader.readLine()) != null) {
-                licenseText.append(line).append("\n");
-            }
-            reader.close();
+        showMarkdownDialog("ライセンス情報", readAssetText("LICENSE.MD"));
+    }
+
+    private String readAssetText(String assetName) {
+        try (InputStream inputStream = getAssets().open(assetName)) {
+            return TextFileReader.readAll(inputStream);
         } catch (Exception e) {
-            licenseText.append("ライセンス情報を取得できません");
+            return "ライセンス情報を取得できません";
         }
-        showMarkdownDialog("ライセンス情報", licenseText.toString());
     }
 
     private void showTextDialog(String title, CharSequence message) {
@@ -164,4 +91,3 @@ public class SettingsActivity extends AppCompatActivity {
         builder.show();
     }
 }
-

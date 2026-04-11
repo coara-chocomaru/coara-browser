@@ -80,6 +80,12 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
+import com.coara.browser.webview.WebViewOptimizationUtils;
+import com.coara.browser.webview.BlobDownloadBridge;
+import com.coara.browser.webview.TabOverviewDialog;
+import com.coara.browser.util.TabStateStore;
+import com.coara.browser.util.SwipeRefreshPolicy;
+import com.coara.browser.util.BrowserConstants;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -97,6 +103,7 @@ import java.lang.reflect.Method;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.net.URLDecoder;
 import java.security.MessageDigest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -109,31 +116,33 @@ import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import android.webkit.MimeTypeMap;
 
 public class MainActivity extends AppCompatActivity {
 
-    private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
-    private static final String PREF_NAME = "AdvancedBrowserPrefs";
-    private static final String KEY_CURRENT_TAB_ID = "current_tab_id";
-    private static final String KEY_DARK_MODE = "dark_mode";
-    private static final String KEY_BASIC_AUTH = "basic_auth";
-    private static final String KEY_ZOOM_ENABLED = "zoom_enabled";
-    private static final String KEY_JS_ENABLED = "js_enabled";
-    private static final String KEY_IMG_BLOCK_ENABLED = "img_block_enabled";
-    private static final String KEY_UA_ENABLED = "ua_enabled";
-    private static final String KEY_DESKUA_ENABLED = "deskua_enabled";
-    private static final String KEY_CT3UA_ENABLED = "ct3ua_enabled";
-    private static final String KEY_TABS = "tabs";
-    private static final String KEY_CURRENT_TAB = "current_tab_index";
-    private static final String KEY_BOOKMARKS = "bookmarks";
-    private static final String KEY_HISTORY = "history";
-    private static final String APPEND_STR = " CoaraBrowser";
-    private static final String START_PAGE = "file:///android_asset/index.html";
-    private static final int FILE_SELECT_CODE = 1001;
-    private static final int MAX_TABS = 30;
-    private static final int MAX_HISTORY_SIZE = 100;
-    private static final String SENTINEL_FILENAME = "cache_sentinel.txt";
-    public static final String EXTRA_CLEAR_HISTORY = "com.coara.browser.EXTRA_CLEAR_HISTORY";
+    private static final Pattern CACHE_MODE_PATTERN = BrowserConstants.CACHE_MODE_PATTERN;
+    private static final String PREF_NAME = BrowserConstants.PREF_NAME;
+    private static final String KEY_CURRENT_TAB_ID = BrowserConstants.KEY_CURRENT_TAB_ID;
+    private static final String KEY_DARK_MODE = BrowserConstants.KEY_DARK_MODE;
+    private static final String KEY_BASIC_AUTH = BrowserConstants.KEY_BASIC_AUTH;
+    private static final String KEY_ZOOM_ENABLED = BrowserConstants.KEY_ZOOM_ENABLED;
+    private static final String KEY_JS_ENABLED = BrowserConstants.KEY_JS_ENABLED;
+    private static final String KEY_IMG_BLOCK_ENABLED = BrowserConstants.KEY_IMG_BLOCK_ENABLED;
+    private static final String KEY_UA_ENABLED = BrowserConstants.KEY_UA_ENABLED;
+    private static final String KEY_DESKUA_ENABLED = BrowserConstants.KEY_DESKUA_ENABLED;
+    private static final String KEY_CT3UA_ENABLED = BrowserConstants.KEY_CT3UA_ENABLED;
+    private static final String KEY_TABS = BrowserConstants.KEY_TABS;
+    private static final String KEY_CURRENT_TAB = BrowserConstants.KEY_CURRENT_TAB;
+    private static final String KEY_BOOKMARKS = BrowserConstants.KEY_BOOKMARKS;
+    private static final String KEY_HISTORY = BrowserConstants.KEY_HISTORY;
+    private static final String APPEND_STR = BrowserConstants.APPEND_STR;
+    private static final String START_PAGE = BrowserConstants.START_PAGE;
+    private static final int FILE_SELECT_CODE = BrowserConstants.FILE_SELECT_CODE;
+    private static final int MAX_TABS = BrowserConstants.MAX_TABS;
+    private static final int MAX_HISTORY_SIZE = BrowserConstants.MAX_HISTORY_SIZE;
+    private static final String SENTINEL_FILENAME = BrowserConstants.SENTINEL_FILENAME;
+    public static final String EXTRA_CLEAR_HISTORY = BrowserConstants.EXTRA_CLEAR_HISTORY;
 
     private static Method sSetSaveFormDataMethod;
     private static Method sSetDatabaseEnabledMethod;
@@ -249,7 +258,7 @@ public class MainActivity extends AppCompatActivity {
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
         basicAuthEnabled = pref.getBoolean(KEY_BASIC_AUTH, false);
         zoomEnabled = pref.getBoolean(KEY_ZOOM_ENABLED, false);
-        jsEnabled = pref.getBoolean(KEY_JS_ENABLED, false);
+        jsEnabled = pref.getBoolean(KEY_JS_ENABLED, true);
         imgBlockEnabled = pref.getBoolean(KEY_IMG_BLOCK_ENABLED, false);
         uaEnabled = pref.getBoolean(KEY_UA_ENABLED, false);
         deskuaEnabled = pref.getBoolean(KEY_DESKUA_ENABLED, false);
@@ -299,6 +308,7 @@ public class MainActivity extends AppCompatActivity {
             currentTabIndex = 0;
             webViewContainer.addView(initialWebView);
             initialWebView.loadUrl(START_PAGE);
+            updatePullToRefreshState(initialWebView, START_PAGE);
         }
         updateTabCount();
 
@@ -335,7 +345,7 @@ public class MainActivity extends AppCompatActivity {
 
         swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> {
             WebView current = getCurrentWebView();
-            return (current != null && current.getScrollY() > 0);
+            return SwipeRefreshPolicy.shouldBlockPullToRefresh(current);
         });
         swipeRefreshLayout.setOnRefreshListener(() -> {
             WebView current = getCurrentWebView();
@@ -433,38 +443,13 @@ public class MainActivity extends AppCompatActivity {
      });
     }
     private void saveBundleToFile(Bundle bundle, String fileName) {
-        File file = new File(getFilesDir(), fileName);
-        Parcel parcel = Parcel.obtain();
-        try {
-            bundle.writeToParcel(parcel, 0);
-            byte[] bytes = parcel.marshall();
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(bytes);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        } finally {
-            parcel.recycle();
-        }
+        TabStateStore.saveBundleToFile(getFilesDir(), bundle, fileName);
     }
 
     private Bundle loadBundleFromFile(String fileName) {
-        File file = new File(getFilesDir(), fileName);
-        if (!file.exists()) return null;
-        try (FileInputStream fis = new FileInputStream(file)) {
-            byte[] bytes = new byte[(int) file.length()];
-            fis.read(bytes);
-            Parcel parcel = Parcel.obtain();
-            parcel.unmarshall(bytes, 0, bytes.length);
-            parcel.setDataPosition(0);
-            Bundle bundle = Bundle.CREATOR.createFromParcel(parcel);
-            parcel.recycle();
-            return bundle;
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
-        }
+        return TabStateStore.loadBundleFromFile(getFilesDir(), fileName);
     }
+
 
     private void handleIntent(Intent intent) {
         if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
@@ -559,87 +544,118 @@ public class MainActivity extends AppCompatActivity {
     }
         }
 
+
     private void loadTabsState() {
         synchronized (webViews) {
-    String tabsJsonStr = pref.getString(KEY_TABS, "[]");
-    int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
-    try {
-        JSONArray tabsArray = new JSONArray(tabsJsonStr);
-        webViews.clear();
-        webViewContainer.removeAllViews();
-        int maxId = 0;
-        for (int i = 0; i < tabsArray.length(); i++) {
-            JSONObject tabObj = tabsArray.getJSONObject(i);
-            int id = tabObj.getInt("id");
-            String url = tabObj.getString("url");
-            WebView webView = createNewWebView();
-            webView.setTag(id);
-            webViews.add(webView);
-            File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
-            if (snapFile.exists()) {
-                try {
-                    Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
-                    if (bm != null) {
-                        tabSnapshots.put(webView, bm);
+            String tabsJsonStr = pref.getString(KEY_TABS, "[]");
+            int currentTabId = pref.getInt(KEY_CURRENT_TAB_ID, -1);
+            try {
+                ArrayList<WebView> oldTabs = new ArrayList<>(webViews);
+                webViews.clear();
+                webViewContainer.removeAllViews();
+                for (WebView old : oldTabs) {
+                    Bitmap bm = tabSnapshots.remove(old);
+                    if (bm != null && !bm.isRecycled()) {
+                        try {
+                            bm.recycle();
+                        } catch (Exception ignored) {
+                        }
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
+                    try {
+                        old.stopLoading();
+                        old.destroy();
+                    } catch (Exception ignored) {
+                    }
                 }
-            }
-            try { restoreCookiesForTab(id, url); } catch (Exception ignored) {}
-            if (id > maxId) maxId = id;
-            if (id == currentTabId) {
-                webView.loadUrl(url);
-            } else {
-                Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                if (state != null) {
-                    WebBackForwardList restored = webView.restoreState(state);
-                    if (restored == null) {
-                        webView.loadUrl(url);
+
+                JSONArray tabsArray = new JSONArray(tabsJsonStr);
+                int maxId = 0;
+                for (int i = 0; i < tabsArray.length(); i++) {
+                    JSONObject tabObj = tabsArray.getJSONObject(i);
+                    int id = tabObj.getInt("id");
+                    String url = tabObj.optString("url", START_PAGE);
+                    WebView webView = createNewWebView();
+                    webView.setTag(id);
+                    webViews.add(webView);
+                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    if (snapFile.exists()) {
+                        try {
+                            Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
+                            if (bm != null) {
+                                tabSnapshots.put(webView, bm);
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
                     }
+                    try {
+                        restoreCookiesForTab(id, url);
+                    } catch (Exception ignored) {
+                    }
+                    if (id > maxId) maxId = id;
+                    Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
+                    if (id == currentTabId) {
+                        if (state != null) {
+                            WebBackForwardList restored = webView.restoreState(state);
+                            if (restored == null) {
+                                webView.loadUrl(url);
+                            }
+                        } else {
+                            webView.loadUrl(url);
+                        }
+                    } else {
+                        if (state != null) {
+                            WebBackForwardList restored = webView.restoreState(state);
+                            if (restored == null) {
+                                webView.loadUrl(url);
+                            }
+                        } else {
+                            webView.loadUrl(url);
+                        }
+                    }
+                }
+                nextTabId = maxId + 1;
+                if (webViews.isEmpty()) {
+                    WebView initialWebView = createNewWebView();
+                    initialWebView.setTag(nextTabId);
+                    nextTabId++;
+                    webViews.add(initialWebView);
+                    currentTabIndex = 0;
+                    webViewContainer.addView(initialWebView);
+                    initialWebView.loadUrl(START_PAGE);
+                    updatePullToRefreshState(initialWebView, START_PAGE);
                 } else {
-                    webView.loadUrl(url);
+                    boolean found = false;
+                    for (int i = 0; i < webViews.size(); i++) {
+                        Object tag = webViews.get(i).getTag();
+                        if (tag instanceof Integer && ((Integer) tag) == currentTabId) {
+                            currentTabIndex = i;
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        currentTabIndex = 0;
+                    }
+                    webViewContainer.addView(getCurrentWebView());
+                    updatePullToRefreshState(getCurrentWebView(), getCurrentWebView().getUrl());
                 }
-            }
-        }
-        nextTabId = maxId + 1;
-        if (webViews.isEmpty()) {
-            WebView initialWebView = createNewWebView();
-            initialWebView.setTag(nextTabId);
-            nextTabId++;
-            webViews.add(initialWebView);
-            currentTabIndex = 0;
-            webViewContainer.addView(initialWebView);
-            initialWebView.loadUrl(START_PAGE);
-        } else {
-            boolean found = false;
-            for (int i = 0; i < webViews.size(); i++) {
-                if ((int) webViews.get(i).getTag() == currentTabId) {
-                    currentTabIndex = i;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
+            } catch (JSONException e) {
+                e.printStackTrace();
+                WebView initialWebView = createNewWebView();
+                initialWebView.setTag(nextTabId);
+                nextTabId++;
+                webViews.clear();
+                webViews.add(initialWebView);
                 currentTabIndex = 0;
+                webViewContainer.removeAllViews();
+                webViewContainer.addView(initialWebView);
+                initialWebView.loadUrl(START_PAGE);
             }
-            webViewContainer.addView(getCurrentWebView());
+            updateTabCount();
         }
-    } catch (JSONException e) {
-        e.printStackTrace();
-        WebView initialWebView = createNewWebView();
-        initialWebView.setTag(nextTabId);
-        nextTabId++;
-        webViews.clear();
-        webViews.add(initialWebView);
-        currentTabIndex = 0;
-        webViewContainer.removeAllViews();
-        webViewContainer.addView(initialWebView);
-        initialWebView.loadUrl(START_PAGE);
     }
-    updateTabCount();
-}
-        }
+
 
     private void updateTabCount() {
         if (tabCountTextView != null) {
@@ -683,100 +699,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private void applyCombinedOptimizations(WebView webView) {
-        String js = "javascript:(function(){" +
-                "var animatedElements=document.querySelectorAll('.animated,.transition');" +
-                "animatedElements.forEach(function(el){" +
-                "if(!el.style.transform){el.style.transform='translateZ(0)';}" +
-                "if(!el.style.willChange){el.style.willChange='transform,opacity';}" +
-                "});" +
-                "var fixedElements=document.querySelectorAll('.fixed');" +
-                "fixedElements.forEach(function(el){" +
-                "if(el.style.position!=='fixed'){el.style.position='fixed';}" +
-                "});" +
-                "})();";
-        webView.evaluateJavascript(js, null);
+        WebViewOptimizationUtils.applyCombinedOptimizations(webView);
     }
+
     private void injectLazyLoading(WebView webView) {
-        String js = "javascript:(function(){" +
-                "var placeholder='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';" +
-                "var images=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');" +
-                "if(images.length===0)return;" +
-                "images.forEach(function(img){" +
-                "img.setAttribute('data-lazy-loaded','true');" +
-                "if(img.hasAttribute('src')){" +
-                "img.setAttribute('data-src',img.src);" +
-                "img.src=placeholder;" +
-                "img.style.opacity='0';" +
-                "img.style.transition='opacity 0.3s';" +
-                "if(!img.style.transform){img.style.transform='translateZ(0)';}" +
-                "}" +
-                "});" +
-                "if('IntersectionObserver'in window){" +
-                "var observer=new IntersectionObserver(function(entries){" +
-                "entries.forEach(function(entry){" +
-                "if(entry.isIntersecting){" +
-                "var img=entry.target;" +
-                "if(img.dataset.src){" +
-                "img.src=img.dataset.src;" +
-                "img.removeAttribute('data-src');" +
-                "img.onload=function(){img.style.opacity='1';};" +
-                "img.onerror=function(){console.warn('Image load failed: '+img.src);};" +
-                "}" +
-                "observer.unobserve(img);" +
-                "}" +
-                "});" +
-                "},{root:null,rootMargin:'0px',threshold:0.1});" +
-                "images.forEach(function(img){observer.observe(img);});" +
-                "}else{" +
-                "var loadImagesOnScroll=function(){" +
-                "images.forEach(function(img){" +
-                "if(img.dataset.src&&isElementInViewport(img)){" +
-                "img.src=img.dataset.src;" +
-                "img.removeAttribute('data-src');" +
-                "img.onload=function(){img.style.opacity='1';};" +
-                "img.onerror=function(){console.warn('Image load failed: '+img.src);};" +
-                "}" +
-                "});" +
-                "};" +
-                "var isElementInViewport=function(el){" +
-                "var rect=el.getBoundingClientRect();" +
-                "return(rect.top>=0&&rect.left>=0&&rect.bottom<=(window.innerHeight||document.documentElement.clientHeight)&&rect.right<=(window.innerWidth||document.documentElement.clientWidth));" +
-                "};" +
-                "window.addEventListener('scroll',loadImagesOnScroll);" +
-                "window.addEventListener('resize',loadImagesOnScroll);" +
-                "window.addEventListener('load',loadImagesOnScroll);" +
-                "loadImagesOnScroll();" +
-                "}" +
-                "})();";
-        webView.evaluateJavascript(js, null);
+        WebViewOptimizationUtils.injectLazyLoading(webView);
     }
+
     private void applyOptimizedSettings(WebSettings settings) {
-        settings.setJavaScriptEnabled(true);
-        settings.setRenderPriority(WebSettings.RenderPriority.HIGH);
-        settings.setAllowFileAccess(true);
-        settings.setAllowContentAccess(true);
-        settings.setLoadWithOverviewMode(true);
-        settings.setUseWideViewPort(true);
-        settings.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setDomStorageEnabled(true);
-        settings.setGeolocationEnabled(false);
-        settings.setTextZoom(100);
-        settings.setDisplayZoomControls(false);
-        settings.setBuiltInZoomControls(false);
-        settings.setSupportZoom(false);
-        settings.setMediaPlaybackRequiresUserGesture(true);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-            WebView.setWebContentsDebuggingEnabled(false);
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            settings.setOffscreenPreRaster(true);
-        }
-        if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
-            WebSettingsCompat.setForceDark(settings, darkModeEnabled ?
-                    WebSettingsCompat.FORCE_DARK_ON : WebSettingsCompat.FORCE_DARK_OFF);
-        }
+        WebViewOptimizationUtils.applyOptimizedSettings(settings, darkModeEnabled);
     }
+
     private void preInitializeWebView() {
         runOnUiThread(new Runnable() { @Override public void run() {
             WebView webView = new WebView(MainActivity.this);
@@ -841,7 +774,7 @@ public class MainActivity extends AppCompatActivity {
             settings.setBuiltInZoomControls(false);
             settings.setSupportZoom(false);
         }
-        settings.setJavaScriptEnabled(!jsEnabled);
+        settings.setJavaScriptEnabled(jsEnabled);
         settings.setLoadsImagesAutomatically(!imgBlockEnabled);
 
         if (uaEnabled) {
@@ -856,7 +789,7 @@ public class MainActivity extends AppCompatActivity {
             settings.setUserAgentString(defaultUA + APPEND_STR);
         }
 
-        webView.addJavascriptInterface(new BlobDownloadInterface(), "BlobDownloader");
+        webView.addJavascriptInterface(new BlobDownloadBridge(this), "BlobDownloader");
 
         webView.setOnLongClickListener(v -> {
             WebView.HitTestResult result = webView.getHitTestResult();
@@ -1062,7 +995,10 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     view.getSettings().setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
                 }
-                if (view == getCurrentWebView()) { urlEditText.setText(url); }
+                if (view == getCurrentWebView()) {
+                    urlEditText.setText(url);
+                    updatePullToRefreshState(view, url);
+                }
                 super.onPageStarted(view, url, favicon);
             }
             @Override
@@ -1080,6 +1016,7 @@ public class MainActivity extends AppCompatActivity {
             faviconImageView.setVisibility(View.VISIBLE);
             if (view == getCurrentWebView()) {
             urlEditText.setText(url);
+            updatePullToRefreshState(view, url);
             }
            }
             if (!isBackNavigation) {
@@ -1241,68 +1178,112 @@ public class MainActivity extends AppCompatActivity {
         return webView;
     }
 
+
     private void closeTab(WebView webView) {
         synchronized (webViews) {
-        int index = webViews.indexOf(webView);
-        if (index != -1) {
+            int index = webViews.indexOf(webView);
+            if (index == -1) {
+                return;
+            }
+
             Object tag = webView.getTag();
-            int id = -1;
-            if (tag instanceof Integer) id = (Integer) tag;
-            if (webViews.size() > 1) {
-                webViews.remove(index);
-                Bitmap bm = tabSnapshots.remove(webView);
-                if (bm != null && !bm.isRecycled()) {
-                    try { bm.recycle(); } catch (Exception ignored) {}
+            int id = (tag instanceof Integer) ? (Integer) tag : -1;
+
+            if (webViews.size() <= 1) {
+                try {
+                    webView.stopLoading();
+                } catch (Exception ignored) {
                 }
-                if (id != -1) {
-                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
-                    if (snapFile.exists()) {
-                        snapFile.delete();
-                    }
-                }
-                if (currentTabIndex > index) {
-                    currentTabIndex--;
-                } else if (currentTabIndex >= webViews.size()) {
-                    currentTabIndex = webViews.size() - 1;
-                }
+                currentTabIndex = 0;
+                webView.loadUrl(START_PAGE);
                 runOnUiThread(() -> {
                     try {
-                        webViewContainer.removeAllViews();
-                        webViewContainer.addView(getCurrentWebView());
+                        updatePullToRefreshState(webView, START_PAGE);
                         updateTabCount();
-                    } catch (Exception ignored) {}
+                    } catch (Exception ignored) {
+                    }
                 });
-            } else {
-                webView.loadUrl(START_PAGE);
+                return;
             }
-        }
-}
 
+            webViews.remove(index);
+            Bitmap bm = tabSnapshots.remove(webView);
+            if (bm != null && !bm.isRecycled()) {
+                try {
+                    bm.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+            if (id != -1) {
+                File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                if (snapFile.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    snapFile.delete();
+                }
+            }
+            try {
+                webView.stopLoading();
+                webView.destroy();
+            } catch (Exception ignored) {
+            }
+
+            if (currentTabIndex > index) {
+                currentTabIndex--;
+            } else if (currentTabIndex >= webViews.size()) {
+                currentTabIndex = webViews.size() - 1;
+            }
+            if (currentTabIndex < 0) {
+                currentTabIndex = 0;
+            }
+
+            runOnUiThread(() -> {
+                try {
+                    webViewContainer.removeAllViews();
+                    webViewContainer.addView(getCurrentWebView());
+                    updatePullToRefreshState(getCurrentWebView(), getCurrentWebView().getUrl());
+                    updateTabCount();
+                } catch (Exception ignored) {
+                }
+            });
         }
+    }
+
+
 
     private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-           ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-           != PackageManager.PERMISSION_GRANTED) {
+                ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
             if (permissionLauncher != null) {
                 permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
             }
             return;
         }
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-        if (mimeType != null) {
-            request.setMimeType(mimeType);
+
+        String effectiveMimeType = normalizeMimeType(mimeType, url);
+        String fileName = getAccurateFileName(url, contentDisposition, effectiveMimeType);
+        Uri uri = Uri.parse(url);
+        DownloadManager.Request request = new DownloadManager.Request(uri);
+        if (!isBlank(effectiveMimeType) && !effectiveMimeType.endsWith("/*")) {
+            request.setMimeType(effectiveMimeType);
         }
+
         String cookies = CookieManager.getInstance().getCookie(url);
-        request.addRequestHeader("cookie", cookies);
-        if (userAgent != null) {
+        if (!isBlank(cookies)) {
+            request.addRequestHeader("cookie", cookies);
+        }
+        if (!isBlank(userAgent)) {
             request.addRequestHeader("User-Agent", userAgent);
         }
+
         request.setDescription("Downloading file...");
-        String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
         request.setTitle(fileName);
+        request.allowScanningByMediaScanner();
         request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setAllowedOverMetered(true);
+        request.setAllowedOverRoaming(true);
         request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+
         DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
         try {
             long downloadId = dm.enqueue(request);
@@ -1315,153 +1296,110 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
         }
     }
+
+
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        String resolvedMimeType = normalizeMimeType(mimeType, url);
+        String fileName = generateBlobFileName(resolvedMimeType);
         String js = "javascript:(function(){" +
-                "fetch('" + url + "').then(function(response){return response.blob();}).then(function(blob){" +
+                "fetch(" + JSONObject.quote(url) + ",{credentials:'include'}).then(function(response){return response.blob();}).then(function(blob){" +
                 "var reader=new FileReader();" +
                 "reader.onloadend=function(){var base64data=reader.result;" +
-                "var fileName='" + generateBlobFileName(mimeType) + "';" +
-                "window.BlobDownloader.onBlobDownloaded(base64data,'" + (mimeType != null ? mimeType : "application/octet-stream") + "',fileName);" +
+                "window.BlobDownloader.onBlobDownloaded(base64data," + JSONObject.quote(resolvedMimeType != null ? resolvedMimeType : "application/octet-stream") + "," + JSONObject.quote(fileName) + ");" +
                 "};" +
                 "reader.readAsDataURL(blob);" +
                 "}).catch(function(error){window.BlobDownloader.onBlobDownloadError(error.toString());});" +
-                "})();"; 
+                "})();";
         getCurrentWebView().evaluateJavascript(js, null);
     }
 
+
+
     private String generateBlobFileName(String mimeType) {
-        String ext = "";
-        if (mimeType != null) {
-            if (mimeType.contains("pdf")) {
-                ext = ".pdf";
-            } else if (mimeType.contains("image/png")) {
-                ext = ".png";
-            } else if (mimeType.contains("image/jpeg")) {
-                ext = ".jpg";
-            } else if (mimeType.contains("text/html")) {
-                ext = ".html";
-            }
-        }
-        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-        return "blob_download_" + timeStamp + ext;
+        return buildTimestampFileName("blob_download_", mimeType);
     }
+
 
     
-    private class BlobDownloadInterface {
-        @JavascriptInterface
-        public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    try {
-                        int commaIndex = base64Data.indexOf(",");
-                        String pureBase64 = base64Data.substring(commaIndex + 1);
-                        byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
-                        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                        if (!downloadDir.exists()) {
-                            downloadDir.mkdirs();
-                        }
-                        File file = new File(downloadDir, fileName);
-                        FileOutputStream fos = new FileOutputStream(file);
-                        try {
-                            fos.write(data);
-                            fos.flush();
-                        } finally {
-                            try { fos.close(); } catch (Exception ignored) {}
-                        }
-                        Toast.makeText(MainActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                    } catch (Exception e) {
-                        Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                    }
-                }
-            });
-        }
 
-        @JavascriptInterface
-        public void onBlobDownloadError(final String errorMessage) {
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    Toast.makeText(MainActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show();
-                }
-            });
-        }
-    }
 
     private void saveImage(String imageUrl) {
-    try {
-        if (imageUrl != null && imageUrl.startsWith("data:")) {
-            int commaIndex = imageUrl.indexOf(',');
-            if (commaIndex == -1) {
-                Toast.makeText(MainActivity.this, "無効なデータURL", Toast.LENGTH_SHORT).show();
+        try {
+            if (imageUrl != null && imageUrl.startsWith("data:")) {
+                int commaIndex = imageUrl.indexOf(',');
+                if (commaIndex == -1) {
+                    Toast.makeText(MainActivity.this, "無効なデータURL", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String metadata = imageUrl.substring(5, commaIndex);
+                boolean isBase64 = metadata.contains("base64");
+                String mimeType = "image/png";
+                if (metadata.contains(";")) {
+                    mimeType = metadata.split(";")[0].trim();
+                } else if (!metadata.isEmpty()) {
+                    mimeType = metadata.trim();
+                }
+
+                byte[] imageData;
+                if (isBase64) {
+                    String base64Data = imageUrl.substring(commaIndex + 1);
+                    imageData = Base64.decode(base64Data, Base64.DEFAULT);
+                } else {
+                    String dataPart = imageUrl.substring(commaIndex + 1);
+                    imageData = dataPart.getBytes("UTF-8");
+                }
+
+                String fileName = buildTimestampFileName("saved_image_", mimeType);
+                File picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+                if (!picturesDir.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    picturesDir.mkdirs();
+                }
+                File file = new File(picturesDir, fileName);
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    fos.write(imageData);
+                    fos.flush();
+                }
+                Toast.makeText(MainActivity.this,
+                        "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
+                        Toast.LENGTH_LONG).show();
                 return;
             }
-            String metadata = imageUrl.substring(5, commaIndex); 
-            boolean isBase64 = metadata.contains("base64");
-            String mimeType = "image/*";
-            if (metadata.contains(";")) {
-                mimeType = metadata.split(";")[0];
+
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                    ContextCompat.checkSelfPermission(MainActivity.this,
+                            Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                            != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(MainActivity.this,
+                        "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
+                return;
             }
-            byte[] imageData;
-            if (isBase64) {
-                String base64Data = imageUrl.substring(commaIndex + 1);
-                imageData = Base64.decode(base64Data, Base64.DEFAULT);
-            } else {
-                String dataPart = imageUrl.substring(commaIndex + 1);
-                imageData = dataPart.getBytes("UTF-8");
+
+            String inferredMimeType = normalizeMimeType(null, imageUrl);
+            if (isBlank(inferredMimeType)) {
+                inferredMimeType = "image/*";
             }
-            String fileName = "saved_image_" + System.currentTimeMillis();
-            if (mimeType.equalsIgnoreCase("image/png")) {
-                fileName += ".png";
-            } else if (mimeType.equalsIgnoreCase("image/jpeg")) {
-                fileName += ".jpg";
-            } else if (mimeType.equalsIgnoreCase("image/bmp")) {
-                fileName += ".bmp";
-            } else if (mimeType.equalsIgnoreCase("image/gif")) {
-                fileName += ".gif";
-            } else if (mimeType.equalsIgnoreCase("image/img")) {
-                fileName += ".img";
+            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(imageUrl));
+            if (!inferredMimeType.endsWith("/*")) {
+                request.setMimeType(inferredMimeType);
             }
-            File picturesDir = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_PICTURES);
-            File file = new File(picturesDir, fileName);
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(imageData);
-                fos.flush();
-            }
+            String fileName = getAccurateFileName(imageUrl, null, inferredMimeType);
+            request.setTitle(fileName);
+            request.setDescription("画像を保存中...");
+            request.allowScanningByMediaScanner();
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, fileName);
+            dm.enqueue(request);
             Toast.makeText(MainActivity.this,
-                "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
-                Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-            ContextCompat.checkSelfPermission(MainActivity.this,
-                Manifest.permission.WRITE_EXTERNAL_STORAGE)
-            != PackageManager.PERMISSION_GRANTED) {
+                    "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
             Toast.makeText(MainActivity.this,
-                "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
-            return;
+                    "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
         }
-        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-        DownloadManager.Request request =
-            new DownloadManager.Request(Uri.parse(imageUrl));
-        request.setMimeType("image/*");
-        String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
-        request.setTitle(fileName);
-        request.setDescription("画像を保存中...");
-        request.setNotificationVisibility(
-            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(
-            Environment.DIRECTORY_PICTURES, fileName);
-        dm.enqueue(request);
-        Toast.makeText(MainActivity.this,
-            "画像の保存の開始しました", Toast.LENGTH_SHORT).show();
-    } catch (Exception e) {
-        Toast.makeText(MainActivity.this,
-            "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
-        e.printStackTrace();
     }
-}
+
     private void exportBookmarksToFile() {
         final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
         File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
@@ -1490,12 +1428,34 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
+
     private void createNewTab() {
         if (webViews.size() >= MAX_TABS) {
             WebView removed = webViews.remove(0);
-            removed.destroy();
+            Bitmap removedSnapshot = tabSnapshots.remove(removed);
+            if (removedSnapshot != null && !removedSnapshot.isRecycled()) {
+                try {
+                    removedSnapshot.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+            Object removedTag = removed.getTag();
+            if (removedTag instanceof Integer) {
+                File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedTag + ".png");
+                if (snapFile.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    snapFile.delete();
+                }
+            }
+            try {
+                removed.stopLoading();
+                removed.destroy();
+            } catch (Exception ignored) {
+            }
             if (currentTabIndex > 0) {
                 currentTabIndex--;
+            } else {
+                currentTabIndex = 0;
             }
         }
         WebView newWebView = createNewWebView();
@@ -1505,8 +1465,9 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         getCurrentWebView().loadUrl(START_PAGE);
-        captureTabSnapshot(newWebView);
     }
+
+
     private void createNewTab(String url) {
         if (webViews.size() >= MAX_TABS) {
             Toast.makeText(this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
@@ -1517,8 +1478,8 @@ public class MainActivity extends AppCompatActivity {
         updateTabCount();
         switchToTab(webViews.size() - 1);
         newWebView.loadUrl(url);
-        captureTabSnapshot(newWebView);
     }
+
 
     private void switchToTab(int index) {
         if (index < 0 || index >= webViews.size()) return;
@@ -1528,13 +1489,22 @@ public class MainActivity extends AppCompatActivity {
         }
         webViewContainer.removeAllViews();
         currentTabIndex = index;
-        webViewContainer.addView(getCurrentWebView());
-        urlEditText.setText(getCurrentWebView().getUrl());
+        WebView next = getCurrentWebView();
+        webViewContainer.addView(next);
+        urlEditText.setText(next.getUrl());
+        updatePullToRefreshState(next, next.getUrl());
     }
 
     private WebView getCurrentWebView() {
         return webViews.get(currentTabIndex);
     }
+
+    private void updatePullToRefreshState(WebView webView, String url) {
+        if (swipeRefreshLayout == null) return;
+        boolean enabled = SwipeRefreshPolicy.shouldEnablePullToRefresh(webView, url);
+        swipeRefreshLayout.setEnabled(enabled);
+    }
+
     private void loadUrl() {
     String input = urlEditText.getText().toString().trim();
     if (input.isEmpty()) return;
@@ -1569,14 +1539,7 @@ public class MainActivity extends AppCompatActivity {
                 public void run() {
                     try {
                         if (owner == getCurrentWebView()) {
-                            if (url.startsWith("https://m.youtube.com/watch") ||
-                                url.startsWith("https://chatgpt.com/") ||
-                                url.startsWith("https://365sns.f5.si/") ||
-                                url.startsWith("https://m.youtube.com/shorts/")) {
-                                swipeRefreshLayout.setEnabled(false);
-                            } else {
-                                swipeRefreshLayout.setEnabled(true);
-                            }
+                            updatePullToRefreshState(owner, url);
                             urlEditText.setText(url);
                             addHistory(url, owner.getTitle());
                         }
@@ -1605,7 +1568,7 @@ public class MainActivity extends AppCompatActivity {
         MenuItem zoomItem = menu.findItem(R.id.action_zoom_toggle);
         if (zoomItem != null) zoomItem.setChecked(zoomEnabled);
         MenuItem jsItem = menu.findItem(R.id.action_js);
-        if (jsItem != null) jsItem.setChecked(jsEnabled);
+        if (jsItem != null) jsItem.setChecked(!jsEnabled);   
         MenuItem imgItem = menu.findItem(R.id.action_img);
         if (imgItem != null) imgItem.setChecked(imgBlockEnabled);
         MenuItem basicAuthItem = menu.findItem(R.id.action_basic_auth);
@@ -1681,15 +1644,14 @@ public class MainActivity extends AppCompatActivity {
             item.setChecked(zoomEnabled);
             pref.edit().putBoolean(KEY_ZOOM_ENABLED, zoomEnabled).apply();
         } else if (id == R.id.action_js) {
-            if (item.isChecked()) {
-                disablejs();
-                jsEnabled = false;
-            } else {
+            jsEnabled = !jsEnabled;
+            if (jsEnabled) {
                 enablejs();
-                jsEnabled = true;
+            } else {
+                disablejs();
             }
-            item.setChecked(jsEnabled);
-            pref.edit().putBoolean(KEY_JS_ENABLED, jsEnabled).apply();
+            item.setChecked(!jsEnabled);
+            pref.edit().putBoolean(KEY_JS_ENABLED, jsEnabled).apply();  
         } else if (id == R.id.action_img) {
             if (item.isChecked()) {
                 disableimgunlock();
@@ -1874,49 +1836,56 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+
     private void clearTabs() {
         synchronized (webViews) {
-        WebView current = getCurrentWebView();
-        current.loadUrl(START_PAGE);
-        for (int i = 0; i < webViews.size(); i++) {
-            if (i != currentTabIndex) {
-                WebView w = webViews.get(i);
+            WebView current = getCurrentWebView();
+            if (current == null) {
+                return;
+            }
+
+            ArrayList<WebView> snapshot = new ArrayList<>(webViews);
+            for (WebView w : snapshot) {
+                if (w == current) {
+                    continue;
+                }
                 Object tag = w.getTag();
-                int id = -1;
-                if (tag instanceof Integer) id = (Integer) tag;
+                int id = (tag instanceof Integer) ? (Integer) tag : -1;
                 Bitmap bm = tabSnapshots.remove(w);
                 if (bm != null && !bm.isRecycled()) {
-                    try { bm.recycle(); } catch (Exception ignored) {}
+                    try {
+                        bm.recycle();
+                    } catch (Exception ignored) {
+                    }
                 }
                 if (id != -1) {
                     File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
-                    if (snapFile.exists()) snapFile.delete();
+                    if (snapFile.exists()) {
+                        //noinspection ResultOfMethodCallIgnored
+                        snapFile.delete();
+                    }
                 }
-                w.destroy();
+                try {
+                    w.stopLoading();
+                    w.destroy();
+                } catch (Exception ignored) {
+                }
             }
-        }
-        WebView curr = getCurrentWebView();
-        if (curr != null) {
-            Object tag2 = curr.getTag();
-            int id2 = -1;
-            if (tag2 instanceof Integer) id2 = (Integer) tag2;
-            Bitmap cbm = tabSnapshots.remove(curr);
-            if (cbm != null && !cbm.isRecycled()) {
-                try { cbm.recycle(); } catch (Exception ignored) {}
+
+            webViews.clear();
+            webViews.add(current);
+            currentTabIndex = 0;
+            try {
+                current.clearHistory();
+                current.loadUrl(START_PAGE);
+            } catch (Exception ignored) {
             }
-            if (id2 != -1) {
-                File snapFileCurr = new File(getFilesDir(), "tab_snapshot_" + id2 + ".png");
-                if (snapFileCurr.exists()) snapFileCurr.delete();
-            }
+            webViewContainer.removeAllViews();
+            webViewContainer.addView(current);
+            updateTabCount();
         }
-        webViews.clear();
-        webViews.add(current);
-        currentTabIndex = 0;
-        webViewContainer.removeAllViews();
-        webViewContainer.addView(current);
-        updateTabCount();
-}
-        }
+    }
+
 
     private void takeScreenshot() {
     View rootView = getWindow().getDecorView().getRootView();
@@ -2048,14 +2017,14 @@ private void saveScreenshot(Bitmap bitmap) {
 
     private void disablejs() {
         WebSettings settings = getCurrentWebView().getSettings();
-        settings.setJavaScriptEnabled(true);
-        Toast.makeText(MainActivity.this, "JavaScript有効", Toast.LENGTH_SHORT).show();
+        settings.setJavaScriptEnabled(false);
+        Toast.makeText(MainActivity.this, "JavaScript無効", Toast.LENGTH_SHORT).show();
     }
 
     private void enablejs() {
         WebSettings settings = getCurrentWebView().getSettings();
-        settings.setJavaScriptEnabled(false);
-        Toast.makeText(MainActivity.this, "JavaScript無効", Toast.LENGTH_SHORT).show();
+        settings.setJavaScriptEnabled(true);
+        Toast.makeText(MainActivity.this, "JavaScript有効", Toast.LENGTH_SHORT).show();
     }
 
     private void enableZoom() {
@@ -2215,253 +2184,120 @@ private void showHistoryDialog() {
 
     
     private void showTabsDialog() {
-        LinearLayout container = new LinearLayout(this);
-        container.setOrientation(LinearLayout.VERTICAL);
-        container.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
-        ViewPager2 viewPager = new ViewPager2(this);
-        viewPager.setOrientation(ViewPager2.ORIENTATION_HORIZONTAL);
-        TabSnapshotAdapter adapter = new TabSnapshotAdapter();
-        viewPager.setAdapter(adapter);
-        LinearLayout.LayoutParams pagerParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                0,
-                1);
-        container.addView(viewPager, pagerParams);
-
-        Button addTabButton = new Button(this);
-        addTabButton.setText("新しいタブを開く");
-        addTabButton.setOnClickListener(v -> {
-            createNewTab();
-            adapter.notifyDataSetChanged();
-        });
-        container.addView(addTabButton);
-
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this)
-                .setTitle("タブ一覧")
-                .setView(container)
-                .setNegativeButton("タブ一覧を閉じる", null)
-                .create();
-        adapter.setParentDialog(dialog);
-        dialog.show();
-    }
-
-    private class TabSnapshotAdapter extends RecyclerView.Adapter<TabSnapshotAdapter.PageViewHolder> {
-        private AlertDialog parentDialog;
-        public void setParentDialog(AlertDialog d) { this.parentDialog = d; }
-        public TabSnapshotAdapter() { }
-
-        @Override
-        public PageViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            FrameLayout root = new FrameLayout(MainActivity.this);
-            root.setLayoutParams(new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-            LinearLayout container = new LinearLayout(MainActivity.this);
-            container.setOrientation(LinearLayout.VERTICAL);
-            FrameLayout.LayoutParams containerParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            container.setLayoutParams(containerParams);
-            LinearLayout row1 = new LinearLayout(MainActivity.this);
-            row1.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout row2 = new LinearLayout(MainActivity.this);
-            row2.setOrientation(LinearLayout.HORIZONTAL);
-            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f);
-            row1.setLayoutParams(rowParams);
-            row2.setLayoutParams(rowParams);
-            int tileMargin = dpToPx(6);
-            LinearLayout.LayoutParams tileParams = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
-            tileParams.setMargins(tileMargin, tileMargin, tileMargin, tileMargin);
-            FrameLayout tile00 = new FrameLayout(MainActivity.this);
-            FrameLayout tile01 = new FrameLayout(MainActivity.this);
-            FrameLayout tile10 = new FrameLayout(MainActivity.this);
-            FrameLayout tile11 = new FrameLayout(MainActivity.this);
-            tile00.setLayoutParams(tileParams);
-            tile01.setLayoutParams(tileParams);
-            tile10.setLayoutParams(tileParams);
-            tile11.setLayoutParams(tileParams);
-            ImageView img00 = new ImageView(MainActivity.this);
-            ImageView img01 = new ImageView(MainActivity.this);
-            ImageView img10 = new ImageView(MainActivity.this);
-            ImageView img11 = new ImageView(MainActivity.this);
-            img00.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img01.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img10.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            img11.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            FrameLayout.LayoutParams imgParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-            tile00.addView(img00, imgParams);
-            tile01.addView(img01, imgParams);
-            tile10.addView(img10, imgParams);
-            tile11.addView(img11, imgParams);
-            TextView title00 = new TextView(MainActivity.this);
-            TextView title01 = new TextView(MainActivity.this);
-            TextView title10 = new TextView(MainActivity.this);
-            TextView title11 = new TextView(MainActivity.this);
-            title00.setTextColor(Color.BLACK);
-            title01.setTextColor(Color.BLACK);
-            title10.setTextColor(Color.BLACK);
-            title11.setTextColor(Color.BLACK);
-            title00.setTextSize(12);
-            title01.setTextSize(12);
-            title10.setTextSize(12);
-            title11.setTextSize(12);
-            title00.setGravity(Gravity.CENTER);
-            title01.setGravity(Gravity.CENTER);
-            title10.setGravity(Gravity.CENTER);
-            title11.setGravity(Gravity.CENTER);
-            title00.setBackgroundColor(Color.argb(160,255,255,255));
-            title01.setBackgroundColor(Color.argb(160,255,255,255));
-            title10.setBackgroundColor(Color.argb(160,255,255,255));
-            title11.setBackgroundColor(Color.argb(160,255,255,255));
-            FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-            tile00.addView(title00, titleParams);
-            tile01.addView(title01, titleParams);
-            tile10.addView(title10, titleParams);
-            tile11.addView(title11, titleParams);
-            ImageButton close00 = new ImageButton(MainActivity.this);
-            ImageButton close01 = new ImageButton(MainActivity.this);
-            ImageButton close10 = new ImageButton(MainActivity.this);
-            ImageButton close11 = new ImageButton(MainActivity.this);
-            close00.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close01.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close10.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            close11.setImageResource(android.R.drawable.ic_menu_close_clear_cancel);
-            FrameLayout.LayoutParams closeParams = new FrameLayout.LayoutParams(dpToPx(36), dpToPx(36), Gravity.TOP | Gravity.END);
-            closeParams.setMargins(dpToPx(4), dpToPx(4), dpToPx(4), dpToPx(4));
-            tile00.addView(close00, closeParams);
-            tile01.addView(close01, closeParams);
-            tile10.addView(close10, closeParams);
-            tile11.addView(close11, closeParams);
-            row1.addView(tile00);
-            row1.addView(tile01);
-            row2.addView(tile10);
-            row2.addView(tile11);
-            container.addView(row1);
-            container.addView(row2);
-            root.addView(container);
-            PageViewHolder vh = new PageViewHolder(root, img00, img01, img10, img11, title00, title01, title10, title11, close00, close01, close10, close11);
-            return vh;
-        }
-
-        @Override
-        public void onBindViewHolder(PageViewHolder holder, int position) {
-            int baseIndex;
-            synchronized (webViews) {
-                baseIndex = position * 4;
-                for (int i = 0; i < 4; i++) {
-                    final int tabIndex = baseIndex + i;
-                    ImageView img = holder.images[i];
-                    TextView title = holder.titles[i];
-                    ImageButton close = holder.closes[i];
-                    if (tabIndex < webViews.size()) {
-                        WebView w = webViews.get(tabIndex);
-                        Bitmap bm = tabSnapshots.get(w);
-                        if (bm != null) {
-                            img.setImageBitmap(Bitmap.createScaledBitmap(bm, Math.max(1, bm.getWidth()/4), Math.max(1, bm.getHeight()/4), true));
-                        } else {
-                            img.setImageDrawable(null);
+        TabOverviewDialog.show(
+                this,
+                new TabOverviewDialog.Host() {
+                    @Override
+                    public int getTabCount() {
+                        synchronized (webViews) {
+                            return webViews.size();
                         }
-                        String t = w.getTitle();
-                        if (t == null || t.isEmpty()) t = w.getUrl();
-                        if (t == null) t = "";
-                        title.setText(shortTitle(t));
-                        img.setAlpha(1f);
-                        img.setClickable(true);
-                        img.setOnClickListener(v -> {
-                            synchronized (webViews) {
-                                currentTabIndex = tabIndex;
-                            }
-                            runOnUiThread(() -> {
-                                try {
-                                    webViewContainer.removeAllViews();
-                                    webViewContainer.addView(getCurrentWebView());
-                                    updateTabCount();
-                                    if (parentDialog != null && parentDialog.isShowing()) parentDialog.dismiss();
-                                } catch (Exception ignored) {}
-                            });
-                        });
-                        close.setVisibility(View.VISIBLE);
-                        close.setOnClickListener(v -> {
-                            WebView target;
-                            synchronized (webViews) {
-                                if (tabIndex >= 0 && tabIndex < webViews.size()) {
-                                    target = webViews.get(tabIndex);
-                                } else return;
-                            }
-                            closeTab(target);
-                            notifyDataSetChanged();
-                        });
-                    } else {
-                        img.setImageDrawable(null);
-                        title.setText("");
-                        img.setClickable(false);
-                        img.setOnClickListener(null);
-                        close.setVisibility(View.INVISIBLE);
+                    }
+
+                    @Override
+                    public WebView getTabAt(int index) {
+                        synchronized (webViews) {
+                            if (index < 0 || index >= webViews.size()) return null;
+                            return webViews.get(index);
+                        }
+                    }
+
+                    @Override
+                    public Bitmap getTabSnapshot(WebView webView) {
+                        return tabSnapshots.get(webView);
+                    }
+
+                    @Override
+                    public int getCurrentTabIndex() {
+                        return currentTabIndex;
+                    }
+
+                    @Override
+                    public void switchToTab(int index) {
+                        MainActivity.this.switchToTab(index);
+                    }
+
+                    @Override
+                    public void closeTabAt(int index) {
+                        WebView target = getTabAt(index);
+                        if (target != null) {
+                            MainActivity.this.closeTab(target);
+                        }
+                    }
+
+                    @Override
+                    public void createNewTab() {
+                        MainActivity.this.createNewTab();
+                    }
+
+                    @Override
+                    public void refreshTabCount() {
+                        updateTabCount();
+                    }
+
+                    @Override
+                    public void dismissCurrentKeyboard() {
+                        InputMethodManager imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+                        if (imm != null && getCurrentFocus() != null) {
+                            imm.hideSoftInputFromWindow(getCurrentFocus().getWindowToken(), 0);
+                        }
                     }
                 }
-            }
-        }
-
-        @Override
-        public int getItemCount() {
-            synchronized (webViews) {
-                int n = webViews.size();
-                return (n + 3) / 4;
-            }
-        }
-
-        private String shortTitle(String url) {
-            if (url == null) return "";
-            if (url.length() > 40) return url.substring(0, 37) + "...";
-            return url;
-        }
-
-        private int dpToPx(int dp) {
-            return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
-        }
-
-        private class PageViewHolder extends RecyclerView.ViewHolder {
-            public ImageView[] images = new ImageView[4];
-            public TextView[] titles = new TextView[4];
-            public ImageButton[] closes = new ImageButton[4];
-            public PageViewHolder(View itemView,
-                                  ImageView img00, ImageView img01, ImageView img10, ImageView img11,
-                                  TextView title00, TextView title01, TextView title10, TextView title11,
-                                  ImageButton close00, ImageButton close01, ImageButton close10, ImageButton close11) {
-                super(itemView);
-                images[0] = img00; images[1] = img01; images[2] = img10; images[3] = img11;
-                titles[0] = title00; titles[1] = title01; titles[2] = title10; titles[3] = title11;
-                closes[0] = close00; closes[1] = close01; closes[2] = close10; closes[3] = close11;
-            }
-        }
+        );
     }
-private void captureTabSnapshot(WebView webView) {
+
+
+    private void captureTabSnapshot(WebView webView) {
         if (webView == null) return;
-        Object tag = webView.getTag();
-        int id = -1;
-        if (tag instanceof Integer) id = (Integer) tag;
         int width = webView.getWidth();
         int height = webView.getHeight();
         if (width <= 0 || height <= 0) return;
+
+        Object tag = webView.getTag();
+        int id = (tag instanceof Integer) ? (Integer) tag : -1;
+
+        Bitmap previous = tabSnapshots.remove(webView);
+        if (previous != null && !previous.isRecycled()) {
+            try {
+                previous.recycle();
+            } catch (Exception ignored) {
+            }
+        }
+
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
         Canvas canvas = new Canvas(bitmap);
         webView.draw(canvas);
-        tabSnapshots.put(webView, bitmap);
+
+        Bitmap snapshot = bitmap;
+        int maxPreviewWidth = 480;
+        if (width > maxPreviewWidth) {
+            int targetHeight = Math.max(1, Math.round((float) height * maxPreviewWidth / (float) width));
+            Bitmap scaled = Bitmap.createScaledBitmap(bitmap, maxPreviewWidth, targetHeight, true);
+            if (scaled != bitmap) {
+                try {
+                    bitmap.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+            snapshot = scaled;
+        }
+
+        tabSnapshots.put(webView, snapshot);
         if (id != -1) {
             final int finalId = id;
-            final Bitmap finalBitmap = bitmap;
+            final Bitmap finalBitmap = snapshot;
             backgroundExecutor.execute(() -> {
-                try {
-                    File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
-                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                        finalBitmap.compress(Bitmap.CompressFormat.PNG, 80, fos);
-                        fos.flush();
-                    }
+                File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                    fos.flush();
                 } catch (Exception e) {
                     e.printStackTrace();
                 }
             });
         }
-}
+    }
+
 
     private void showBookmarksManagementDialog() {
         if (bookmarks.isEmpty()) {
@@ -2936,4 +2772,175 @@ private void addHistory(String url, String title) {
             }
         } catch (Exception ignored) {}
     }
+
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private String normalizeMimeType(String mimeType, String sourceUrl) {
+        if (!isBlank(mimeType)) {
+            return mimeType.trim().toLowerCase(Locale.ROOT);
+        }
+        String inferred = inferMimeTypeFromUrl(sourceUrl);
+        return isBlank(inferred) ? null : inferred;
+    }
+
+    private String inferMimeTypeFromUrl(String sourceUrl) {
+        if (isBlank(sourceUrl)) {
+            return null;
+        }
+        try {
+            String path = Uri.parse(sourceUrl).getPath();
+            if (isBlank(path)) {
+                path = sourceUrl;
+            }
+            String ext = MimeTypeMap.getFileExtensionFromUrl(path);
+            if (!isBlank(ext)) {
+                String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext.toLowerCase(Locale.ROOT));
+                if (!isBlank(mime)) {
+                    return mime;
+                }
+                ext = ext.toLowerCase(Locale.ROOT);
+                if ("jpg".equals(ext) || "jpeg".equals(ext)) return "image/jpeg";
+                if ("png".equals(ext)) return "image/png";
+                if ("gif".equals(ext)) return "image/gif";
+                if ("webp".equals(ext)) return "image/webp";
+                if ("bmp".equals(ext)) return "image/bmp";
+                if ("svg".equals(ext)) return "image/svg+xml";
+                if ("html".equals(ext) || "htm".equals(ext)) return "text/html";
+                if ("json".equals(ext)) return "application/json";
+                if ("pdf".equals(ext)) return "application/pdf";
+                if ("zip".equals(ext)) return "application/zip";
+                if ("apk".equals(ext)) return "application/vnd.android.package-archive";
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String resolveExtensionFromMimeType(String mimeType) {
+        if (isBlank(mimeType)) {
+            return "";
+        }
+        String normalized = mimeType.trim().toLowerCase(Locale.ROOT);
+        String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(normalized);
+        if (!isBlank(ext)) {
+            return "." + ext;
+        }
+        if (normalized.contains("jpeg")) return ".jpg";
+        if (normalized.contains("png")) return ".png";
+        if (normalized.contains("gif")) return ".gif";
+        if (normalized.contains("webp")) return ".webp";
+        if (normalized.contains("bmp")) return ".bmp";
+        if (normalized.contains("svg")) return ".svg";
+        if (normalized.contains("html")) return ".html";
+        if (normalized.contains("json")) return ".json";
+        if (normalized.contains("pdf")) return ".pdf";
+        if (normalized.contains("zip")) return ".zip";
+        if (normalized.contains("apk")) return ".apk";
+        return "";
+    }
+
+    private String ensureExtensionForFileName(String fileName, String mimeType, String sourceUrl) {
+        if (isBlank(fileName)) {
+            fileName = "download_" + System.currentTimeMillis();
+        }
+        int dotIndex = fileName.lastIndexOf('.');
+        int lastSeparator = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
+        boolean hasExtension = dotIndex > lastSeparator && dotIndex < fileName.length() - 1;
+        if (!hasExtension) {
+            String extension = resolveExtensionFromMimeType(mimeType);
+            if (isBlank(extension)) {
+                String inferred = inferMimeTypeFromUrl(sourceUrl);
+                extension = resolveExtensionFromMimeType(inferred);
+            }
+            if (!isBlank(extension)) {
+                fileName += extension;
+            }
+        }
+        return fileName;
+    }
+
+    private String buildTimestampFileName(String prefix, String mimeType) {
+        String normalizedPrefix = isBlank(prefix) ? "download_" : prefix;
+        String fileName = normalizedPrefix + new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        String extension = resolveExtensionFromMimeType(mimeType);
+        if (!isBlank(extension)) {
+            fileName += extension;
+        }
+        return fileName;
+    }
+
+
+    private String getAccurateFileName(String url, String contentDisposition, String mimeType) {
+        String fileName = null;
+        if (!isBlank(contentDisposition)) {
+            fileName = parseFilenameFromContentDisposition(contentDisposition);
+        }
+        if (isBlank(fileName)) {
+            fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+        }
+        if (isBlank(fileName)) {
+            fileName = buildTimestampFileName("download_", mimeType);
+        }
+        fileName = sanitizeFileName(fileName);
+        fileName = ensureExtensionForFileName(fileName, mimeType, url);
+        return fileName;
+    }
+
+
+
+    private String parseFilenameFromContentDisposition(String contentDisposition) {
+        Matcher matcher = Pattern.compile("filename\\*\\s*=\\s*([^']+)'[^']*'([^;]+)", Pattern.CASE_INSENSITIVE)
+                .matcher(contentDisposition);
+        if (matcher.find()) {
+            String charset = matcher.group(1).trim();
+            String value = matcher.group(2).trim();
+            try {
+                return URLDecoder.decode(value, charset);
+            } catch (Exception ignored) {
+                try {
+                    return URLDecoder.decode(value, "UTF-8");
+                } catch (Exception e) {
+                    return value;
+                }
+            }
+        }
+        matcher = Pattern.compile("filename\\s*=\\s*\"?([^\";]+)\"?", Pattern.CASE_INSENSITIVE)
+                .matcher(contentDisposition);
+        if (matcher.find()) {
+            return matcher.group(1).trim();
+        }
+        return null;
+    }
+
+
+
+    private String sanitizeFileName(String name) {
+        if (isBlank(name)) {
+            return "download_" + System.currentTimeMillis();
+        }
+        name = name.trim();
+        name = name.replaceAll("[\\\\/:*?\"<>|]", "_");
+        name = name.replaceAll("[. ]+$", "");
+        if (name.isEmpty()) {
+            name = "download_" + System.currentTimeMillis();
+        }
+        if (name.length() > 200) {
+            int dotIndex = name.lastIndexOf('.');
+            if (dotIndex > 0 && dotIndex < name.length() - 1) {
+                String base = name.substring(0, dotIndex);
+                String ext = name.substring(dotIndex);
+                if (base.length() > 200 - ext.length()) {
+                    base = base.substring(0, Math.max(1, 200 - ext.length() - 1));
+                }
+                name = base + ext;
+            } else {
+                name = name.substring(0, 200);
+            }
+        }
+        return name;
+    }
+
 }

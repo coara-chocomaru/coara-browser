@@ -42,7 +42,7 @@
 
         <activity
             android:name=".MainActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
             android:launchMode="singleTop"
             android:importantForAutofill="yes"
@@ -70,7 +70,7 @@
         <activity
             android:name=".SecretActivity"
             android:process=":Secret_webview"
-            android:configChanges="keyboardHidden|orientation|screenSize"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="false" />
 
         <activity

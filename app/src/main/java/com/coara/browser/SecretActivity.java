@@ -265,6 +265,11 @@ public class SecretActivity extends AppCompatActivity {
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.removeAllCookies(null);
         cookieManager.flush();
+        WebStorage.getInstance().deleteAllData();
+        try {
+            WebViewDatabase.getInstance(this).clearFormData();
+        } catch (Exception ignored) {
+        }
         loadBookmarks();
         loadHistory();
         if (!historyItems.isEmpty()) {
@@ -280,7 +285,15 @@ public class SecretActivity extends AppCompatActivity {
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
         webViewContainer = findViewById(R.id.webViewContainer);
         tabCountTextView = findViewById(R.id.tabCountTextView);
-        tabCountTextView.setOnClickListener(v -> showTabsDialog());
+        if (tabCountTextView != null) {
+            tabCountTextView.setVisibility(View.GONE);
+            tabCountTextView.setOnClickListener(v -> showTabsDialog());
+        }
+        if (btnNewTab != null) {
+            btnNewTab.setVisibility(View.GONE);
+        }
+
+        purgeSecretTabPersistence();
 
         WebView initialWebView = createNewWebView();
             initialWebView.setTag(nextTabId);
@@ -428,18 +441,20 @@ public class SecretActivity extends AppCompatActivity {
 
     private void clear0() {
         WebView webView = getCurrentWebView();
-    if (webView != null) {
-        webView.clearHistory();
-        webView.clearCache(true);
-        webView.clearFormData();
-        webView.clearSslPreferences();
-        webView.clearMatches();
-        clearTabs();
-      }
-    WebStorage.getInstance().deleteAllData();
-    CookieManager cookieManager = CookieManager.getInstance();
-    cookieManager.removeAllCookies(null);
-    cookieManager.flush();
+        if (webView != null) {
+            webView.clearHistory();
+            webView.clearCache(true);
+            webView.clearFormData();
+            webView.clearSslPreferences();
+            webView.clearMatches();
+            clearTabs();
+        }
+        WebStorage.getInstance().deleteAllData();
+        WebViewDatabase.getInstance(this).clearFormData();
+        purgeSecretTabPersistence();
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.removeAllCookies(null);
+        cookieManager.flush();
      }
     private void saveBundleToFile(Bundle bundle, String fileName) {
         File file = new File(getFilesDir(), fileName);
@@ -514,28 +529,7 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void saveTabsState() {
-        JSONArray tabsArray = new JSONArray();
-        for (WebView webView : webViews) {
-            int id = (int) webView.getTag();
-            String url = webView.getUrl();
-            if (url == null) url = "";
-            JSONObject tabObj = new JSONObject();
-            try {
-                tabObj.put("id", id);
-                tabObj.put("url", url);
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-            tabsArray.put(tabObj);
-            Bundle state = new Bundle();
-            webView.saveState(state);
-            saveBundleToFile(state, "tab_state_" + id + ".dat");
-        }
-        int currentTabId = (int) getCurrentWebView().getTag();
-        pref.edit()
-            .putString(KEY_TABS, tabsArray.toString())
-            .putInt(KEY_CURRENT_TAB_ID, currentTabId)
-            .apply();
+        purgeSecretTabPersistence();
     }
     private void loadTabsState() {
     String tabsJsonStr = pref.getString(KEY_TABS, "[]");
@@ -609,6 +603,58 @@ public class SecretActivity extends AppCompatActivity {
             tabCountTextView.setText(String.valueOf(webViews.size()));
         }
     }
+
+    private void purgeSecretTabPersistence() {
+        if (pref != null) {
+            SharedPreferences.Editor editor = pref.edit();
+            editor.remove(KEY_TABS);
+            editor.remove(KEY_CURRENT_TAB_ID);
+            editor.apply();
+        }
+        deleteSecretStateFiles();
+        deleteRecursively(new File(getFilesDir(), "favicons"));
+        File cacheSentinel = new File(getCacheDir(), SENTINEL_FILENAME);
+        if (cacheSentinel.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            cacheSentinel.delete();
+        }
+        File filesSentinel = new File(getFilesDir(), SENTINEL_FILENAME);
+        if (filesSentinel.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            filesSentinel.delete();
+        }
+    }
+
+    private void deleteSecretStateFiles() {
+        File dir = getFilesDir();
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return;
+        }
+        for (File file : files) {
+            if (file != null && file.getName().startsWith("tab_state_")) {
+                //noinspection ResultOfMethodCallIgnored
+                file.delete();
+            }
+        }
+    }
+
+    private void deleteRecursively(File file) {
+        if (file == null || !file.exists()) {
+            return;
+        }
+        if (file.isDirectory()) {
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        //noinspection ResultOfMethodCallIgnored
+        file.delete();
+    }
+
     private void checkSentinelAndClearTabsIfNecessary() {
     File cacheDir = getCacheDir();
     File sentinel = new File(cacheDir, SENTINEL_FILENAME);
@@ -1797,31 +1843,61 @@ private class AndroidBridge {
         }
     }
     private void clearSecretDataAndReturnToMain() {
-    for (WebView webView : webViews) {
-        webView.clearCache(true);
-        webView.clearHistory();
-        webView.clearFormData();
-    }
-    clearPageCache();
-    clearTabs();
-    WebViewDatabase.getInstance(this).clearHttpAuthUsernamePassword();
-    WebViewDatabase.getInstance(this).clearFormData();
+        for (WebView webView : new ArrayList<>(webViews)) {
+            if (webView != null) {
+                try {
+                    webView.stopLoading();
+                    webView.clearHistory();
+                    webView.clearCache(true);
+                    webView.clearFormData();
+                    webView.clearSslPreferences();
+                    webView.clearMatches();
+                    webView.removeAllViews();
+                    webView.destroy();
+                } catch (Exception ignored) {
+                }
+            }
+        }
 
-    CookieManager cookieManager = CookieManager.getInstance();
-    cookieManager.removeAllCookies(null);
-    cookieManager.flush();
+        webViews.clear();
+        currentTabIndex = 0;
+        webViewContainer.removeAllViews();
+        historyItems.clear();
+        bookmarks.clear();
+        if (faviconCache != null) {
+            faviconCache.evictAll();
+        }
 
-    SharedPreferences secretPrefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-    secretPrefs.edit()
-            .remove(KEY_HISTORY)
-            .remove(KEY_TABS)
-            .apply();
+        clearWebStorage();
+        clearPageCache();
+        purgeSecretTabPersistence();
 
-    Intent intent = new Intent(this, MainActivity.class);
-    intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
-    startActivity(intent);
+        WebViewDatabase db = WebViewDatabase.getInstance(this);
+        try {
+            db.clearHttpAuthUsernamePassword();
+        } catch (Exception ignored) {
+        }
+        try {
+            db.clearFormData();
+        } catch (Exception ignored) {
+        }
 
-    finish();
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.removeAllCookies(null);
+        cookieManager.flush();
+
+        SharedPreferences secretPrefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        secretPrefs.edit().clear().apply();
+
+        if (urlEditText != null) {
+            urlEditText.setText("");
+        }
+
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+
+        finish();
     }
     private void applyNegapoji() {
         String js = "javascript:(function() {" +
