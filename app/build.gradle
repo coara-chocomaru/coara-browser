@@ -9,8 +9,8 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 31
-        versionCode = 233
-        versionName = "4.3.1"
+        versionCode = 262
+        versionName = "4.4.0"
         multiDexEnabled = true
         vectorDrawables.useSupportLibrary = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
