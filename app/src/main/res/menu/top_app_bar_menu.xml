@@ -1,37 +1,46 @@
 <?xml version="1.0" encoding="utf-8"?>
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <group>
         <item
             android:id="@+id/action_add_bookmark"
-            android:title="ブックマーク登録" />
+            android:icon="@drawable/ic_bookmark_add"
+            android:title="ブックマーク登録"
+            app:showAsAction="never" />
         <item android:title="ブックマーク管理">
             <menu>
                 <item
                     android:id="@+id/action_bookmark_management"
-                    android:title="ブックマーク" />
+                    android:icon="@drawable/ic_bookmarks"
+                    android:title="ブックマーク"
+                    app:showAsAction="never" />
                 <item
                     android:id="@+id/action_export"
-                    android:title="エクスポート" />
+                    android:icon="@drawable/ic_copy"
+                    android:title="エクスポート"
+                    app:showAsAction="never" />
                 <item
                     android:id="@+id/action_import"
-                    android:title="インポート" />
+                    android:icon="@drawable/ic_file"
+                    android:title="インポート"
+                    app:showAsAction="never" />
             </menu>
         </item>
     </group>
     <item android:title="ツール">
         <menu>
-            <item android:id="@+id/action_basic_auth" android:title="basicモード" android:checkable="true" />
-            <item android:id="@+id/action_Secret" android:title="シークレットモード" />
-            <item android:id="@+id/action_find_in_page" android:title="ページ内検索" />
-            <item android:id="@+id/action_txtphoto" android:title="TXT→画像" />
-            <item android:id="@+id/action_htmlview" android:title="htmlview" />
-            <item android:id="@+id/action_asciiart" android:title="画像→TXT" />
-            <item android:id="@+id/action_pgdl" android:title="ページ保存" />
-            <item android:id="@+id/action_num" android:title="電卓" />
-            <item android:id="@+id/action_exec" android:title="exec" />
-            <item android:id="@+id/action_grep" android:title="grep-i/md5" />
-            <item android:id="@+id/action_qr" android:title="QRコード" />
+            <item android:id="@+id/action_basic_auth" android:icon="@drawable/ic_globe" android:title="basicモード" android:checkable="true" app:showAsAction="never" />
+            <item android:id="@+id/action_Secret" android:icon="@drawable/ic_dark_mode" android:title="シークレットモード" app:showAsAction="never" />
+            <item android:id="@+id/action_find_in_page" android:icon="@drawable/ic_search" android:title="ページ内検索" app:showAsAction="never" />
+            <item android:id="@+id/action_txtphoto" android:icon="@drawable/ic_txtphoto" android:title="TXT→画像" app:showAsAction="never" />
+            <item android:id="@+id/action_htmlview" android:icon="@drawable/ic_globe" android:title="htmlview" app:showAsAction="never" />
+            <item android:id="@+id/action_asciiart" android:icon="@drawable/ic_asciiart" android:title="画像→TXT" app:showAsAction="never" />
+            <item android:id="@+id/action_pgdl" android:icon="@drawable/ic_page_download" android:title="ページ保存" app:showAsAction="never" />
+            <item android:id="@+id/action_num" android:icon="@drawable/ic_num" android:title="電卓" app:showAsAction="never" />
+            <item android:id="@+id/action_exec" android:icon="@drawable/ic_terminal" android:title="exec" app:showAsAction="never" />
+            <item android:id="@+id/action_grep" android:icon="@drawable/ic_copy" android:title="grep-i/md5" app:showAsAction="never" />
+            <item android:id="@+id/action_qr" android:icon="@drawable/ic_qrcode" android:title="QRコード" app:showAsAction="never" />
         </menu>
     </item>
 
