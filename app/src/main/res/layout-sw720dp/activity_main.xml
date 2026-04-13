@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout 
+<androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
-    android:layout_height="match_parent">
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_browser_window">
 
-    <LinearLayout 
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical">
@@ -13,84 +14,117 @@
         <com.google.android.material.appbar.MaterialToolbar
             android:id="@+id/topAppBar"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:background="?attr/colorPrimary"
-            app:contentInsetStart="0dp">
+            android:layout_height="88dp"
+            android:background="@drawable/bg_browser_toolbar"
+            android:elevation="6dp"
+            android:minHeight="88dp"
+            app:contentInsetStart="0dp"
+            app:contentInsetEnd="0dp"
+            app:contentInsetStartWithNavigation="0dp"
+            app:contentInsetEndWithActions="0dp"
+            app:popupTheme="@style/ThemeOverlay.MaterialComponents.Light"
+            app:title=""
+            app:titleCentered="false">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:padding="8dp">
+                android:orientation="horizontal"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="12dp"
+                android:paddingBottom="12dp">
 
-                <LinearLayout
+                <com.google.android.material.card.MaterialCardView
                     android:id="@+id/urlContainer"
                     android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="0.85"
-                    android:orientation="horizontal"
-                    android:background="@drawable/bg_url_edittext"
-                    android:padding="4dp">
+                    android:layout_height="52dp"
+                    android:layout_weight="1"
+                    android:foreground="?attr/selectableItemBackground"
+                    app:cardBackgroundColor="@android:color/transparent"
+                    app:cardCornerRadius="26dp"
+                    app:cardElevation="0dp"
+                    app:strokeColor="#D9E0E7"
+                    app:strokeWidth="1dp">
 
-                    <ImageView
-                        android:id="@+id/favicon"
-                        android:layout_width="24dp"
-                        android:layout_height="24dp"
-                        android:layout_marginTop="4dp"
-                        android:src="@drawable/transparent_vector"
-                        android:contentDescription="Favicon" />
-
-                    <com.google.android.material.textfield.TextInputEditText
-                        android:id="@+id/urlEditText"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:hint="Enter URL"
-                        android:singleLine="true"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="6dp"
-                        android:paddingBottom="6dp"
-                        android:textSize="18sp"
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:background="@drawable/bg_browser_url_container"
                         android:gravity="center_vertical"
-                        android:background="@null"
-                        android:includeFontPadding="true" />
+                        android:orientation="horizontal"
+                        android:paddingStart="15dp"
+                        android:paddingEnd="15dp">
 
-                </LinearLayout>
+                        <ImageView
+                            android:id="@+id/favicon"
+                            android:layout_width="22dp"
+                            android:layout_height="22dp"
+                            android:layout_marginEnd="10dp"
+                            android:contentDescription="Favicon"
+                            android:src="@drawable/transparent_vector" />
+
+                        <com.google.android.material.textfield.TextInputEditText
+                            android:id="@+id/urlEditText"
+                            android:layout_width="0dp"
+                            android:layout_height="match_parent"
+                            android:layout_weight="1"
+                            android:background="@null"
+                            android:gravity="center_vertical"
+                            android:hint="Search or type URL"
+                            android:imeOptions="actionGo"
+                            android:includeFontPadding="false"
+                            android:inputType="textUri"
+                            android:singleLine="true"
+                            android:textColor="@android:color/black"
+                            android:textColorHint="#69707A"
+                            android:textSize="16sp" />
+                    </LinearLayout>
+                </com.google.android.material.card.MaterialCardView>
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnGo"
                     android:layout_width="wrap_content"
-                    android:layout_height="48dp"
+                    android:layout_height="52dp"
+                    android:layout_marginStart="12dp"
+                    android:minWidth="74dp"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
                     android:text="Go"
+                    android:textAllCaps="false"
                     android:textSize="14sp"
-                    android:paddingLeft="12dp"
-                    android:paddingRight="12dp"
-                    android:backgroundTint="@android:color/holo_blue_dark"
+                    app:cornerRadius="26dp"
+                    app:backgroundTint="@color/colorPrimary"
                     android:textColor="@android:color/white" />
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnNewTab"
-                    android:layout_width="45dp"
-                    android:layout_height="55dp"
+                    android:layout_width="52dp"
+                    android:layout_height="52dp"
+                    android:layout_marginStart="10dp"
+                    android:minWidth="52dp"
                     android:text="+"
-                    android:textSize="16sp"
-                    android:paddingLeft="10dp"
-                    android:paddingRight="10dp"
-                    android:backgroundTint="@android:color/white"
-                    android:textColor="@android:color/holo_blue_dark" />
+                    android:textAllCaps="false"
+                    android:textSize="22sp"
+                    android:fontFamily="sans-serif-medium"
+                    app:cornerRadius="26dp"
+                    app:backgroundTint="@android:color/white"
+                    android:textColor="@color/colorPrimary"
+                    app:strokeColor="#D9E0E7"
+                    app:strokeWidth="1dp" />
 
                 <TextView
                     android:id="@+id/tabCountTextView"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:background="@drawable/rounded_outline"
+                    android:layout_width="36dp"
+                    android:layout_height="36dp"
+                    android:layout_marginStart="10dp"
+                    android:background="@drawable/bg_browser_chip"
                     android:gravity="center"
                     android:text="1"
-                    android:textColor="@android:color/holo_blue_dark"
-                    android:textSize="16sp"
-                    android:layout_marginStart="8dp" />
+                    android:textColor="@color/colorPrimary"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
             </LinearLayout>
         </com.google.android.material.appbar.MaterialToolbar>
 
@@ -98,13 +132,13 @@
             android:id="@+id/swipeRefreshLayout"
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1">
+            android:layout_weight="1"
+            android:background="@drawable/bg_browser_window">
 
             <FrameLayout
                 android:id="@+id/webViewContainer"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
-
         </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
     </LinearLayout>
