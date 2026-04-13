@@ -24,7 +24,6 @@ public final class TabStateStore {
                 fos.flush();
             }
             if (target.exists() && !target.delete()) {
-                // best effort
             }
             if (!temp.renameTo(target)) {
                 try (FileOutputStream fos = new FileOutputStream(target)) {
@@ -35,7 +34,6 @@ public final class TabStateStore {
                 temp.delete();
             }
         } catch (Exception ignored) {
-            // ignore state write errors silently to preserve browser stability
         } finally {
             parcel.recycle();
         }
