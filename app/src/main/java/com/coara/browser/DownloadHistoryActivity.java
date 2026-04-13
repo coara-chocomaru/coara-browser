@@ -8,9 +8,11 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.graphics.Paint;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.webkit.MimeTypeMap;
 import android.webkit.URLUtil;
 import android.widget.Toast;
 import android.widget.TextView;
@@ -37,6 +39,7 @@ import org.json.JSONObject;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -48,7 +51,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private DownloadAdapter adapter;
     private List<DownloadItem> downloadItems;
     private SharedPreferences pref;
-    
+
     private DownloadManager downloadManager;
     private Handler updateHandler = new Handler(Looper.getMainLooper());
     private ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -146,15 +149,15 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                         File file = new File(filePath);
                         int status = file.exists() ? DownloadManager.STATUS_SUCCESSFUL : DownloadManager.STATUS_FAILED;
                         String fileName = !storedFileName.isEmpty() ? storedFileName : file.getName();
-                        item = new DownloadItem(downloadId, fileName, "", status, 0, file.exists() ? file.length() : 0,
+                        item = new DownloadItem(downloadId, fileName, "", status, 0,
+                                file.exists() ? file.length() : 0,
                                 "file://" + filePath, "");
                     } else {
                         if (item.title == null || item.title.isEmpty()) {
                             if (!storedFileName.isEmpty()) {
                                 item.title = storedFileName;
                             } else if (!filePath.isEmpty()) {
-                                File file = new File(filePath);
-                                item.title = file.getName();
+                                item.title = new File(filePath).getName();
                             }
                         }
                         item.localUri = "file://" + filePath;
@@ -192,7 +195,8 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                 long downloadedSize = safeGetLong(cursor, DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
                 String localUri = safeGetString(cursor, DownloadManager.COLUMN_LOCAL_URI);
                 String downloadUrl = safeGetString(cursor, DownloadManager.COLUMN_URI);
-                return new DownloadItem(downloadId, title, description, status, downloadedSize, totalSize, localUri, downloadUrl);
+                return new DownloadItem(downloadId, title, description, status, downloadedSize,
+                        totalSize, localUri, downloadUrl);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -253,6 +257,105 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         return 0;
     }
 
+
+    private String getMimeTypeFromPath(String filePath) {
+        if (filePath == null || filePath.isEmpty()) return null;
+        String lower = filePath.toLowerCase(Locale.ROOT);
+
+        int queryPos = lower.indexOf('?');
+        if (queryPos != -1) lower = lower.substring(0, queryPos);
+
+        int dotPos = lower.lastIndexOf('.');
+        if (dotPos < 0 || dotPos == lower.length() - 1) return null;
+
+        String ext = lower.substring(dotPos + 1);
+
+        String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+        if (mime != null && !mime.isEmpty()) return mime;
+
+        switch (ext) {
+            case "apk":   return "application/vnd.android.package-archive";
+            case "pdf":   return "application/pdf";
+            case "zip":   return "application/zip";
+            case "rar":   return "application/x-rar-compressed";
+            case "7z":    return "application/x-7z-compressed";
+            case "tar":   return "application/x-tar";
+            case "gz":    return "application/gzip";
+            case "mp4":
+            case "m4v":   return "video/mp4";
+            case "mkv":   return "video/x-matroska";
+            case "avi":   return "video/x-msvideo";
+            case "mov":   return "video/quicktime";
+            case "webm":  return "video/webm";
+            case "mp3":   return "audio/mpeg";
+            case "aac":   return "audio/aac";
+            case "ogg":   return "audio/ogg";
+            case "flac":  return "audio/flac";
+            case "wav":   return "audio/wav";
+            case "m4a":   return "audio/mp4";
+            case "jpg":
+            case "jpeg":  return "image/jpeg";
+            case "png":   return "image/png";
+            case "gif":   return "image/gif";
+            case "webp":  return "image/webp";
+            case "bmp":   return "image/bmp";
+            case "svg":   return "image/svg+xml";
+            case "ico":   return "image/x-icon";
+            case "txt":   return "text/plain";
+            case "html":
+            case "htm":   return "text/html";
+            case "csv":   return "text/csv";
+            case "json":  return "application/json";
+            case "xml":   return "application/xml";
+            case "doc":   return "application/msword";
+            case "docx":  return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+            case "xls":   return "application/vnd.ms-excel";
+            case "xlsx":  return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+            case "ppt":   return "application/vnd.ms-powerpoint";
+            case "pptx":  return "application/vnd.openxmlformats-officedocument.presentationml.presentation";
+            case "epub":  return "application/epub+zip";
+            default:      return null;
+        }
+    }
+
+
+    private void openFileWithApp(Context ctx, DownloadItem item) {
+        File targetFile = new File(item.filePath);
+        if (!targetFile.exists()) {
+            Toast.makeText(ctx, "ファイルが見つかりません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        String mimeType = getMimeTypeFromPath(item.filePath);
+
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            Uri fileUri;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                fileUri = FileProvider.getUriForFile(
+                        ctx, ctx.getPackageName() + ".fileprovider", targetFile);
+            } else {
+                fileUri = Uri.fromFile(targetFile);
+            }
+
+            if (mimeType != null) {
+                intent.setDataAndType(fileUri, mimeType);
+            } else {
+                intent.setDataAndType(fileUri, "*/*");
+            }
+
+            ctx.startActivity(intent);
+
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(ctx, "開けるアプリがありません", Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(ctx, "ファイルを開けません: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void removeHistoryRecord(long downloadId) {
         try {
             String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
@@ -275,20 +378,17 @@ public class DownloadHistoryActivity extends AppCompatActivity {
             String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
             JSONArray array = new JSONArray(jsonStr);
             JSONArray updated = new JSONArray();
-
             for (int i = 0; i < array.length(); i++) {
                 JSONObject obj = array.getJSONObject(i);
                 if (obj.optLong("id", -1L) != oldId) {
                     updated.put(obj);
                 }
             }
-
             JSONObject newObj = new JSONObject();
             newObj.put("id", newId);
             newObj.put("fileName", title != null ? title : "");
             newObj.put("filePath", path != null ? path : "");
             updated.put(newObj);
-
             pref.edit().putString(BrowserConstants.KEY_DOWNLOAD_HISTORY, updated.toString()).apply();
         } catch (JSONException e) {
             e.printStackTrace();
@@ -297,18 +397,10 @@ public class DownloadHistoryActivity extends AppCompatActivity {
 
     public void clearDownloadHistory() {
         pref.edit().remove(BrowserConstants.KEY_DOWNLOAD_HISTORY).apply();
-        if (downloadItems != null) {
-            downloadItems.clear();
-        }
-        if (adapter != null) {
-            adapter.notifyDataSetChanged();
-        }
-        if (tvEmpty != null) {
-            tvEmpty.setVisibility(View.VISIBLE);
-        }
-        if (recyclerView != null) {
-            recyclerView.setVisibility(View.GONE);
-        }
+        if (downloadItems != null) downloadItems.clear();
+        if (adapter != null) adapter.notifyDataSetChanged();
+        if (tvEmpty != null) tvEmpty.setVisibility(View.VISIBLE);
+        if (recyclerView != null) recyclerView.setVisibility(View.GONE);
         Toast.makeText(this, "ダウンロード履歴を全消去しました", Toast.LENGTH_SHORT).show();
     }
 
@@ -324,7 +416,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         public boolean isPaused;
         public String filePath;
 
-        public DownloadItem(long downloadId, String title, String description, int status, long downloadedSize, long totalSize, String localUri, String downloadUrl) {
+        public DownloadItem(long downloadId, String title, String description,
+                int status, long downloadedSize, long totalSize,
+                String localUri, String downloadUrl) {
             this.downloadId = downloadId;
             this.title = title;
             this.description = description;
@@ -344,8 +438,8 @@ public class DownloadHistoryActivity extends AppCompatActivity {
 
     public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHolder> {
 
-        private List<DownloadItem> items;
-        private Context context;
+        private final List<DownloadItem> items;
+        private final Context context;
 
         public DownloadAdapter(Context context, List<DownloadItem> items) {
             this.context = context;
@@ -365,30 +459,38 @@ public class DownloadHistoryActivity extends AppCompatActivity {
             if (item.title == null || item.title.isEmpty()) {
                 item.title = "ダウンロード " + item.downloadId;
             }
+
             if (!file.exists()) {
                 holder.fileTitle.setText(item.title + " [削除済]");
-                holder.fileTitle.setPaintFlags(holder.fileTitle.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
+                holder.fileTitle.setPaintFlags(
+                        holder.fileTitle.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
             } else {
                 holder.fileTitle.setText(item.title);
-                holder.fileTitle.setPaintFlags(holder.fileTitle.getPaintFlags() & (~Paint.STRIKE_THRU_TEXT_FLAG));
+                holder.fileTitle.setPaintFlags(
+                        holder.fileTitle.getPaintFlags() & (~Paint.STRIKE_THRU_TEXT_FLAG));
             }
+
             String statusText;
             boolean showProgress = false;
             boolean showOpenButton = false;
             switch (item.status) {
                 case DownloadManager.STATUS_SUCCESSFUL:
                     statusText = "完了 (" + formatSize(item.totalSize) + ")";
-                    showOpenButton = true;
+                    showOpenButton = file.exists();
                     break;
                 case DownloadManager.STATUS_FAILED:
                     statusText = "失敗";
                     break;
                 case DownloadManager.STATUS_RUNNING:
-                    statusText = "ダウンロード中 (" + formatSize(item.downloadedSize) + " / " + formatSize(item.totalSize) + ", " + item.getProgress() + "%)";
+                    statusText = "ダウンロード中 (" + formatSize(item.downloadedSize)
+                            + " / " + formatSize(item.totalSize)
+                            + ", " + item.getProgress() + "%)";
                     showProgress = true;
                     break;
                 case DownloadManager.STATUS_PAUSED:
-                    statusText = "一時停止中 (" + formatSize(item.downloadedSize) + " / " + formatSize(item.totalSize) + ", " + item.getProgress() + "%)";
+                    statusText = "一時停止中 (" + formatSize(item.downloadedSize)
+                            + " / " + formatSize(item.totalSize)
+                            + ", " + item.getProgress() + "%)";
                     showProgress = true;
                     break;
                 case DownloadManager.STATUS_PENDING:
@@ -398,49 +500,42 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     statusText = "不明";
             }
             if (item.isPaused) {
-                statusText = "一時停止中 (" + formatSize(item.downloadedSize) + " / " + formatSize(item.totalSize) + ", " + item.getProgress() + "%)";
+                statusText = "一時停止中 (" + formatSize(item.downloadedSize)
+                        + " / " + formatSize(item.totalSize)
+                        + ", " + item.getProgress() + "%)";
                 showProgress = true;
             }
             holder.fileStatus.setText(statusText);
-            if (showProgress) {
-                holder.progressBar.setVisibility(View.VISIBLE);
-                holder.progressBar.setProgress(item.getProgress());
-            } else {
-                holder.progressBar.setVisibility(View.GONE);
-            }
+            holder.progressBar.setVisibility(showProgress ? View.VISIBLE : View.GONE);
+            if (showProgress) holder.progressBar.setProgress(item.getProgress());
+
             if (showOpenButton) {
                 holder.btnOpenFile.setVisibility(View.VISIBLE);
-                holder.btnOpenFile.setOnClickListener(v -> {
-                    try {
-                        Intent intent = new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS);
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        context.startActivity(intent);
-                    } catch (ActivityNotFoundException e) {
-                        Toast.makeText(context, "ダウンロード一覧を開けません", Toast.LENGTH_SHORT).show();
-                    }
-                });
+                holder.btnOpenFile.setOnClickListener(v -> openFileWithApp(context, item));
             } else {
                 holder.btnOpenFile.setVisibility(View.GONE);
             }
 
-
-            if (item.filePath != null && item.filePath.toLowerCase().endsWith(".apk")) {
+            if (item.filePath != null && item.filePath.toLowerCase(Locale.ROOT).endsWith(".apk")) {
                 holder.itemView.setOnClickListener(v -> {
                     File apkFile = new File(item.filePath);
                     if (apkFile.exists()) {
                         try {
                             Intent intent = new Intent(Intent.ACTION_VIEW);
                             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                                 intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                Uri apkUri = FileProvider.getUriForFile(context, context.getPackageName() + ".fileprovider", apkFile);
+                                Uri apkUri = FileProvider.getUriForFile(
+                                        context, context.getPackageName() + ".fileprovider", apkFile);
                                 intent.setDataAndType(apkUri, "application/vnd.android.package-archive");
                             } else {
-                                intent.setDataAndType(Uri.fromFile(apkFile), "application/vnd.android.package-archive");
+                                intent.setDataAndType(Uri.fromFile(apkFile),
+                                        "application/vnd.android.package-archive");
                             }
                             context.startActivity(intent);
                         } catch (Exception e) {
-                            Toast.makeText(context, "インストールできません: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                            Toast.makeText(context, "インストールできません: " + e.getMessage(),
+                                    Toast.LENGTH_SHORT).show();
                         }
                     } else {
                         Toast.makeText(context, "ファイルが存在しません", Toast.LENGTH_SHORT).show();
@@ -459,7 +554,8 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                    items.remove(position);
                                    notifyItemRemoved(position);
                                    removeHistoryRecord(item.downloadId);
-                                   Toast.makeText(context, "履歴から消去しました", Toast.LENGTH_SHORT).show();
+                                   Toast.makeText(context, "履歴から消去しました",
+                                           Toast.LENGTH_SHORT).show();
                                }
                            })
                            .setNegativeButton("閉じる", null)
@@ -471,9 +567,11 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                    if (which == 0) {
                                        File delFile = new File(item.filePath);
                                        if (delFile.exists() && delFile.delete()) {
-                                           Toast.makeText(context, "ファイルを削除しました", Toast.LENGTH_SHORT).show();
+                                           Toast.makeText(context, "ファイルを削除しました",
+                                                   Toast.LENGTH_SHORT).show();
                                        } else {
-                                           Toast.makeText(context, "ファイルの削除に失敗しました", Toast.LENGTH_SHORT).show();
+                                           Toast.makeText(context, "ファイルの削除に失敗しました",
+                                                   Toast.LENGTH_SHORT).show();
                                        }
                                        items.remove(position);
                                        notifyItemRemoved(position);
@@ -488,14 +586,18 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                    .setItems(new String[]{"キャンセル", "停止"}, (dialog, which) -> {
                                        if (which == 0) {
                                            downloadManager.remove(item.downloadId);
-                                           Toast.makeText(context, "ダウンロードをキャンセルしました", Toast.LENGTH_SHORT).show();
+                                           Toast.makeText(context,
+                                                   "ダウンロードをキャンセルしました",
+                                                   Toast.LENGTH_SHORT).show();
                                            items.remove(position);
                                            notifyItemRemoved(position);
                                            removeHistoryRecord(item.downloadId);
                                        } else if (which == 1) {
                                            downloadManager.remove(item.downloadId);
                                            item.isPaused = true;
-                                           Toast.makeText(context, "ダウンロードを一時停止しました", Toast.LENGTH_SHORT).show();
+                                           Toast.makeText(context,
+                                                   "ダウンロードを一時停止しました",
+                                                   Toast.LENGTH_SHORT).show();
                                            notifyItemChanged(position);
                                        }
                                    })
@@ -505,20 +607,29 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                             builder.setTitle("操作を選択")
                                    .setItems(new String[]{"キャンセル", "再開"}, (dialog, which) -> {
                                        if (which == 0) {
-                                           Toast.makeText(context, "ダウンロードをキャンセルしました", Toast.LENGTH_SHORT).show();
+                                           Toast.makeText(context,
+                                                   "ダウンロードをキャンセルしました",
+                                                   Toast.LENGTH_SHORT).show();
                                            items.remove(position);
                                            notifyItemRemoved(position);
                                        } else if (which == 1) {
-                                           DownloadManager.Request request = new DownloadManager.Request(Uri.parse(item.downloadUrl));
+                                           DownloadManager.Request request =
+                                                   new DownloadManager.Request(
+                                                           Uri.parse(item.downloadUrl));
                                            request.setTitle(item.title);
-                                           request.setDescription(item.description != null ? item.description : "Downloading file...");
-                                           request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                                           long oldDownloadId = item.downloadId;
-                                           long newDownloadId = downloadManager.enqueue(request);
-                                           item.downloadId = newDownloadId;
+                                           request.setDescription(item.description != null
+                                                   ? item.description : "Downloading file...");
+                                           request.setNotificationVisibility(
+                                                   DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                                           long oldId = item.downloadId;
+                                           long newId = downloadManager.enqueue(request);
+                                           item.downloadId = newId;
                                            item.isPaused = false;
-                                           replaceHistoryRecord(oldDownloadId, newDownloadId, item.title, item.filePath);
-                                           Toast.makeText(context, "ダウンロードを再開しました", Toast.LENGTH_SHORT).show();
+                                           replaceHistoryRecord(oldId, newId,
+                                                   item.title, item.filePath);
+                                           Toast.makeText(context,
+                                                   "ダウンロードを再開しました",
+                                                   Toast.LENGTH_SHORT).show();
                                            notifyItemChanged(position);
                                        }
                                    })
@@ -532,9 +643,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         }
 
         @Override
-        public int getItemCount() {
-            return items.size();
-        }
+        public int getItemCount() { return items.size(); }
 
         public class ViewHolder extends RecyclerView.ViewHolder {
             ImageView fileIcon;
@@ -555,9 +664,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
 
         private String formatSize(long size) {
             if (size <= 0) return "0 B";
-            final String[] units = new String[]{"B", "KB", "MB", "GB", "TB"};
-            int digitGroups = (int) (Math.log10(size) / Math.log10(1024));
-            return String.format("%.1f %s", size / Math.pow(1024, digitGroups), units[digitGroups]);
+            final String[] units = {"B", "KB", "MB", "GB", "TB"};
+            int dg = (int) (Math.log10(size) / Math.log10(1024));
+            return String.format(Locale.ROOT, "%.1f %s", size / Math.pow(1024, dg), units[dg]);
         }
     }
 }

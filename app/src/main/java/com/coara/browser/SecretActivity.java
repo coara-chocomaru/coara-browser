@@ -79,6 +79,7 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
+import com.coara.browser.util.BrowserUrlRouter;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -218,12 +219,21 @@ public class SecretActivity extends AppCompatActivity {
     public static class HistoryItem {
         private final String title;
         private final String url;
+        private final long timestamp;
+
         public HistoryItem(String title, String url) {
+            this(title, url, System.currentTimeMillis());
+        }
+
+        public HistoryItem(String title, String url, long timestamp) {
             this.title = title;
             this.url = url;
+            this.timestamp = timestamp;
         }
+
         public String getTitle() { return title; }
         public String getUrl() { return url; }
+        public long getTimestamp() { return timestamp; }
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -493,17 +503,21 @@ public class SecretActivity extends AppCompatActivity {
     private void handleIntent(Intent intent) {
         if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
             Uri data = intent.getData();
-            clearTabs();
-            historyItems.clear();
-            WebStorage.getInstance().deleteAllData();
-            CookieManager cookieManager = CookieManager.getInstance();
-            cookieManager.removeAllCookies(null);
-            cookieManager.flush();
             if (data != null) {
                 String url = data.toString();
-                createNewTab(url);
-                if (!webViews.isEmpty()) {
-                    getCurrentWebView().setTag("external");
+                if (BrowserUrlRouter.isWebUrl(url)) {
+                    clearTabs();
+                    historyItems.clear();
+                    WebStorage.getInstance().deleteAllData();
+                    CookieManager cookieManager = CookieManager.getInstance();
+                    cookieManager.removeAllCookies(null);
+                    cookieManager.flush();
+                    createNewTab(url);
+                    if (!webViews.isEmpty()) {
+                        getCurrentWebView().setTag("external");
+                    }
+                } else {
+                    BrowserUrlRouter.handleUrlLoading(this, getCurrentWebView(), url);
                 }
             }
             setIntent(new Intent());
@@ -1038,60 +1052,11 @@ public class SecretActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                String url = request.getUrl().toString();
-                if (url.startsWith("tel:")) {
-                    startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("mailto:")) {
-                    startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("intent:")) {
-                    try {
-                        Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                        if (intent != null) {
-                            if (intent.resolveActivity(getPackageManager()) != null) {
-                                startActivity(intent);
-                            } else {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    view.loadUrl(fallbackUrl);
-                                }
-                            }
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-                return false;
+                return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, request.getUrl().toString());
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (url.startsWith("tel:")) {
-                    startActivity(new Intent(Intent.ACTION_DIAL, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("mailto:")) {
-                    startActivity(new Intent(Intent.ACTION_SENDTO, Uri.parse(url)));
-                    return true;
-                } else if (url.startsWith("intent:")) {
-                    try {
-                        Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                        if (intent != null) {
-                            if (intent.resolveActivity(getPackageManager()) != null) {
-                                startActivity(intent);
-                            } else {
-                                String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                                if (fallbackUrl != null) {
-                                    view.loadUrl(fallbackUrl);
-                                }
-                            }
-                            return true;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-                return false;
+                return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, url);
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
@@ -1556,27 +1521,24 @@ public class SecretActivity extends AppCompatActivity {
         return webViews.get(currentTabIndex);
     }
     private void loadUrl() {
-    String input = urlEditText.getText().toString().trim();
-    if (input.isEmpty()) return;
-    String url;
-    if (input.startsWith("http://") || input.startsWith("https://") || input.startsWith("intent:")) {
-        url = input;
-    } else if (input.contains(" ") || !input.contains(".")) {
-        try {
-            String query = URLEncoder.encode(input, "UTF-8");
-            url = "https://www.google.com/search?q=" + query;
-        } catch (UnsupportedEncodingException e) {
-            Toast.makeText(this, "エンコードエラー", Toast.LENGTH_SHORT).show();
+        String input = urlEditText.getText().toString().trim();
+        if (input.isEmpty()) {
             return;
         }
-    } else {
-        url = "http://" + input;
-    }
+        String url = BrowserUrlRouter.normalizeUserInput(input);
+        if (url.isEmpty()) {
+            return;
+        }
         WebView current = getCurrentWebView();
-    if (current != null) {
+        if (current == null) {
+            return;
+        }
+        if (BrowserUrlRouter.handleUrlLoading(this, current, url)) {
+            return;
+        }
         current.loadUrl(url);
-      }
     }
+
 private class AndroidBridge {
     @JavascriptInterface
     public void onUrlChange(final String url) {
@@ -2418,11 +2380,43 @@ private void showHistoryDialog() {
         }
         pref.edit().putString(KEY_BOOKMARKS, array.toString()).apply();
     }
-    private void loadHistory() {
+private void loadHistory() {
     historyItems.clear();
+    String jsonStr = pref.getString(KEY_HISTORY, "[]");
+    if (jsonStr == null || jsonStr.trim().isEmpty()) {
+        return;
+    }
+    try {
+        JSONArray array = new JSONArray(jsonStr);
+        for (int i = 0; i < array.length(); i++) {
+            JSONObject obj = array.getJSONObject(i);
+            String title = obj.optString("title", "");
+            String url = obj.optString("url", "");
+            if (url.isEmpty()) {
+                continue;
+            }
+            long timestamp = obj.optLong("timestamp", System.currentTimeMillis());
+            historyItems.add(new HistoryItem(title, url, timestamp));
+        }
+    } catch (JSONException e) {
+        e.printStackTrace();
+    }
 }
 
 private void saveHistory() {
+    JSONArray array = new JSONArray();
+    for (HistoryItem item : historyItems) {
+        JSONObject obj = new JSONObject();
+        try {
+            obj.put("title", item.getTitle());
+            obj.put("url", item.getUrl());
+            obj.put("timestamp", item.getTimestamp());
+        } catch (JSONException e) {
+            e.printStackTrace();
+        }
+        array.put(obj);
+    }
+    pref.edit().putString(KEY_HISTORY, array.toString()).apply();
 }
 
 private String normalizeUrl(String url) {  
@@ -2440,10 +2434,11 @@ private void addHistory(String url, String title) {
     String normalizedUrl = normalizeUrl(url);
     if (!historyItems.isEmpty() && normalizeUrl(historyItems.get(historyItems.size() - 1).getUrl()).equals(normalizedUrl))
         return;
-    historyItems.add(new HistoryItem(title, url));
+    historyItems.add(new HistoryItem(title, url, System.currentTimeMillis()));
     if (historyItems.size() > MAX_HISTORY_SIZE) {
         historyItems.remove(0);
     }
+    saveHistory();
 }
     public void exitFullScreen() {
         if (customView != null) {
@@ -2624,68 +2619,143 @@ private void addHistory(String url, String title) {
         }
     }
 
-    private class HistoryAdapter extends RecyclerView.Adapter<HistoryAdapter.HistoryViewHolder> {
-        private final List<HistoryItem> items;
-        private final AlertDialog dialog;
-        public HistoryAdapter(List<HistoryItem> items, AlertDialog dialog) {
-            this.items = items;
-            this.dialog = dialog;
-        }
-        @Override
-        public HistoryViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
-            View view = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_history, parent, false);
-            return new HistoryViewHolder(view);
-        }
-        @Override
-        public void onBindViewHolder(HistoryViewHolder holder, int position) {
-            HistoryItem item = items.get(position);
-            holder.title.setText((item.getTitle() != null && !item.getTitle().isEmpty()) ? item.getTitle() : item.getUrl());
-            holder.url.setText(item.getUrl());
-            Bitmap icon = faviconCache.get(item.getUrl());
-            if (icon != null) {
-                holder.favicon.setImageBitmap(icon);
-            } else {
-                holder.favicon.setImageResource(R.drawable.transparent_vector);
+    private static final class HistoryRow {
+    static final int TYPE_HEADER = 0;
+    static final int TYPE_ITEM = 1;
+
+    final int type;
+    final String header;
+    final HistoryItem item;
+
+    private HistoryRow(int type, String header, HistoryItem item) {
+        this.type = type;
+        this.header = header;
+        this.item = item;
+    }
+
+    static HistoryRow header(String header) {
+        return new HistoryRow(TYPE_HEADER, header, null);
+    }
+
+    static HistoryRow item(HistoryItem item) {
+        return new HistoryRow(TYPE_ITEM, null, item);
+    }
+}
+
+private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+    private final List<HistoryItem> sourceItems;
+    private final List<HistoryRow> rows = new ArrayList<>();
+    private final AlertDialog dialog;
+    private final SimpleDateFormat headerFormat = new SimpleDateFormat("yyyy/MM/dd", Locale.getDefault());
+    private final SimpleDateFormat groupKeyFormat = new SimpleDateFormat("yyyyMMdd", Locale.getDefault());
+
+    HistoryAdapter(List<HistoryItem> items, AlertDialog dialog) {
+        this.sourceItems = items;
+        this.dialog = dialog;
+        rebuildRows();
+    }
+
+    private void rebuildRows() {
+        rows.clear();
+        String lastGroupKey = null;
+        for (HistoryItem item : sourceItems) {
+            String groupKey = groupKeyFormat.format(new Date(item.getTimestamp()));
+            if (!groupKey.equals(lastGroupKey)) {
+                rows.add(HistoryRow.header(headerFormat.format(new Date(item.getTimestamp()))));
+                lastGroupKey = groupKey;
             }
-            holder.itemView.setOnClickListener(v -> {
-                getCurrentWebView().loadUrl(item.getUrl());
-                dialog.dismiss();
-            });
-            holder.itemView.setOnLongClickListener(v -> {
-                int currentPosition = holder.getAdapterPosition();
-                if (currentPosition == RecyclerView.NO_POSITION) return true;
-                HistoryItem currentItem = items.get(currentPosition);
-                String[] options = {"URLコピー", "削除"};
-                new MaterialAlertDialogBuilder(SecretActivity.this)
-                        .setTitle("操作を選択")
-                        .setItems(options, (dialogInterface, which) -> {
-                            if (which == 0) {
-                                copyLink(currentItem.getUrl());
-                            } else if (which == 1) {
-                                items.remove(currentPosition);
-                                notifyItemRemoved(currentPosition);
-                                saveHistory();
-                                Toast.makeText(SecretActivity.this, "削除しました", Toast.LENGTH_SHORT).show();
-                            }
-                        }).show();
-                return true;
-            });
-        }
-        @Override
-        public int getItemCount() { return items.size(); }
-        class HistoryViewHolder extends RecyclerView.ViewHolder {
-            ImageView favicon;
-            TextView title;
-            TextView url;
-            public HistoryViewHolder(View itemView) {
-                super(itemView);
-                favicon = itemView.findViewById(R.id.historyFavicon);
-                title = itemView.findViewById(R.id.historyTitle);
-                url = itemView.findViewById(R.id.historyUrl);
-            }
+            rows.add(HistoryRow.item(item));
         }
     }
 
+    @Override
+    public int getItemViewType(int position) {
+        return rows.get(position).type;
+    }
+
+    @Override
+    public RecyclerView.ViewHolder onCreateViewHolder(ViewGroup parent, int viewType) {
+        LayoutInflater inflater = LayoutInflater.from(parent.getContext());
+        if (viewType == HistoryRow.TYPE_HEADER) {
+            View view = inflater.inflate(R.layout.item_history_header, parent, false);
+            return new HeaderViewHolder(view);
+        }
+        View view = inflater.inflate(R.layout.item_history, parent, false);
+        return new HistoryViewHolder(view);
+    }
+
+    @Override
+    public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
+        HistoryRow row = rows.get(position);
+        if (holder instanceof HeaderViewHolder) {
+            ((HeaderViewHolder) holder).date.setText(row.header);
+            return;
+        }
+        HistoryItem item = row.item;
+        HistoryViewHolder historyHolder = (HistoryViewHolder) holder;
+        historyHolder.title.setText((item.getTitle() != null && !item.getTitle().isEmpty()) ? item.getTitle() : item.getUrl());
+        historyHolder.url.setText(item.getUrl());
+        Bitmap icon = faviconCache.get(item.getUrl());
+        if (icon != null) {
+            historyHolder.favicon.setImageBitmap(icon);
+        } else {
+            historyHolder.favicon.setImageResource(R.drawable.transparent_vector);
+        }
+        historyHolder.itemView.setOnClickListener(v -> {
+            getCurrentWebView().loadUrl(item.getUrl());
+            dialog.dismiss();
+        });
+        historyHolder.itemView.setOnLongClickListener(v -> {
+            int currentPosition = historyHolder.getBindingAdapterPosition();
+            if (currentPosition == RecyclerView.NO_POSITION) return true;
+            HistoryRow currentRow = rows.get(currentPosition);
+            if (currentRow.type != HistoryRow.TYPE_ITEM || currentRow.item == null) return true;
+            HistoryItem currentItem = currentRow.item;
+            String[] options = {"URLコピー", "削除"};
+            new MaterialAlertDialogBuilder(SecretActivity.this)
+                    .setTitle("操作を選択")
+                    .setItems(options, (dialogInterface, which) -> {
+                        if (which == 0) {
+                            copyLink(currentItem.getUrl());
+                        } else if (which == 1) {
+                            sourceItems.remove(currentItem);
+                            rebuildRows();
+                            notifyDataSetChanged();
+                            saveHistory();
+                            Toast.makeText(SecretActivity.this, "削除しました", Toast.LENGTH_SHORT).show();
+                        }
+                    }).show();
+            return true;
+        });
+    }
+
+    @Override
+    public int getItemCount() {
+        return rows.size();
+    }
+
+    class HeaderViewHolder extends RecyclerView.ViewHolder {
+        TextView date;
+
+        HeaderViewHolder(View itemView) {
+            super(itemView);
+            date = itemView.findViewById(R.id.historyDateHeader);
+        }
+    }
+
+    class HistoryViewHolder extends RecyclerView.ViewHolder {
+        ImageView favicon;
+        TextView title;
+        TextView url;
+
+        HistoryViewHolder(View itemView) {
+            super(itemView);
+            favicon = itemView.findViewById(R.id.historyFavicon);
+            title = itemView.findViewById(R.id.historyTitle);
+            url = itemView.findViewById(R.id.historyUrl);
+        }
+    }
+}
     private class BookmarkAdapter extends RecyclerView.Adapter<BookmarkAdapter.BookmarkViewHolder> {
         private final List<Bookmark> items;
         private final boolean managementMode;
