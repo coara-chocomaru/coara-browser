@@ -1,44 +1,63 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout 
+<com.google.android.material.card.MaterialCardView
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:padding="8dp"
-    android:background="?attr/selectableItemBackground"
-    android:gravity="center_vertical">
-
-    <androidx.appcompat.widget.AppCompatImageView
-        android:id="@+id/bookmarkFavicon"
-        android:layout_width="24dp"
-        android:layout_height="24dp"
-        android:src="@drawable/transparent_vector"
-        android:layout_gravity="center_vertical"
-        android:layout_marginEnd="8dp" />
+    android:layout_marginHorizontal="12dp"
+    android:layout_marginVertical="6dp"
+    android:foreground="?attr/selectableItemBackground"
+    app:cardBackgroundColor="@android:color/white"
+    app:cardCornerRadius="24dp"
+    app:cardElevation="1dp"
+    app:strokeColor="#E0E3E7"
+    app:strokeWidth="1dp">
 
     <LinearLayout
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:layout_marginStart="8dp">
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:padding="14dp">
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/bookmarkTitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="タイトル"
-            android:textStyle="bold"
-            android:textAppearance="?attr/textAppearanceBody2" />
+        <ImageView
+            android:id="@+id/bookmarkFavicon"
+            android:layout_width="46dp"
+            android:layout_height="46dp"
+            android:background="@drawable/bg_browser_icon_chip"
+            android:contentDescription="Bookmark favicon"
+            android:padding="11dp"
+            android:src="@drawable/transparent_vector" />
 
-        <androidx.appcompat.widget.AppCompatTextView
-            android:id="@+id/bookmarkUrl"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:text="URL"
-            android:textSize="6sp"
-            android:textAppearance="?attr/textAppearanceCaption" />
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/bookmarkTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="タイトル"
+                android:textColor="#1F1F1F"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <androidx.appcompat.widget.AppCompatTextView
+                android:id="@+id/bookmarkUrl"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="URL"
+                android:textColor="#6E7681"
+                android:textSize="12sp" />
+        </LinearLayout>
     </LinearLayout>
 
-</LinearLayout>
+</com.google.android.material.card.MaterialCardView>

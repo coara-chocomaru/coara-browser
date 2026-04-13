@@ -1,45 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout 
+<LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/findInPageBar"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:background="#CC000000"
-    android:padding="8dp">
+    android:background="@drawable/bg_browser_search_bar"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:elevation="8dp">
 
-    <EditText
-         android:id="@+id/etFindQuery"
-         android:layout_width="0dp"
-         android:layout_weight="1"
-         android:layout_height="wrap_content"
-         android:hint="検索キーワード"
-         android:textColor="#FFFFFF"
-         android:imeOptions="actionSearch" />
+    <com.google.android.material.card.MaterialCardView
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        app:cardBackgroundColor="@android:color/transparent"
+        app:cardCornerRadius="28dp"
+        app:cardElevation="4dp"
+        app:strokeColor="#DADCE0"
+        app:strokeWidth="1dp">
 
-    <TextView
-         android:id="@+id/tvFindCount"
-         android:layout_width="wrap_content"
-         android:layout_height="wrap_content"
-         android:text="0/0"
-         android:textColor="#FFFFFF"
-         android:padding="8dp" />
+        <EditText
+            android:id="@+id/etFindQuery"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="@null"
+            android:hint="検索キーワード"
+            android:imeOptions="actionSearch"
+            android:inputType="text"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:textColor="#1F1F1F"
+            android:textColorHint="#6E7681" />
+    </com.google.android.material.card.MaterialCardView>
 
-    <Button
-         android:id="@+id/btnFindPrev"
-         android:layout_width="wrap_content"
-         android:layout_height="wrap_content"
-         android:text="前へ" />
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="12dp">
 
-    <Button
-         android:id="@+id/btnFindNext"
-         android:layout_width="wrap_content"
-         android:layout_height="wrap_content"
-         android:text="次へ" />
+        <TextView
+            android:id="@+id/tvFindCount"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:background="@drawable/bg_browser_chip"
+            android:gravity="center"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="0/0"
+            android:textColor="@color/colorPrimary"
+            android:textSize="13sp"
+            android:textStyle="bold" />
 
-    <Button
-         android:id="@+id/btnFindClose"
-         android:layout_width="wrap_content"
-         android:layout_height="wrap_content"
-         android:text="閉じる" />
+        <Button
+            android:id="@+id/btnFindPrev"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="12dp"
+            android:text="前"
+            android:textAllCaps="false"
+            android:backgroundTint="#FFFFFF"
+            android:textColor="#1F1F1F"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp" />
+
+        <Button
+            android:id="@+id/btnFindNext"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:text="次"
+            android:textAllCaps="false"
+            android:backgroundTint="@color/colorPrimary"
+            android:textColor="@android:color/white"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp" />
+
+        <Button
+            android:id="@+id/btnFindClose"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginStart="8dp"
+            android:text="X"
+            android:textAllCaps="false"
+            android:backgroundTint="#FFFFFF"
+            android:textColor="#1F1F1F"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp" />
+
+    </LinearLayout>
+
 </LinearLayout>
