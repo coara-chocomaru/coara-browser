@@ -1522,20 +1522,103 @@ public class MainActivity extends AppCompatActivity {
                 inferredMimeType = "image/*";
             }
             DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            String fileName = getAccurateFileName(imageUrl, null, inferredMimeType);
-            Uri uri = Uri.parse(imageUrl);
-            DownloadManager.Request request = new DownloadManager.Request(uri);
-            if (!isBlank(inferredMimeType) && !inferredMimeType.endsWith("/*")) {
+            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(imageUrl));
+            if (!inferredMimeType.endsWith("/*")) {
                 request.setMimeType(inferredMimeType);
             }
+            String fileName = getAccurateFileName(imageUrl, null, inferredMimeType);
             request.setTitle(fileName);
+            request.setDescription("画像を保存中...");
+            request.allowScanningByMediaScanner();
             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, fileName);
             dm.enqueue(request);
-            Toast.makeText(MainActivity.this, "画像をダウンロードキューに追加しました", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this,
+                    "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
-            Toast.makeText(MainActivity.this, "画像保存に失敗しました", Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this,
+                    "画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
+            e.printStackTrace();
         }
+    }
+
+    private void exportBookmarksToFile() {
+        final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
+        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!downloadDir.exists()) {
+            downloadDir.mkdirs();
+        }
+        String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
+        final File file;
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            file = new File(downloadDir, "JSON-bookmark" + timeStamp + ".txt");
+        } else {
+            file = new File(downloadDir, timeStamp + "-bookmark.json");
+        }
+        backgroundExecutor.execute(() -> {
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(bookmarksJson.getBytes("UTF-8"));
+                fos.flush();
+                runOnUiThread(() ->
+                    Toast.makeText(MainActivity.this, "ブックマークをエクスポートしました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show()
+                );
+            } catch (Exception e) {
+                runOnUiThread(() ->
+                    Toast.makeText(MainActivity.this, "ブックマークのエクスポートに失敗しました: " + e.getMessage(), Toast.LENGTH_SHORT).show()
+                );
+                e.printStackTrace();
+            }
+        });
+    }
+
+    private void createNewTab() {
+        if (webViews.size() >= MAX_TABS) {
+            WebView removed = webViews.remove(0);
+            Bitmap removedSnapshot = tabSnapshots.remove(removed);
+            if (removedSnapshot != null && !removedSnapshot.isRecycled()) {
+                try {
+                    removedSnapshot.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+            Object removedTag = removed.getTag();
+            if (removedTag instanceof Integer) {
+                File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedTag + ".png");
+                if (snapFile.exists()) {
+                    snapFile.delete();
+                }
+            }
+            try {
+                removed.stopLoading();
+                removed.destroy();
+            } catch (Exception ignored) {
+            }
+            if (currentTabIndex > 0) {
+                currentTabIndex--;
+            } else {
+                currentTabIndex = 0;
+            }
+        }
+        WebView newWebView = createNewWebView();
+        newWebView.setTag(nextTabId);
+        nextTabId++;
+        webViews.add(newWebView);
+        updateTabCount();
+        switchToTab(webViews.size() - 1);
+        getCurrentWebView().loadUrl(START_PAGE);
+    }
+
+
+    private void createNewTab(String url) {
+        if (webViews.size() >= MAX_TABS) {
+            Toast.makeText(this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        WebView newWebView = createNewWebView();
+        webViews.add(newWebView);
+        updateTabCount();
+        switchToTab(webViews.size() - 1);
+        newWebView.loadUrl(url);
     }
 
 
