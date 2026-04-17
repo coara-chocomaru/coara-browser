@@ -35,10 +35,12 @@
         </menu>
     </item>
 
-    <group>
-        <item android:id="@+id/action_tabs" android:title="タブ一覧" />
-        <item android:id="@+id/action_clear_tabs" android:title="タブをクリア" />
-    </group>
+<group>
+    <item
+        android:id="@+id/action_tabs"
+        android:title="タブ"
+        android:visible="false" />
+</group>
 
     <item android:title="表示設定">
         <menu>
