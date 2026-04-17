@@ -7,6 +7,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentCallbacks2;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -90,6 +91,7 @@ import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.SpaStateManager;
 import com.coara.browser.util.CacheModePolicy;
 import com.coara.browser.util.BrowserConstants;
+import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -199,6 +201,7 @@ public class MainActivity extends AppCompatActivity {
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
+    private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
@@ -488,15 +491,173 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        resumeAllWebViewTimers();
+        resumeCurrentWebView();
+    }
+
+    @Override
     protected void onPause() {
+        pauseCurrentWebView();
+        pauseAllWebViewTimers();
         super.onPause();
         saveTabsState();
     }
 
     @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        trimBrowserMemory(level);
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
+        pendingSpaHistoryTasks.clear();
+        releaseAllWebViews();
         backgroundExecutor.shutdown();
+    }
+
+    private void pauseCurrentWebView() {
+        WebView current = null;
+        try {
+            if (!webViews.isEmpty() && currentTabIndex >= 0 && currentTabIndex < webViews.size()) {
+                current = webViews.get(currentTabIndex);
+            }
+        } catch (Exception ignored) {
+        }
+        if (current != null) {
+            try {
+                current.onPause();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    private void resumeCurrentWebView() {
+        WebView current = null;
+        try {
+            if (!webViews.isEmpty() && currentTabIndex >= 0 && currentTabIndex < webViews.size()) {
+                current = webViews.get(currentTabIndex);
+            }
+        } catch (Exception ignored) {
+        }
+        if (current != null) {
+            try {
+                current.onResume();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+
+    private void pauseAllWebViewTimers() {
+        synchronized (webViews) {
+            for (WebView webView : new ArrayList<>(webViews)) {
+                if (webView == null) continue;
+                try {
+                    webView.pauseTimers();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private void resumeAllWebViewTimers() {
+        synchronized (webViews) {
+            for (WebView webView : new ArrayList<>(webViews)) {
+                if (webView == null) continue;
+                try {
+                    webView.resumeTimers();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private void releaseAllWebViews() {
+        synchronized (webViews) {
+            ArrayList<WebView> tabsToRelease = new ArrayList<>(webViews);
+            webViews.clear();
+            webViewContainer.removeAllViews();
+            for (WebView tab : tabsToRelease) {
+                clearPendingSpaHistory(tab);
+                try {
+                    tab.stopLoading();
+                } catch (Exception ignored) {
+                }
+                try {
+                    tab.onPause();
+                } catch (Exception ignored) {
+                }
+                try {
+                    tab.destroy();
+                } catch (Exception ignored) {
+                }
+            }
+            if (preloadedWebView != null) {
+                try {
+                    preloadedWebView.stopLoading();
+                } catch (Exception ignored) {
+                }
+                try {
+                    preloadedWebView.onPause();
+                } catch (Exception ignored) {
+                }
+                try {
+                    preloadedWebView.destroy();
+                } catch (Exception ignored) {
+                }
+                preloadedWebView = null;
+            }
+            clearTabSnapshots();
+        }
+    }
+
+    private void clearTabSnapshots() {
+        for (Bitmap bitmap : tabSnapshots.values()) {
+            if (bitmap != null && !bitmap.isRecycled()) {
+                try {
+                    bitmap.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        tabSnapshots.clear();
+    }
+
+    private void trimBrowserMemory(int level) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && faviconCache != null) {
+            try {
+                faviconCache.trimToSize(Math.max(1, faviconCache.maxSize() / 2));
+            } catch (Exception ignored) {
+            }
+        }
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
+            clearTabSnapshots();
+        }
+    }
+
+    private void restoreWebViewState(WebView webView, Bundle state, String url) {
+        if (webView == null) {
+            return;
+        }
+        try {
+            if (state != null) {
+                WebBackForwardList restored = webView.restoreState(state);
+                if (restored == null) {
+                    webView.loadUrl(url);
+                }
+            } else {
+                webView.loadUrl(url);
+            }
+        } catch (Exception e) {
+            try {
+                webView.loadUrl(url);
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void saveTabsState() {
@@ -612,25 +773,8 @@ public class MainActivity extends AppCompatActivity {
                     }
                     if (id > maxId) maxId = id;
                     Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                    if (id == currentTabId) {
-                        if (state != null) {
-                            WebBackForwardList restored = webView.restoreState(state);
-                            if (restored == null) {
-                                webView.loadUrl(url);
-                            }
-                        } else {
-                            webView.loadUrl(url);
-                        }
-                    } else {
-                        if (state != null) {
-                            WebBackForwardList restored = webView.restoreState(state);
-                            if (restored == null) {
-                                webView.loadUrl(url);
-                            }
-                        } else {
-                            webView.loadUrl(url);
-                        }
-                    }
+                    restoreWebViewState(webView, state, url);
+                    webView.onPause();
                 }
                 nextTabId = maxId + 1;
                 if (webViews.isEmpty()) {
@@ -656,6 +800,10 @@ public class MainActivity extends AppCompatActivity {
                         currentTabIndex = 0;
                     }
                     webViewContainer.addView(getCurrentWebView());
+                    try {
+                        getCurrentWebView().onResume();
+                    } catch (Exception ignored) {
+                    }
                     updatePullToRefreshState(getCurrentWebView(), getCurrentWebView().getUrl());
                 }
             } catch (JSONException e) {
@@ -735,6 +883,7 @@ public class MainActivity extends AppCompatActivity {
             applyOptimizedSettings(settings);
             String defaultUA = settings.getUserAgentString();
             settings.setUserAgentString(defaultUA + APPEND_STR);
+            webView.onPause();
             preloadedWebView = webView;
         }
         });
@@ -959,6 +1108,7 @@ public class MainActivity extends AppCompatActivity {
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 
                 SpaStateManager.getInstance().clearState(view);
+                clearPendingSpaHistory(view);
                 view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
                 if (view == getCurrentWebView()) {
                     urlEditText.setText(url);
@@ -971,12 +1121,12 @@ public class MainActivity extends AppCompatActivity {
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
-             new Handler(Looper.getMainLooper()).postDelayed(() -> injectLazyLoading(view), 200);
+             UiThread.postDelayed(() -> injectLazyLoading(view), 200);
             }
             view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
             WebViewOptimizationUtils.injectSpaProbe(view);
             final String capturedUrl = url;
-            new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            UiThread.postDelayed(() -> {
                 try {
                     String cur = view.getUrl();
                     if (cur != null && cur.equals(capturedUrl)) {
@@ -994,6 +1144,7 @@ public class MainActivity extends AppCompatActivity {
             updatePullToRefreshState(view, url);
             }
            }
+            clearPendingSpaHistory(view);
             if (!isBackNavigation) {
             addHistory(url, view.getTitle()); 
             currentHistoryIndex = historyItems.size() - 1;
@@ -1004,13 +1155,27 @@ public class MainActivity extends AppCompatActivity {
               swipeRefreshLayout.setRefreshing(false);
             }
           String jsOverrideHistory = "(function(){" +
-          "function notifyUrlChange(){AndroidBridge.onUrlChange(location.href);}" +
+          "try{" +
+          "if(!window.__coaraHistoryHooked){" +
+          "window.__coaraHistoryHooked=true;" +
+          "window.__coaraLastHref=location.href;" +
+          "var notifyUrlChange=function(force){" +
+          "var href=location.href;" +
+          "if(!force&&href===window.__coaraLastHref)return;" +
+          "window.__coaraLastHref=href;" +
+          "try{AndroidBridge.onUrlChange(href);}catch(ex){}" +
+          "};" +
           "var pushState=history.pushState;" +
-          "history.pushState=function(){pushState.apply(history,arguments);notifyUrlChange();};" +
+          "history.pushState=function(){var r=pushState.apply(history,arguments);notifyUrlChange(true);return r;};" +
           "var replaceState=history.replaceState;" +
-          "history.replaceState=function(){replaceState.apply(history,arguments);notifyUrlChange();};" +
-          "window.addEventListener('popstate',function(){notifyUrlChange();});" +
-          "notifyUrlChange();" +
+          "history.replaceState=function(){var r=replaceState.apply(history,arguments);notifyUrlChange(true);return r;};" +
+          "window.addEventListener('popstate',function(){notifyUrlChange(true);});" +
+          "window.addEventListener('hashchange',function(){notifyUrlChange(true);});" +
+          "notifyUrlChange(true);" +
+          "}else{" +
+          "try{AndroidBridge.onUrlChange(location.href);}catch(ex2){}" +
+          "}" +
+          "}catch(e){}" +
           "})();"; 
             view.evaluateJavascript(jsOverrideHistory, null); 
             if (view == getCurrentWebView()) {
@@ -1457,15 +1622,23 @@ public class MainActivity extends AppCompatActivity {
 
 
     private void switchToTab(int index) {
-        if (index < 0 || index >= webViews.size()) return;
+        if (index < 0 || index >= webViews.size() || index == currentTabIndex) return;
         WebView current = getCurrentWebView();
         if (current != null) {
             captureTabSnapshot(current);
+            try {
+                current.onPause();
+            } catch (Exception ignored) {
+            }
         }
         webViewContainer.removeAllViews();
         currentTabIndex = index;
         WebView next = getCurrentWebView();
         webViewContainer.addView(next);
+        try {
+            next.onResume();
+        } catch (Exception ignored) {
+        }
         urlEditText.setText(next.getUrl());
         updatePullToRefreshState(next, next.getUrl());
     }
@@ -1478,6 +1651,36 @@ public class MainActivity extends AppCompatActivity {
         if (swipeRefreshLayout == null) return;
         boolean enabled = SwipeRefreshPolicy.shouldEnablePullToRefresh(webView, url);
         swipeRefreshLayout.setEnabled(enabled);
+    }
+
+    private void clearPendingSpaHistory(WebView webView) {
+        if (webView == null) return;
+        Runnable pending = pendingSpaHistoryTasks.remove(webView);
+        if (pending != null) {
+            UiThread.mainHandler().removeCallbacks(pending);
+        }
+    }
+
+    private void scheduleSpaHistoryUpdate(final WebView owner, final String url) {
+        if (owner == null || url == null || url.isEmpty()) return;
+        clearPendingSpaHistory(owner);
+        Runnable task = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (owner != getCurrentWebView()) return;
+                    String current = owner.getUrl();
+                    if (current == null || !current.equals(url)) return;
+                    updatePullToRefreshState(owner, url);
+                    urlEditText.setText(url);
+                    addHistory(url, owner.getTitle());
+                } finally {
+                    pendingSpaHistoryTasks.remove(owner);
+                }
+            }
+        };
+        pendingSpaHistoryTasks.put(owner, task);
+        UiThread.mainHandler().postDelayed(task, 180L);
     }
 
     private void loadUrl() {
@@ -1506,15 +1709,14 @@ public class MainActivity extends AppCompatActivity {
         }
         @JavascriptInterface
         public void onUrlChange(final String url) {
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
+            UiThread.post(new Runnable() {
                 @Override
                 public void run() {
                     try {
-                        if (owner == getCurrentWebView()) {
-                            updatePullToRefreshState(owner, url);
-                            urlEditText.setText(url);
-                            addHistory(url, owner.getTitle());
+                        if (owner != getCurrentWebView()) {
+                            return;
                         }
+                        scheduleSpaHistoryUpdate(owner, url);
                     } catch (Exception ignored) {}
                 }
             });
@@ -1522,7 +1724,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void onSpaDetected(final boolean isSpa) {
-            new Handler(Looper.getMainLooper()).post(new Runnable() {
+            UiThread.post(new Runnable() {
                 @Override
                 public void run() {
                     try {
@@ -1891,7 +2093,7 @@ public class MainActivity extends AppCompatActivity {
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Handler handler = new Handler(Looper.getMainLooper());
+        Handler handler = UiThread.mainHandler();
         PixelCopy.request(getWindow(), bitmap, copyResult -> {
             if (copyResult == PixelCopy.SUCCESS) {
                 saveScreenshot(bitmap);

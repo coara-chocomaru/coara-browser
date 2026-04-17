@@ -31,6 +31,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.core.content.FileProvider;
 
 import com.coara.browser.util.BrowserConstants;
+import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -53,7 +54,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private SharedPreferences pref;
 
     private DownloadManager downloadManager;
-    private Handler updateHandler = new Handler(Looper.getMainLooper());
+    private final Handler updateHandler = UiThread.mainHandler();
     private ExecutorService executor = Executors.newSingleThreadExecutor();
 
     private Runnable updateRunnable = new Runnable() {
