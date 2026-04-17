@@ -30,6 +30,7 @@
     </group>
     <item android:title="ツール">
         <menu>
+            <item android:id="@+id/action_export_all_cookies_zip" android:icon="@drawable/ic_globe" android:title="cookie保存" android:checkable="true" app:showAsAction="never" />
             <item android:id="@+id/action_basic_auth" android:icon="@drawable/ic_globe" android:title="basicモード" android:checkable="true" app:showAsAction="never" />
             <item android:id="@+id/action_Secret" android:icon="@drawable/ic_dark_mode" android:title="シークレットモード" app:showAsAction="never" />
             <item android:id="@+id/action_find_in_page" android:icon="@drawable/ic_search" android:title="ページ内検索" app:showAsAction="never" />
