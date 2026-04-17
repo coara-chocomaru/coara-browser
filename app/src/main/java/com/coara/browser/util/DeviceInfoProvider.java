@@ -35,28 +35,27 @@ public final class DeviceInfoProvider {
 
     public static CharSequence collectDeviceInfo() {
         SpannableStringBuilder result = new SpannableStringBuilder();
+        final String[][] props = {
+                {"ro.product.model", "model"},
+                {"ro.product.manufacturer", "manufacturer"},
+                {"ro.product.brand", "carrier"},
+                {"ro.system.build.id", "Build id"},
+                {"ro.system.build.version.release", "OS version"},
+                {"ro.vndk.version", "VNDK"},
+                {"ro.system.build.version.sdk", "SDK"},
+                {"ro.hardware", "soc"},
+                {"ro.build.type", "Build Type"},
+                {"ro.product.locale", "Language"},
+                {"ro.sf.lcd_density", "Density"},
+                {"ro.boot.baseband", "baseband"},
+                {"ro.boot.slot_suffix", "slot"}
+        };
+
         try {
             Process process = Runtime.getRuntime().exec("getprop");
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
                 String line;
-            String[][] props = {
-                    {"ro.product.model", "model"},
-                    {"ro.product.manufacturer", "manufacturer"},
-                    {"ro.product.brand", "carrier"},
-                    {"ro.system.build.id", "Build id"},
-                    {"ro.system.build.version.release", "OS version"},
-                    {"ro.vndk.version", "VNDK"},
-                    {"ro.system.build.version.sdk", "SDK"},
-                    {"ro.hardware", "soc"},
-                    {"ro.build.type", "Build Type"},
-                    {"ro.product.locale", "Language"},
-                    {"ro.sf.lcd_density", "Density"},
-                    {"ro.boot.baseband", "baseband"},
-                    {"ro.boot.slot_suffix", "slot"}
-            };
-
-            Map<String, String> propValues = new HashMap<>();
-
+                Map<String, String> propValues = new HashMap<>(props.length * 2);
                 while ((line = reader.readLine()) != null) {
                     if (!line.startsWith("[")) continue;
                     int keyStart = line.indexOf('[') + 1;
@@ -68,21 +67,20 @@ public final class DeviceInfoProvider {
 
                     String key = line.substring(keyStart, keyEnd).trim();
                     String value = line.substring(valueStart, valueEnd).trim();
-
                     if (key.startsWith("ro.")) {
                         propValues.put(key, value);
                     }
                 }
 
-            for (String[] prop : props) {
-                String label = prop[1] + "  ";
-                String val = propValues.getOrDefault(prop[0], "不明");
-                result.append(label);
-                int start = result.length();
-                result.append(val).append("\n");
-                int end = result.length();
-                result.setSpan(new ForegroundColorSpan(0xFF448AFF), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            }
+                for (String[] prop : props) {
+                    String label = prop[1] + "  ";
+                    String val = propValues.getOrDefault(prop[0], "不明");
+                    result.append(label);
+                    int start = result.length();
+                    result.append(val).append("\n");
+                    int end = result.length();
+                    result.setSpan(new ForegroundColorSpan(0xFF448AFF), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                }
             }
         } catch (Exception e) {
             result.append("取得失敗");
@@ -92,14 +90,12 @@ public final class DeviceInfoProvider {
 
     public static String readAssetText(Context context, String assetName) {
         StringBuilder sb = new StringBuilder();
-        try {
-            InputStream inputStream = context.getAssets().open(assetName);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream));
+        try (InputStream inputStream = context.getAssets().open(assetName);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 sb.append(line).append("\n");
             }
-            reader.close();
         } catch (Exception e) {
             sb.append("ライセンス情報を取得できません");
         }

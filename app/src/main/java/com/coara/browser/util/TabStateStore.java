@@ -3,6 +3,8 @@ package com.coara.browser.util;
 import android.os.Bundle;
 import android.os.Parcel;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -19,16 +21,17 @@ public final class TabStateStore {
         try {
             bundle.writeToParcel(parcel, 0);
             byte[] bytes = parcel.marshall();
-            try (FileOutputStream fos = new FileOutputStream(temp)) {
-                fos.write(bytes);
-                fos.flush();
+            try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(temp))) {
+                bos.write(bytes);
+                bos.flush();
             }
             if (target.exists() && !target.delete()) {
+                // fall through and try overwrite below
             }
             if (!temp.renameTo(target)) {
-                try (FileOutputStream fos = new FileOutputStream(target)) {
-                    fos.write(bytes);
-                    fos.flush();
+                try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(target))) {
+                    bos.write(bytes);
+                    bos.flush();
                 }
                 //noinspection ResultOfMethodCallIgnored
                 temp.delete();
@@ -43,11 +46,11 @@ public final class TabStateStore {
         if (dir == null || fileName == null) return null;
         File file = new File(dir, fileName);
         if (!file.exists()) return null;
-        try (FileInputStream fis = new FileInputStream(file)) {
+        try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(file))) {
             byte[] bytes = new byte[(int) file.length()];
             int offset = 0;
             while (offset < bytes.length) {
-                int read = fis.read(bytes, offset, bytes.length - offset);
+                int read = bis.read(bytes, offset, bytes.length - offset);
                 if (read < 0) break;
                 offset += read;
             }

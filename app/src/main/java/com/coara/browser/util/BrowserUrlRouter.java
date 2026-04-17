@@ -25,8 +25,29 @@ public final class BrowserUrlRouter {
         if (looksLikeUrlWithScheme(trimmed)) {
             return trimmed;
         }
-        if (trimmed.matches("^[\\w.-]+:\\d+(?:/.*)?$")) {
-            return "http://" + trimmed;
+        int colon = trimmed.indexOf(':');
+        if (colon > 0 && colon < trimmed.length() - 1) {
+            boolean hostLike = true;
+            for (int i = 0; i < colon; i++) {
+                char c = trimmed.charAt(i);
+                if (!(Character.isLetterOrDigit(c) || c == '.' || c == '-' || c == '_')) {
+                    hostLike = false;
+                    break;
+                }
+            }
+            if (hostLike) {
+                int i = colon + 1;
+                boolean hasDigit = false;
+                while (i < trimmed.length()) {
+                    char c = trimmed.charAt(i);
+                    if (!Character.isDigit(c)) break;
+                    hasDigit = true;
+                    i++;
+                }
+                if (hasDigit && (i == trimmed.length() || trimmed.charAt(i) == '/')) {
+                    return "http://" + trimmed;
+                }
+            }
         }
         if (URLUtil.isValidUrl(trimmed)) {
             return trimmed;
