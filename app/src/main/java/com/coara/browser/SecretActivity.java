@@ -80,7 +80,6 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.coara.browser.util.BrowserUrlRouter;
-import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -284,9 +283,10 @@ public class SecretActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         loadBookmarks();
-        loadHistory();
-        if (!historyItems.isEmpty()) {
-            currentHistoryIndex = historyItems.size() - 1;
+        historyItems.clear();
+        currentHistoryIndex = -1;
+        if (pref != null) {
+            pref.edit().remove(KEY_HISTORY).apply();
         }
         initializePersistentFavicons();
 
@@ -353,14 +353,11 @@ public class SecretActivity extends AppCompatActivity {
             copyButton.setVisibility(hasFocus ? View.VISIBLE : View.GONE);
         });
 
-        swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> {
-            WebView current = getCurrentWebView();
-            return (current != null && current.getScrollY() > 0);
-        });
-        swipeRefreshLayout.setOnRefreshListener(() -> {
-            WebView current = getCurrentWebView();
-            if (current != null) current.reload();
-        });
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setEnabled(false);
+            swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> true);
+            swipeRefreshLayout.setOnRefreshListener(() -> { });
+        }
             
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             permissionLauncher = registerForActivityResult(
@@ -462,6 +459,11 @@ public class SecretActivity extends AppCompatActivity {
             webView.clearMatches();
             clearTabs();
         }
+        historyItems.clear();
+        currentHistoryIndex = -1;
+        if (pref != null) {
+            pref.edit().remove(KEY_HISTORY).apply();
+        }
         WebStorage.getInstance().deleteAllData();
         WebViewDatabase.getInstance(this).clearFormData();
         purgeSecretTabPersistence();
@@ -511,6 +513,10 @@ public class SecretActivity extends AppCompatActivity {
                 if (BrowserUrlRouter.isWebUrl(url)) {
                     clearTabs();
                     historyItems.clear();
+                    currentHistoryIndex = -1;
+                    if (pref != null) {
+                        pref.edit().remove(KEY_HISTORY).apply();
+                    }
                     WebStorage.getInstance().deleteAllData();
                     CookieManager cookieManager = CookieManager.getInstance();
                     cookieManager.removeAllCookies(null);
@@ -679,7 +685,7 @@ public class SecretActivity extends AppCompatActivity {
     if (!sentinel.exists()) {
         SharedPreferences.Editor editor = pref.edit();
         editor.remove(KEY_TABS);
-        editor.remove(KEY_CURRENT_TAB);
+        editor.remove(KEY_CURRENT_TAB_ID);
         editor.apply();
         webViews.clear();
        }
@@ -855,6 +861,9 @@ public class SecretActivity extends AppCompatActivity {
         String defaultUA = settings.getUserAgentString();
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
+        }
         
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
         if (sSetSaveFormDataMethod != null) {
@@ -1099,9 +1108,9 @@ public class SecretActivity extends AppCompatActivity {
          } else {
             isBackNavigation = false;
           }
-        if (swipeRefreshLayout.isRefreshing()) {
-            swipeRefreshLayout.setRefreshing(false);
-           }
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setEnabled(false);
+        }
           String jsOverrideHistory = "(function(){" +
           "try{" +
           "if(!window.__coaraHistoryHooked){" +
@@ -1542,9 +1551,9 @@ public class SecretActivity extends AppCompatActivity {
     }
 
     private void updatePullToRefreshState(WebView webView, String url) {
-        if (swipeRefreshLayout == null) return;
-        boolean enabled = SwipeRefreshPolicy.shouldEnablePullToRefresh(webView, url);
-        swipeRefreshLayout.setEnabled(enabled);
+        if (swipeRefreshLayout != null) {
+            swipeRefreshLayout.setEnabled(false);
+        }
     }
 
     private void clearPendingSpaHistory(WebView webView) {
@@ -1568,13 +1577,8 @@ public class SecretActivity extends AppCompatActivity {
                     updatePullToRefreshState(owner, url);
                     urlEditText.setText(url);
                     addHistory(url, owner.getTitle());
-                    if (url.startsWith("https://m.youtube.com/watch") ||
-                        url.startsWith("https://chatgpt.com/") ||
-                        url.startsWith("https://365sns.f5.si/") ||
-                        url.startsWith("https://m.youtube.com/shorts/")) {
+                    if (swipeRefreshLayout != null) {
                         swipeRefreshLayout.setEnabled(false);
-                    } else {
-                        swipeRefreshLayout.setEnabled(true);
                     }
                 } finally {
                     pendingSpaHistoryTasks.remove(owner);
@@ -1810,7 +1814,10 @@ private class AndroidBridge {
                 current.clearHistory();
             }
             historyItems.clear();
-            saveHistory();
+            currentHistoryIndex = -1;
+            if (pref != null) {
+                pref.edit().remove(KEY_HISTORY).apply();
+            }
             clearWebStorage();
             clearPageCache();
             clearTabs();
@@ -1883,9 +1890,9 @@ private class AndroidBridge {
 
         webViews.clear();
         currentTabIndex = 0;
+        currentHistoryIndex = -1;
         webViewContainer.removeAllViews();
         historyItems.clear();
-        bookmarks.clear();
         if (faviconCache != null) {
             faviconCache.evictAll();
         }
@@ -1908,8 +1915,9 @@ private class AndroidBridge {
         cookieManager.removeAllCookies(null);
         cookieManager.flush();
 
-        SharedPreferences secretPrefs = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
-        secretPrefs.edit().clear().apply();
+        if (pref != null) {
+            pref.edit().remove(KEY_HISTORY).remove(KEY_TABS).remove(KEY_CURRENT_TAB_ID).apply();
+        }
 
         if (urlEditText != null) {
             urlEditText.setText("");
@@ -2442,41 +2450,12 @@ private void showHistoryDialog() {
     }
 private void loadHistory() {
     historyItems.clear();
-    String jsonStr = pref.getString(KEY_HISTORY, "[]");
-    if (jsonStr == null || jsonStr.trim().isEmpty()) {
-        return;
-    }
-    try {
-        JSONArray array = new JSONArray(jsonStr);
-        for (int i = 0; i < array.length(); i++) {
-            JSONObject obj = array.getJSONObject(i);
-            String title = obj.optString("title", "");
-            String url = obj.optString("url", "");
-            if (url.isEmpty()) {
-                continue;
-            }
-            long timestamp = obj.optLong("timestamp", System.currentTimeMillis());
-            historyItems.add(new HistoryItem(title, url, timestamp));
-        }
-    } catch (JSONException e) {
-        e.printStackTrace();
-    }
 }
 
 private void saveHistory() {
-    JSONArray array = new JSONArray();
-    for (HistoryItem item : historyItems) {
-        JSONObject obj = new JSONObject();
-        try {
-            obj.put("title", item.getTitle());
-            obj.put("url", item.getUrl());
-            obj.put("timestamp", item.getTimestamp());
-        } catch (JSONException e) {
-            e.printStackTrace();
-        }
-        array.put(obj);
+    if (pref != null) {
+        pref.edit().remove(KEY_HISTORY).apply();
     }
-    pref.edit().putString(KEY_HISTORY, array.toString()).apply();
 }
 
 private String normalizeUrl(String url) {  
@@ -2498,7 +2477,6 @@ private void addHistory(String url, String title) {
     if (historyItems.size() > MAX_HISTORY_SIZE) {
         historyItems.remove(0);
     }
-    saveHistory();
 }
     public void exitFullScreen() {
         if (customView != null) {
