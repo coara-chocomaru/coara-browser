@@ -7,10 +7,8 @@ import android.webkit.WebView;
 import androidx.webkit.WebSettingsCompat;
 import androidx.webkit.WebViewFeature;
 
-
 public final class WebViewOptimizationUtils {
     private WebViewOptimizationUtils() {}
-
 
     public static void applyOptimizedSettings(WebSettings settings, boolean darkModeEnabled) {
         settings.setJavaScriptEnabled(true);
@@ -56,10 +54,11 @@ public final class WebViewOptimizationUtils {
         }
     }
 
-
     public static void applyCombinedOptimizations(WebView webView) {
         String js = "javascript:(function(){"
-                + "requestAnimationFrame(function(){"
+                + "try{if(window.__coaraCombinedOptimized)return;window.__coaraCombinedOptimized=true;}catch(e){}"
+                + "var run=function(){"
+                + "try{"
                 + "var anim=document.querySelectorAll('.animated,.transition,[class*=\"animate\"],[class*=\"transition\"]');"
                 + "for(var i=0;i<anim.length;i++){"
                 + "var s=anim[i].style;"
@@ -89,11 +88,12 @@ public final class WebViewOptimizationUtils {
                 + "for(var m=0;m<scs.length;m++){"
                 + "if(!scs[m].style.willChange)scs[m].style.willChange='scroll-position';"
                 + "}"
-                + "});"
+                + "}catch(err){}"
+                + "};"
+                + "if(window.requestIdleCallback){requestIdleCallback(run,{timeout:250});}else{requestAnimationFrame(run);}"
                 + "})();";
         webView.evaluateJavascript(js, null);
     }
-
 
     public static void injectSpaProbe(WebView webView) {
         String js = "javascript:(function(){"
@@ -135,6 +135,27 @@ public final class WebViewOptimizationUtils {
                 + "}catch(pe){}"
                 + "}"
                 + "}catch(e){}"
+                + "try{"
+                + "if(!window.__coaraHistoryHooked){"
+                + "window.__coaraHistoryHooked=true;"
+                + "window.__coaraLastHref=location.href;"
+                + "var notifyUrlChange=function(force){"
+                + "var href=location.href;"
+                + "if(!force&&href===window.__coaraLastHref)return;"
+                + "window.__coaraLastHref=href;"
+                + "try{AndroidBridge.onUrlChange(href);}catch(ex){}"
+                + "};"
+                + "var pushState=history.pushState;"
+                + "history.pushState=function(){var r=pushState.apply(history,arguments);notifyUrlChange(true);return r;};"
+                + "var replaceState=history.replaceState;"
+                + "history.replaceState=function(){var r=replaceState.apply(history,arguments);notifyUrlChange(true);return r;};"
+                + "window.addEventListener('popstate',function(){notifyUrlChange(true);});"
+                + "window.addEventListener('hashchange',function(){notifyUrlChange(true);});"
+                + "notifyUrlChange(true);"
+                + "}else{"
+                + "try{AndroidBridge.onUrlChange(location.href);}catch(ex2){}"
+                + "}"
+                + "}catch(hookErr){}"
                 + "if('serviceWorker' in navigator){"
                 + "try{"
                 + "navigator.serviceWorker.getRegistrations().then(function(r){"
@@ -149,6 +170,7 @@ public final class WebViewOptimizationUtils {
 
     public static void injectLazyLoading(WebView webView) {
         String js = "javascript:(function(){"
+                + "try{if(window.__coaraLazyLoadingApplied)return;window.__coaraLazyLoadingApplied=true;}catch(e){}"
                 + "var PH='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';"
                 + "var imgs=document.querySelectorAll('img[src^=\"https://i.ytimg.com/\"]:not([data-lazy-loaded])');"
                 + "if(imgs.length===0)return;"
