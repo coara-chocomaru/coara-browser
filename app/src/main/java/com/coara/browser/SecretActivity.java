@@ -1839,8 +1839,6 @@ private class AndroidBridge {
         } else if (id == R.id.action_translate) {
             translatePageToJapanese();
             return true;
-        } else if (id == R.id.action_clear_tabs) {
-            clearTabs();
         } else if (id == R.id.action_screenshot) {
             takeScreenshot();
         }
