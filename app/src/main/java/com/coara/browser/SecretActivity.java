@@ -8,7 +8,6 @@ import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
-import android.content.ComponentCallbacks2;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -83,9 +82,6 @@ import com.google.android.material.textfield.TextInputEditText;
 import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.UiThread;
-import com.coara.browser.util.CacheModePolicy;
-import com.coara.browser.util.SpaStateManager;
-import com.coara.browser.webview.WebViewOptimizationUtils;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -192,6 +188,7 @@ public class SecretActivity extends AppCompatActivity {
     private WebView preloadedWebView = null;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
+    private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     static {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
         try {
@@ -259,7 +256,7 @@ public class SecretActivity extends AppCompatActivity {
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
         basicAuthEnabled = pref.getBoolean(KEY_BASIC_AUTH, false);
         zoomEnabled = pref.getBoolean(KEY_ZOOM_ENABLED, false);
-        jsEnabled = pref.getBoolean(KEY_JS_ENABLED, true);
+        jsEnabled = pref.getBoolean(KEY_JS_ENABLED, false);
         imgBlockEnabled = pref.getBoolean(KEY_IMG_BLOCK_ENABLED, false);
         uaEnabled = pref.getBoolean(KEY_UA_ENABLED, false);
         deskuaEnabled = pref.getBoolean(KEY_DESKUA_ENABLED, false);
@@ -540,149 +537,14 @@ public class SecretActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
-        pauseCurrentWebView();
-        pauseAllWebViewTimers();
         super.onPause();
         saveTabsState();
-    }
-    @Override
-    protected void onResume() {
-        super.onResume();
-        resumeAllWebViewTimers();
-        resumeCurrentWebView();
-    }
-
-    @Override
-    public void onTrimMemory(int level) {
-        super.onTrimMemory(level);
-        trimBrowserMemory(level);
-    }
-
-
-    private void pauseCurrentWebView() {
-        WebView current = null;
-        try {
-            if (!webViews.isEmpty() && currentTabIndex >= 0 && currentTabIndex < webViews.size()) {
-                current = webViews.get(currentTabIndex);
-            }
-        } catch (Exception ignored) {
-        }
-        if (current != null) {
-            try {
-                current.onPause();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private void resumeCurrentWebView() {
-        WebView current = null;
-        try {
-            if (!webViews.isEmpty() && currentTabIndex >= 0 && currentTabIndex < webViews.size()) {
-                current = webViews.get(currentTabIndex);
-            }
-        } catch (Exception ignored) {
-        }
-        if (current != null) {
-            try {
-                current.onResume();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
-    private void pauseAllWebViewTimers() {
-        synchronized (webViews) {
-            for (WebView webView : new ArrayList<>(webViews)) {
-                if (webView == null) continue;
-                try {
-                    webView.pauseTimers();
-                } catch (Exception ignored) {
-                }
-            }
-        }
-    }
-
-    private void resumeAllWebViewTimers() {
-        synchronized (webViews) {
-            for (WebView webView : new ArrayList<>(webViews)) {
-                if (webView == null) continue;
-                try {
-                    webView.resumeTimers();
-                } catch (Exception ignored) {
-                }
-            }
-        }
-    }
-
-    private void trimBrowserMemory(int level) {
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && faviconCache != null) {
-            try {
-                faviconCache.trimToSize(Math.max(1, faviconCache.maxSize() / 2));
-            } catch (Exception ignored) {
-            }
-        }
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
-            clearTabSnapshots();
-        }
-    }
-
-    private void clearTabSnapshots() {
-        for (Bitmap bitmap : tabSnapshots.values()) {
-            if (bitmap != null && !bitmap.isRecycled()) {
-                try {
-                    bitmap.recycle();
-                } catch (Exception ignored) {
-                }
-            }
-        }
-        tabSnapshots.clear();
-    }
-
-    private void releaseAllWebViews() {
-        synchronized (webViews) {
-            ArrayList<WebView> tabsToRelease = new ArrayList<>(webViews);
-            webViews.clear();
-            webViewContainer.removeAllViews();
-            for (WebView tab : tabsToRelease) {
-                clearPendingSpaHistory(tab);
-                try {
-                    tab.stopLoading();
-                } catch (Exception ignored) {
-                }
-                try {
-                    tab.onPause();
-                } catch (Exception ignored) {
-                }
-                try {
-                    tab.destroy();
-                } catch (Exception ignored) {
-                }
-            }
-            if (preloadedWebView != null) {
-                try {
-                    preloadedWebView.stopLoading();
-                } catch (Exception ignored) {
-                }
-                try {
-                    preloadedWebView.onPause();
-                } catch (Exception ignored) {
-                }
-                try {
-                    preloadedWebView.destroy();
-                } catch (Exception ignored) {
-                }
-                preloadedWebView = null;
-            }
-            clearTabSnapshots();
-        }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
         pendingSpaHistoryTasks.clear();
-        releaseAllWebViews();
         backgroundExecutor.shutdown();
     }
 
@@ -1027,7 +889,7 @@ public class SecretActivity extends AppCompatActivity {
             settings.setBuiltInZoomControls(false);
             settings.setSupportZoom(false);
         }
-        settings.setJavaScriptEnabled(jsEnabled);
+        settings.setJavaScriptEnabled(!jsEnabled);
         settings.setLoadsImagesAutomatically(!imgBlockEnabled);
 
         if (uaEnabled) {
@@ -1204,32 +1066,24 @@ public class SecretActivity extends AppCompatActivity {
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
-                SpaStateManager.getInstance().clearState(view);
+                String lowerUrl = url.toLowerCase();
                 clearPendingSpaHistory(view);
-                view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
-                if (view == getCurrentWebView()) {
-                    urlEditText.setText(url);
-                    updatePullToRefreshState(view, url);
+                boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
+                if (isMatched) {
+                    view.getSettings().setCacheMode(WebSettings.LOAD_DEFAULT);
+                } else {
+                    view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
                 }
+                urlEditText.setText(url);
                 super.onPageStarted(view, url, favicon);
             }
             @Override
             public void onPageFinished(WebView view, String url) {
                   super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-                  view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
-                  WebViewOptimizationUtils.injectSpaProbe(view);
-                  final String capturedUrl = url;
-                  UiThread.postDelayed(() -> {
-                      try {
-                          String cur = view.getUrl();
-                          if (cur != null && cur.equals(capturedUrl)) {
-                              WebViewOptimizationUtils.injectSpaProbe(view);
-                          }
-                      } catch (Exception ignored) {}
-                  }, 1500);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
-             UiThread.postDelayed(() -> injectLazyLoading(view), 200);
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
+             UiThread.postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
@@ -1238,7 +1092,6 @@ public class SecretActivity extends AppCompatActivity {
             faviconImageView.setVisibility(View.VISIBLE);
             if (view == getCurrentWebView()) {
             urlEditText.setText(url);
-            updatePullToRefreshState(view, url);
             }
            }
          clearPendingSpaHistory(view);
@@ -1276,8 +1129,100 @@ public class SecretActivity extends AppCompatActivity {
           "})();"; 
            view.evaluateJavascript(jsOverrideHistory, null); 
           }
-            @Override@Override
-            public void onShowCustomView(View view, CustomViewCallback callback) {
+            @Override
+            public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
+                if (!basicAuthEnabled) {
+                    super.onReceivedHttpAuthRequest(view, handler, host, realm);
+                    return;
+                }
+                LinearLayout layout = new LinearLayout(SecretActivity.this);
+                layout.setOrientation(LinearLayout.VERTICAL);
+                int padding = (int)(16 * getResources().getDisplayMetrics().density);
+                layout.setPadding(padding, padding, padding, padding);
+                final EditText usernameInput = new EditText(SecretActivity.this);
+                usernameInput.setHint("ユーザー名");
+                usernameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
+                layout.addView(usernameInput);
+                final EditText passwordInput = new EditText(SecretActivity.this);
+                passwordInput.setHint("パスワード");
+                passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+                layout.addView(passwordInput);
+                new MaterialAlertDialogBuilder(SecretActivity.this)
+                    .setTitle("Basic認証情報を入力")
+                    .setView(layout)
+                    .setPositiveButton("ログイン", (dialog, which) -> {
+                        String username = usernameInput.getText().toString().trim();
+                        String password = passwordInput.getText().toString().trim();
+                        if (!username.isEmpty() && !password.isEmpty()) {
+                            handler.proceed(username, password);
+                        } else {
+                            Toast.makeText(SecretActivity.this, "ユーザー名とパスワードを入力してください", Toast.LENGTH_SHORT).show();
+                            handler.cancel();
+                        }
+                    })
+                    .setNegativeButton("キャンセル", (dialog, which) -> handler.cancel())
+                    .show();
+            }
+        });
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
+                                               FileChooserParams fileChooserParams) {
+                SecretActivity.this.filePathCallback = filePathCallback;
+                try {
+                    fileChooserLauncher.launch(fileChooserParams.createIntent());
+                } catch (Exception e) {
+                    SecretActivity.this.filePathCallback = null;
+                    Toast.makeText(SecretActivity.this, "ファイル選択エラー", Toast.LENGTH_SHORT).show();
+                    return false;
+                }
+                return true;
+            }
+           @Override
+           public void onPermissionRequest(final PermissionRequest request) {
+           try {
+            String[] resources = request.getResources();
+            List<String> permissionsNeeded = new ArrayList<>();
+
+            for (String resource : resources) {
+                if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                    if (ContextCompat.checkSelfPermission(SecretActivity.this, Manifest.permission.CAMERA)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        permissionsNeeded.add(Manifest.permission.CAMERA);
+                    }
+                } else if (PermissionRequest.RESOURCE_AUDIO_CAPTURE.equals(resource)) {
+                    if (ContextCompat.checkSelfPermission(SecretActivity.this, Manifest.permission.RECORD_AUDIO)
+                            != PackageManager.PERMISSION_GRANTED) {
+                        permissionsNeeded.add(Manifest.permission.RECORD_AUDIO);
+                    }
+                }
+            }
+            if (permissionsNeeded.isEmpty()) {
+                request.grant(resources);
+            } else {
+                pendingPermissionRequest = request;
+                permissionRequestLauncher.launch(permissionsNeeded.toArray(new String[0]));
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            request.deny();
+        }
+    }
+
+            @Override
+            public void onReceivedIcon(WebView view, Bitmap icon) {
+                if (view == getCurrentWebView()) {
+                    faviconImageView.setImageBitmap(icon);
+                }
+                webViewFavicons.put(view, icon);
+                String currentUrl = view.getUrl();
+                if (currentUrl != null) {
+                    faviconCache.put(currentUrl, icon);
+                    backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
+                }
+            }
+            @Override
+            public void onShowCustomView(View view, WebChromeClient.CustomViewCallback callback) {
                 if (customView != null) {
                     callback.onCustomViewHidden();
                     return;
@@ -1669,23 +1614,6 @@ private class AndroidBridge {
                 WebView current = getCurrentWebView();
                 if (current == null) return;
                 scheduleSpaHistoryUpdate(current, url);
-            } catch (Exception ignored) {}
-        });
-    }
-
-    @JavascriptInterface
-    public void onSpaDetected(final boolean isSpa) {
-        UiThread.post(() -> {
-            try {
-                WebView current = getCurrentWebView();
-                if (current == null) return;
-                SpaStateManager.getInstance().setDetected(current, isSpa);
-                updatePullToRefreshState(current, current.getUrl());
-                String currentUrl = current.getUrl();
-                if (currentUrl != null) {
-                    current.getSettings().setCacheMode(
-                            CacheModePolicy.determinePostLoad(currentUrl, isSpa));
-                }
             } catch (Exception ignored) {}
         });
     }
