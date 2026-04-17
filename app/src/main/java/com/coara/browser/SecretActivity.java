@@ -188,7 +188,6 @@ public class SecretActivity extends AppCompatActivity {
     private WebView preloadedWebView = null;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
-    private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     static {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
         try {
@@ -456,7 +455,6 @@ public class SecretActivity extends AppCompatActivity {
     private void clear0() {
         WebView webView = getCurrentWebView();
         if (webView != null) {
-            SpaStateManager.getInstance().clearState(webView);
             webView.clearHistory();
             webView.clearCache(true);
             webView.clearFormData();
@@ -1222,7 +1220,7 @@ public class SecretActivity extends AppCompatActivity {
                 }
             }
             @Override
-            public void onShowCustomView(View view, WebChromeClient.CustomViewCallback callback) {
+            public void onShowCustomView(View view, CustomViewCallback callback) {
                 if (customView != null) {
                     callback.onCustomViewHidden();
                     return;
@@ -1958,7 +1956,6 @@ private class AndroidBridge {
 
     private void clearTabs() {
         WebView current = getCurrentWebView();
-        SpaStateManager.getInstance().clearState(current);
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
             if (i != currentTabIndex) {
