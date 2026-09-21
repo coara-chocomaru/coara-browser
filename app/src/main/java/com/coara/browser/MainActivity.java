@@ -212,15 +212,12 @@ public class MainActivity extends AppCompatActivity {
     // ここに無ければ正規表現ベースのURL判定を毎フレーム再実行してしまう。
     private final Map<WebView, Boolean> pullToRefreshEligibleCache = new HashMap<>();
 
-    // PIN設定（端末のPINを使用）: 認証結果を受け取るためのランチャーは
-    // Activity が STARTED になる前（＝フィールド初期化のタイミング）に登録しておく必要がある。
-    private final ActivityResultLauncher<Intent> pinConfirmLauncher = registerForActivityResult(
+    private final ActivityResultLauncher<Intent> launchProtectionLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
             result -> {
                 if (result.getResultCode() == RESULT_OK) {
                     com.coara.browser.util.PinLockManager.markUnlocked();
                 } else {
-                    // 認証をキャンセル/失敗した場合は内容を見せず、そのままバックグラウンドへ退避する。
                     moveTaskToBack(true);
                     finish();
                 }
@@ -283,7 +280,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        maybeRequestPinUnlock();
+        maybeRequestLaunchProtection();
 
         toolbar = findViewById(R.id.topAppBar);
         setSupportActionBar(toolbar);
@@ -1476,59 +1473,42 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * 「端末のPINを使用」がONで、かつ端末に実際にPINが設定されている場合のみ、
-     * OSの確認画面（端末のPIN/パターン/パスワード/生体認証）を要求する。
-     * 一度成功したらプロセスが生きている間は再度問わない（アプリ内の別画面遷移などでは聞き直さない）。
-     * 端末側でPIN設定が解除されている場合は締め出しを避けるため何もしない。
-     */
-    /**
-     * メニューの「info」の下にある「PIN設定」から開く設定ダイアログ。
-     * 「端末のPINを使用」をONにする際は、端末に実際にPIN等が設定されているかを確認し、
-     * 未設定であれば安全側（OFF）に倒したうえで、端末の設定画面を開くよう促す。
-     */
-    private void showPinSettingsDialog() {
+    private void showLaunchProtectionDialog() {
         android.view.LayoutInflater inflater = getLayoutInflater();
         View dialogView = inflater.inflate(R.layout.dialog_pin_settings, null);
-        com.google.android.material.materialswitch.MaterialSwitch switchPinLock =
+        com.google.android.material.switchmaterial.SwitchMaterial switchLaunchProtection =
                 dialogView.findViewById(R.id.switchPinLock);
         TextView statusText = dialogView.findViewById(R.id.pinStatusText);
 
         boolean currentlyEnabled = com.coara.browser.util.PinLockManager.isEnabled(this);
-        switchPinLock.setChecked(currentlyEnabled);
+        switchLaunchProtection.setChecked(currentlyEnabled);
 
         if (currentlyEnabled && !com.coara.browser.util.PinLockManager.isDeviceSecure(this)) {
-            // 前回ON状態で保存された後に、端末側でPIN設定が解除されていた場合の保険表示。
             statusText.setVisibility(View.VISIBLE);
-            statusText.setText("端末のPIN設定が見つからないため、この設定は次回起動時まで一時的に無効として扱われます。");
+            statusText.setText("端末の画面ロックが見つからないため、この設定は次回起動時まで一時的に無効として扱われます。");
         }
 
-        switchPinLock.setOnCheckedChangeListener((buttonView, isChecked) -> {
+        switchLaunchProtection.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (!isChecked) {
-                // OFFにする操作は常に安全なので、そのまま保存するだけでよい。
                 com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, false);
                 statusText.setVisibility(View.GONE);
                 return;
             }
 
-            // ONにしようとした場合のみ、端末側に実際にPINが設定されているかを確認する。
             if (com.coara.browser.util.PinLockManager.isDeviceSecure(MainActivity.this)) {
                 com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, true);
                 statusText.setVisibility(View.GONE);
-                Toast.makeText(MainActivity.this, "次回起動時から端末のPINで保護されます", Toast.LENGTH_SHORT).show();
+                Toast.makeText(MainActivity.this, "次回起動時から端末の画面ロックで保護されます", Toast.LENGTH_SHORT).show();
             } else {
-                // 未設定の場合は有効化せず、安全側（OFF）に倒したうえで設定を促す。
-                // setChecked(false) はこのリスナーを同期的に再度呼び出す（isChecked=false 側）が、
-                // そちらは単純に保存して抜けるだけなので、続けてここで案内文を上書き表示すればよい。
                 buttonView.setChecked(false);
                 com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, false);
 
                 statusText.setVisibility(View.VISIBLE);
-                statusText.setText("端末にPIN・パターン・パスワードが設定されていないため有効化できません。"
+                statusText.setText("端末に画面ロック（PIN・パターン・パスワードなど）が設定されていないため有効化できません。"
                         + "先に端末のロック画面設定を行ってください。");
 
                 new MaterialAlertDialogBuilder(MainActivity.this)
-                        .setTitle("端末のPINが未設定です")
+                        .setTitle("端末の画面ロックが未設定です")
                         .setMessage("この機能を使うには、先に端末本体にPIN・パターン・パスワードのいずれかを設定してください。設定画面を開きますか？")
                         .setPositiveButton("設定を開く", (d, w) -> {
                             try {
@@ -1543,13 +1523,13 @@ public class MainActivity extends AppCompatActivity {
         });
 
         new MaterialAlertDialogBuilder(this)
-                .setTitle("PIN設定")
+                .setTitle("起動保護")
                 .setView(dialogView)
                 .setPositiveButton("閉じる", null)
                 .show();
     }
 
-    private void maybeRequestPinUnlock() {
+    private void maybeRequestLaunchProtection() {
         if (!com.coara.browser.util.PinLockManager.shouldPromptLock(this)) {
             return;
         }
@@ -1559,14 +1539,12 @@ public class MainActivity extends AppCompatActivity {
         }
         try {
             Intent intent = keyguardManager.createConfirmDeviceCredentialIntent(
-                    "アプリのロック解除", "続行するには端末のPINなどで認証してください");
+                    "起動保護", "続行するには端末の画面ロックで認証してください");
             if (intent == null) {
-                // 端末が確認画面を提供できない場合は締め出さない。
                 return;
             }
-            pinConfirmLauncher.launch(intent);
+            launchProtectionLauncher.launch(intent);
         } catch (Exception ignored) {
-            // 認証フローの起動に失敗した場合も、ユーザーを締め出さない方を優先する。
         }
     }
 
@@ -2042,7 +2020,7 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_Settings) {
             startActivity(new Intent(MainActivity.this, SettingsActivity.class));
         } else if (id == R.id.action_pin_settings) {
-            showPinSettingsDialog();
+            showLaunchProtectionDialog();
         } else if (id == R.id.action_Secret) {
             Intent intent = new Intent(MainActivity.this, SecretActivity.class);
             intent.putExtra(EXTRA_CLEAR_HISTORY, true);
