@@ -2,11 +2,11 @@ name: Build
 on:
   push:
     branches:
-      - v4.4.1
+      - v4.4.2
   pull_request:
   
     branches:
-      - v4.4.1
+      - v4.4.2
 permissions:
   contents: read
 
