@@ -3,7 +3,10 @@ package com.coara.browser.webview;
 import android.app.Activity;
 import androidx.appcompat.app.AlertDialog;
 import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.RectF;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,7 +17,9 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.GridLayoutManager;
+import androidx.recyclerview.widget.ItemTouchHelper;
 import androidx.recyclerview.widget.RecyclerView;
 
 import com.coara.browser.R;
@@ -42,6 +47,10 @@ public final class TabOverviewDialog {
         RecyclerView recyclerView = new RecyclerView(activity);
         recyclerView.setLayoutManager(new GridLayoutManager(activity, 2));
         recyclerView.setNestedScrollingEnabled(true);
+        // Item size/type never changes after bind, so RecyclerView can skip a layout pass
+        // on every notify — a small but free performance win for the tab grid.
+        recyclerView.setHasFixedSize(true);
+        recyclerView.setItemViewCacheSize(8);
 
         AlertDialog dialog = new MaterialAlertDialogBuilder(activity)
                 .setTitle("タブ一覧")
@@ -52,6 +61,12 @@ public final class TabOverviewDialog {
         TabOverviewAdapter adapter = new TabOverviewAdapter(activity, host, dialog);
         recyclerView.setAdapter(adapter);
 
+        // 追加の閉じ方: カードを左右にスワイプすると、既存の×ボタンに加えて
+        // そのタブを閉じられるようにする（既存の閉じ方は変更しない）。
+        ItemTouchHelper swipeToCloseHelper = new ItemTouchHelper(
+                new SwipeToCloseCallback(activity, host, adapter));
+        swipeToCloseHelper.attachToRecyclerView(recyclerView);
+
         dialog.setButton(AlertDialog.BUTTON_POSITIVE, "新しいタブ", (d, which) -> {
             host.dismissCurrentKeyboard();
             host.createNewTab();
@@ -60,6 +75,101 @@ public final class TabOverviewDialog {
         });
 
         dialog.show();
+    }
+
+    /**
+     * 横方向のスワイプでタブを閉じるための ItemTouchHelper.Callback。
+     * Host はタブ数を直接返す設計のため、スワイプ後に実際にタブが削除されたか
+     * （最後の1枚はスタートページへ戻るだけで削除されない）を件数差分で判定し、
+     * 削除時のみアイテム削除アニメーションを、そうでない場合は再バインドのみを行う。
+     */
+    private static final class SwipeToCloseCallback extends ItemTouchHelper.SimpleCallback {
+        private final Activity activity;
+        private final Host host;
+        private final TabOverviewAdapter adapter;
+        private final Paint backgroundPaint = new Paint();
+        private final Paint iconPaint = new Paint();
+
+        SwipeToCloseCallback(Activity activity, Host host, TabOverviewAdapter adapter) {
+            super(0, ItemTouchHelper.LEFT | ItemTouchHelper.RIGHT);
+            this.activity = activity;
+            this.host = host;
+            this.adapter = adapter;
+            backgroundPaint.setColor(Color.parseColor("#D9464646"));
+            backgroundPaint.setAntiAlias(true);
+            iconPaint.setColor(Color.WHITE);
+            iconPaint.setAntiAlias(true);
+            iconPaint.setStrokeWidth(dp(activity, 3));
+            iconPaint.setStrokeCap(Paint.Cap.ROUND);
+        }
+
+        @Override
+        public boolean onMove(@NonNull RecyclerView recyclerView,
+                               @NonNull RecyclerView.ViewHolder viewHolder,
+                               @NonNull RecyclerView.ViewHolder target) {
+            return false;
+        }
+
+        @Override
+        public void onSwiped(@NonNull RecyclerView.ViewHolder viewHolder, int direction) {
+            int position = viewHolder.getBindingAdapterPosition();
+            if (position == RecyclerView.NO_POSITION) return;
+
+            int beforeCount = Math.max(0, host.getTabCount());
+            host.dismissCurrentKeyboard();
+            host.closeTabAt(position);
+            host.refreshTabCount();
+            int afterCount = Math.max(0, host.getTabCount());
+
+            if (afterCount < beforeCount) {
+                adapter.notifyItemRemoved(position);
+                if (position < afterCount) {
+                    adapter.notifyItemRangeChanged(position, afterCount - position);
+                }
+            } else {
+                // 最後の1タブはクローズされずスタートページへ遷移しただけなので、
+                // 見た目上は元の位置に留めて内容だけ更新する。
+                adapter.notifyItemChanged(position);
+            }
+        }
+
+        @Override
+        public void onChildDraw(@NonNull Canvas c, @NonNull RecyclerView recyclerView,
+                                 @NonNull RecyclerView.ViewHolder viewHolder, float dX, float dY,
+                                 int actionState, boolean isCurrentlyActive) {
+            View itemView = viewHolder.itemView;
+            if (actionState == ItemTouchHelper.ACTION_STATE_SWIPE && dX != 0f) {
+                float radius = dp(activity, 18);
+                RectF rect = new RectF(itemView.getLeft(), itemView.getTop(),
+                        itemView.getRight(), itemView.getBottom());
+                c.drawRoundRect(rect, radius, radius, backgroundPaint);
+
+                float centerY = itemView.getTop() + itemView.getHeight() / 2f;
+                float centerX = dX > 0
+                        ? itemView.getLeft() + dp(activity, 28)
+                        : itemView.getRight() - dp(activity, 28);
+                float half = dp(activity, 8);
+                c.drawLine(centerX - half, centerY - half, centerX + half, centerY + half, iconPaint);
+                c.drawLine(centerX - half, centerY + half, centerX + half, centerY - half, iconPaint);
+
+                itemView.setTranslationX(dX);
+                itemView.setAlpha(Math.max(0.25f, 1f - Math.abs(dX) / itemView.getWidth()));
+            } else {
+                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive);
+            }
+        }
+
+        @Override
+        public void clearView(@NonNull RecyclerView recyclerView, @NonNull RecyclerView.ViewHolder viewHolder) {
+            super.clearView(recyclerView, viewHolder);
+            viewHolder.itemView.setAlpha(1f);
+            viewHolder.itemView.setTranslationX(0f);
+        }
+
+        private static int dp(Activity activity, int value) {
+            float density = activity.getResources().getDisplayMetrics().density;
+            return Math.round(value * density);
+        }
     }
 
     private static final class TabOverviewAdapter extends RecyclerView.Adapter<TabOverviewAdapter.TabViewHolder> {
