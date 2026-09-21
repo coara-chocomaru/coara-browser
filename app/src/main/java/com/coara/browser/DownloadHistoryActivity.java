@@ -39,10 +39,13 @@ import org.json.JSONObject;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class DownloadHistoryActivity extends AppCompatActivity {
 
@@ -56,39 +59,80 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private DownloadManager downloadManager;
     private final Handler updateHandler = UiThread.mainHandler();
     private ExecutorService executor = Executors.newSingleThreadExecutor();
+    // onPause/onResume のたびに世代番号を進めることで、既にキューに入っている
+    // バックグラウンド問い合わせの結果が、後から復帰したセッションのUIを
+    // 誤って更新してしまう（＝古い結果で新しい状態を上書きする）ことを防ぐ。
+    private final AtomicInteger pollGeneration = new AtomicInteger(0);
 
-    private Runnable updateRunnable = new Runnable() {
+    private final Runnable updateRunnable = new Runnable() {
         @Override
         public void run() {
-            boolean needUpdate = false;
-            if (downloadItems != null && adapter != null) {
-                for (int i = 0, size = downloadItems.size(); i < size; i++) {
-                    DownloadItem currentItem = downloadItems.get(i);
-                    if (currentItem.status == DownloadManager.STATUS_SUCCESSFUL ||
-                            currentItem.status == DownloadManager.STATUS_FAILED) {
-                        continue;
-                    }
-                    DownloadItem updated = getDownloadItem(currentItem.downloadId);
-                    if (updated != null) {
-                        if (currentItem.status != updated.status ||
-                                currentItem.downloadedSize != updated.downloadedSize ||
-                                currentItem.totalSize != updated.totalSize) {
-                            currentItem.status = updated.status;
-                            currentItem.downloadedSize = updated.downloadedSize;
-                            currentItem.totalSize = updated.totalSize;
-                            needUpdate = true;
-                        }
-                        if (currentItem.title == null || currentItem.title.isEmpty()) {
-                            currentItem.title = updated.title;
-                        }
-                        currentItem.localUri = updated.localUri;
-                    }
-                }
-                if (needUpdate) {
-                    adapter.notifyDataSetChanged();
+            final int myGeneration = pollGeneration.get();
+            final List<DownloadItem> itemsSnapshot = downloadItems;
+            if (itemsSnapshot == null || adapter == null) {
+                updateHandler.postDelayed(this, 1000);
+                return;
+            }
+
+            // まだ完了/失敗していないダウンロードIDだけを抽出する（軽量なのでUIスレッドで実行）。
+            final List<Long> pendingIds = new ArrayList<>();
+            for (int i = 0, size = itemsSnapshot.size(); i < size; i++) {
+                DownloadItem item = itemsSnapshot.get(i);
+                if (item.status != DownloadManager.STATUS_SUCCESSFUL
+                        && item.status != DownloadManager.STATUS_FAILED) {
+                    pendingIds.add(item.downloadId);
                 }
             }
-            updateHandler.postDelayed(this, 1000);
+            if (pendingIds.isEmpty()) {
+                updateHandler.postDelayed(this, 1000);
+                return;
+            }
+
+            // DownloadManager への問い合わせ（ContentProvider経由でブロッキングしうる）は
+            // メインスレッドを塞がないようバックグラウンドで実行する。
+            executor.execute(() -> {
+                final Map<Long, DownloadItem> updates = new HashMap<>();
+                for (Long id : pendingIds) {
+                    if (pollGeneration.get() != myGeneration) {
+                        return; // 画面が非表示になった等で世代が変わったため破棄
+                    }
+                    DownloadItem updated = getDownloadItem(id);
+                    if (updated != null) {
+                        updates.put(id, updated);
+                    }
+                }
+
+                updateHandler.post(() -> {
+                    if (pollGeneration.get() != myGeneration || isFinishing()) {
+                        return;
+                    }
+                    boolean needUpdate = false;
+                    List<DownloadItem> current = downloadItems;
+                    if (current != null && adapter != null) {
+                        for (int i = 0, size = current.size(); i < size; i++) {
+                            DownloadItem currentItem = current.get(i);
+                            DownloadItem updated = updates.get(currentItem.downloadId);
+                            if (updated == null) continue;
+                            if (currentItem.status != updated.status ||
+                                    currentItem.downloadedSize != updated.downloadedSize ||
+                                    currentItem.totalSize != updated.totalSize) {
+                                currentItem.status = updated.status;
+                                currentItem.downloadedSize = updated.downloadedSize;
+                                currentItem.totalSize = updated.totalSize;
+                                needUpdate = true;
+                            }
+                            if (currentItem.title == null || currentItem.title.isEmpty()) {
+                                currentItem.title = updated.title;
+                            }
+                            currentItem.localUri = updated.localUri;
+                        }
+                        if (needUpdate) {
+                            adapter.notifyDataSetChanged();
+                        }
+                    }
+                    updateHandler.postDelayed(updateRunnable, 1000);
+                });
+            });
         }
     };
 
@@ -118,17 +162,20 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        pollGeneration.incrementAndGet();
         updateHandler.post(updateRunnable);
     }
 
     @Override
     protected void onPause() {
+        pollGeneration.incrementAndGet();
         updateHandler.removeCallbacks(updateRunnable);
         super.onPause();
     }
 
     @Override
     protected void onDestroy() {
+        pollGeneration.incrementAndGet();
         updateHandler.removeCallbacksAndMessages(null);
         executor.shutdownNow();
         super.onDestroy();

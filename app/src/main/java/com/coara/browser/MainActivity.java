@@ -3,6 +3,7 @@ package com.coara.browser;
 import android.Manifest;
 import android.app.Activity;
 import android.app.DownloadManager;
+import android.app.KeyguardManager;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.ClipData;
@@ -206,6 +207,24 @@ public class MainActivity extends AppCompatActivity {
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
+    // ページ遷移時に一度だけ計算した「Pull-to-Refresh を許可してよいか」を保持するキャッシュ。
+    // SwipeRefreshLayout の子スクロール判定はドラッグ中に毎フレーム呼ばれるため、
+    // ここに無ければ正規表現ベースのURL判定を毎フレーム再実行してしまう。
+    private final Map<WebView, Boolean> pullToRefreshEligibleCache = new HashMap<>();
+
+    // PIN設定（端末のPINを使用）: 認証結果を受け取るためのランチャーは
+    // Activity が STARTED になる前（＝フィールド初期化のタイミング）に登録しておく必要がある。
+    private final ActivityResultLauncher<Intent> pinConfirmLauncher = registerForActivityResult(
+            new ActivityResultContracts.StartActivityForResult(),
+            result -> {
+                if (result.getResultCode() == RESULT_OK) {
+                    com.coara.browser.util.PinLockManager.markUnlocked();
+                } else {
+                    // 認証をキャンセル/失敗した場合は内容を見せず、そのままバックグラウンドへ退避する。
+                    moveTaskToBack(true);
+                    finish();
+                }
+            });
     static {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             try {
@@ -263,6 +282,8 @@ public class MainActivity extends AppCompatActivity {
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        maybeRequestPinUnlock();
 
         toolbar = findViewById(R.id.topAppBar);
         setSupportActionBar(toolbar);
@@ -363,7 +384,14 @@ public class MainActivity extends AppCompatActivity {
 
         swipeRefreshLayout.setOnChildScrollUpCallback((parent1, child) -> {
             WebView current = getCurrentWebView();
-            return SwipeRefreshPolicy.shouldBlockPullToRefresh(current);
+            if (current == null) return true;
+            Boolean cached = pullToRefreshEligibleCache.get(current);
+            if (cached == null) {
+                // キャッシュがまだ無い場合のみフルの判定を行い、以降のフレームのために記録する。
+                cached = SwipeRefreshPolicy.shouldEnablePullToRefresh(current, current.getUrl());
+                pullToRefreshEligibleCache.put(current, cached);
+            }
+            return SwipeRefreshPolicy.shouldBlockPullToRefresh(current, cached);
         });
         swipeRefreshLayout.setOnRefreshListener(() -> {
             WebView current = getCurrentWebView();
@@ -587,6 +615,9 @@ public class MainActivity extends AppCompatActivity {
             webViewContainer.removeAllViews();
             for (WebView tab : tabsToRelease) {
                 clearPendingSpaHistory(tab);
+                pullToRefreshEligibleCache.remove(tab);
+                webViewFavicons.remove(tab);
+                originalUserAgents.remove(tab);
                 try {
                     tab.stopLoading();
                 } catch (Exception ignored) {
@@ -744,6 +775,9 @@ public class MainActivity extends AppCompatActivity {
                         } catch (Exception ignored) {
                         }
                     }
+                    pullToRefreshEligibleCache.remove(old);
+                    webViewFavicons.remove(old);
+                    originalUserAgents.remove(old);
                     try {
                         old.stopLoading();
                         old.destroy();
@@ -1097,6 +1131,63 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
+            public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
+                // WebView のレンダラープロセスが（低メモリ端末でのOSによるkillなどで）
+                // 落ちた場合、ここで false を返す（＝デフォルト動作）とアプリ全体が
+                // クラッシュしてしまう。true を返して自前でリカバリすることで、
+                // 対象タブだけを安全に破棄・再生成し、アプリ全体の強制終了を防ぐ。
+                try {
+                    boolean crashed = detail != null && detail.didCrash();
+                    String lastUrl = null;
+                    try {
+                        lastUrl = view.getUrl();
+                    } catch (Exception ignored) {
+                    }
+                    final String recoverUrl = (lastUrl == null || lastUrl.isEmpty()) ? START_PAGE : lastUrl;
+
+                    UiThread.mainHandler().post(() -> {
+                        try {
+                            recoverFromRenderProcessGone(view, recoverUrl);
+                        } catch (Exception ignored) {
+                        }
+                    });
+
+                    Toast.makeText(MainActivity.this,
+                            crashed ? "ページの表示中に問題が発生したため復旧しました" : "タブを再読み込みしました",
+                            Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                return true;
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, android.webkit.WebResourceError error) {
+                super.onReceivedError(view, request, error);
+                // 既存の見た目・挙動は変えない（WebView 標準のエラー表示に任せる）。
+                // メインフレームの読み込み失敗のみ最小限のログを残し、原因調査を助ける。
+                try {
+                    if (request != null && request.isForMainFrame()) {
+                        android.util.Log.w("CoaraBrowser", "Main frame load error: "
+                                + request.getUrl() + " code=" + (error != null ? error.getErrorCode() : 0));
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                super.onReceivedHttpError(view, request, errorResponse);
+                try {
+                    if (request != null && request.isForMainFrame() && errorResponse != null) {
+                        android.util.Log.w("CoaraBrowser", "Main frame HTTP error: "
+                                + request.getUrl() + " status=" + errorResponse.getStatusCode());
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+
+            @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 return super.shouldInterceptRequest(view, request);
             }
@@ -1323,6 +1414,162 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+    /**
+     * onRenderProcessGone からの復旧処理。
+     * クラッシュしたレンダラーに紐づく WebView インスタンスはそのまま再利用できないため、
+     * 同じタブの位置に新しい WebView を差し替えて、直前のURLを再読み込みする。
+     * 他のタブや currentTabIndex には影響を与えない。
+     */
+    private void recoverFromRenderProcessGone(WebView crashed, String recoverUrl) {
+        synchronized (webViews) {
+            int index = webViews.indexOf(crashed);
+            if (index == -1) {
+                // 既に閉じられている等で対象が見つからない場合は何もしない。
+                try {
+                    crashed.destroy();
+                } catch (Exception ignored) {
+                }
+                return;
+            }
+
+            Object tag = crashed.getTag();
+            boolean wasCurrent = (index == currentTabIndex);
+
+            Bitmap bm = tabSnapshots.remove(crashed);
+            if (bm != null && !bm.isRecycled()) {
+                try {
+                    bm.recycle();
+                } catch (Exception ignored) {
+                }
+            }
+            pullToRefreshEligibleCache.remove(crashed);
+            webViewFavicons.remove(crashed);
+            originalUserAgents.remove(crashed);
+
+            if (wasCurrent) {
+                try {
+                    webViewContainer.removeView(crashed);
+                } catch (Exception ignored) {
+                }
+            }
+            try {
+                crashed.destroy();
+            } catch (Exception ignored) {
+            }
+
+            WebView replacement = createNewWebView();
+            if (tag != null) {
+                replacement.setTag(tag);
+            }
+            webViews.set(index, replacement);
+
+            if (wasCurrent) {
+                webViewContainer.addView(replacement);
+                replacement.loadUrl(recoverUrl);
+                urlEditText.setText(recoverUrl);
+                updatePullToRefreshState(replacement, recoverUrl);
+            } else {
+                // 非表示タブの復旧は既存の loadTabsState と同じ方式（読み込んだ上で pause）に揃える。
+                replacement.loadUrl(recoverUrl);
+                replacement.onPause();
+            }
+        }
+    }
+
+    /**
+     * 「端末のPINを使用」がONで、かつ端末に実際にPINが設定されている場合のみ、
+     * OSの確認画面（端末のPIN/パターン/パスワード/生体認証）を要求する。
+     * 一度成功したらプロセスが生きている間は再度問わない（アプリ内の別画面遷移などでは聞き直さない）。
+     * 端末側でPIN設定が解除されている場合は締め出しを避けるため何もしない。
+     */
+    /**
+     * メニューの「info」の下にある「PIN設定」から開く設定ダイアログ。
+     * 「端末のPINを使用」をONにする際は、端末に実際にPIN等が設定されているかを確認し、
+     * 未設定であれば安全側（OFF）に倒したうえで、端末の設定画面を開くよう促す。
+     */
+    private void showPinSettingsDialog() {
+        android.view.LayoutInflater inflater = getLayoutInflater();
+        View dialogView = inflater.inflate(R.layout.dialog_pin_settings, null);
+        com.google.android.material.materialswitch.MaterialSwitch switchPinLock =
+                dialogView.findViewById(R.id.switchPinLock);
+        TextView statusText = dialogView.findViewById(R.id.pinStatusText);
+
+        boolean currentlyEnabled = com.coara.browser.util.PinLockManager.isEnabled(this);
+        switchPinLock.setChecked(currentlyEnabled);
+
+        if (currentlyEnabled && !com.coara.browser.util.PinLockManager.isDeviceSecure(this)) {
+            // 前回ON状態で保存された後に、端末側でPIN設定が解除されていた場合の保険表示。
+            statusText.setVisibility(View.VISIBLE);
+            statusText.setText("端末のPIN設定が見つからないため、この設定は次回起動時まで一時的に無効として扱われます。");
+        }
+
+        switchPinLock.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (!isChecked) {
+                // OFFにする操作は常に安全なので、そのまま保存するだけでよい。
+                com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, false);
+                statusText.setVisibility(View.GONE);
+                return;
+            }
+
+            // ONにしようとした場合のみ、端末側に実際にPINが設定されているかを確認する。
+            if (com.coara.browser.util.PinLockManager.isDeviceSecure(MainActivity.this)) {
+                com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, true);
+                statusText.setVisibility(View.GONE);
+                Toast.makeText(MainActivity.this, "次回起動時から端末のPINで保護されます", Toast.LENGTH_SHORT).show();
+            } else {
+                // 未設定の場合は有効化せず、安全側（OFF）に倒したうえで設定を促す。
+                // setChecked(false) はこのリスナーを同期的に再度呼び出す（isChecked=false 側）が、
+                // そちらは単純に保存して抜けるだけなので、続けてここで案内文を上書き表示すればよい。
+                buttonView.setChecked(false);
+                com.coara.browser.util.PinLockManager.setEnabled(MainActivity.this, false);
+
+                statusText.setVisibility(View.VISIBLE);
+                statusText.setText("端末にPIN・パターン・パスワードが設定されていないため有効化できません。"
+                        + "先に端末のロック画面設定を行ってください。");
+
+                new MaterialAlertDialogBuilder(MainActivity.this)
+                        .setTitle("端末のPINが未設定です")
+                        .setMessage("この機能を使うには、先に端末本体にPIN・パターン・パスワードのいずれかを設定してください。設定画面を開きますか？")
+                        .setPositiveButton("設定を開く", (d, w) -> {
+                            try {
+                                startActivity(new Intent(android.provider.Settings.ACTION_SECURITY_SETTINGS));
+                            } catch (Exception e) {
+                                Toast.makeText(MainActivity.this, "設定画面を開けませんでした", Toast.LENGTH_SHORT).show();
+                            }
+                        })
+                        .setNegativeButton("あとで", null)
+                        .show();
+            }
+        });
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("PIN設定")
+                .setView(dialogView)
+                .setPositiveButton("閉じる", null)
+                .show();
+    }
+
+    private void maybeRequestPinUnlock() {
+        if (!com.coara.browser.util.PinLockManager.shouldPromptLock(this)) {
+            return;
+        }
+        KeyguardManager keyguardManager = (KeyguardManager) getSystemService(Context.KEYGUARD_SERVICE);
+        if (keyguardManager == null) {
+            return;
+        }
+        try {
+            Intent intent = keyguardManager.createConfirmDeviceCredentialIntent(
+                    "アプリのロック解除", "続行するには端末のPINなどで認証してください");
+            if (intent == null) {
+                // 端末が確認画面を提供できない場合は締め出さない。
+                return;
+            }
+            pinConfirmLauncher.launch(intent);
+        } catch (Exception ignored) {
+            // 認証フローの起動に失敗した場合も、ユーザーを締め出さない方を優先する。
+        }
+    }
+
     private void closeTab(WebView webView) {
         synchronized (webViews) {
             int index = webViews.indexOf(webView);
@@ -1358,6 +1605,9 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {
                 }
             }
+            pullToRefreshEligibleCache.remove(webView);
+            webViewFavicons.remove(webView);
+            originalUserAgents.remove(webView);
             if (id != -1) {
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                 if (snapFile.exists()) {
@@ -1651,6 +1901,9 @@ public class MainActivity extends AppCompatActivity {
     private void updatePullToRefreshState(WebView webView, String url) {
         if (swipeRefreshLayout == null) return;
         boolean enabled = SwipeRefreshPolicy.shouldEnablePullToRefresh(webView, url);
+        if (webView != null) {
+            pullToRefreshEligibleCache.put(webView, enabled);
+        }
         swipeRefreshLayout.setEnabled(enabled);
     }
 
@@ -1788,6 +2041,8 @@ public class MainActivity extends AppCompatActivity {
             }
         } else if (id == R.id.action_Settings) {
             startActivity(new Intent(MainActivity.this, SettingsActivity.class));
+        } else if (id == R.id.action_pin_settings) {
+            showPinSettingsDialog();
         } else if (id == R.id.action_Secret) {
             Intent intent = new Intent(MainActivity.this, SecretActivity.class);
             intent.putExtra(EXTRA_CLEAR_HISTORY, true);
@@ -2061,6 +2316,9 @@ public class MainActivity extends AppCompatActivity {
                     } catch (Exception ignored) {
                     }
                 }
+                pullToRefreshEligibleCache.remove(w);
+                webViewFavicons.remove(w);
+                originalUserAgents.remove(w);
                 if (id != -1) {
                     File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                     if (snapFile.exists()) {
@@ -2466,22 +2724,34 @@ private void showHistoryDialog() {
             }
         }
 
-        Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        webView.draw(canvas);
-
-        Bitmap snapshot = bitmap;
+        // メモリ削減: タブ一覧のプレビューは小さいサムネイルとしてしか表示されないため、
+        // (1) 画面フル解像度のARGB_8888バッファを一度確保してから縮小するのではなく、
+        //     最初から目的のサイズへ Canvas.scale して直接描画することで、
+        //     ピーク時に必要な一時メモリと縮小処理そのものを丸ごと削減する。
+        // (2) プレビューに透過は不要なため、1px あたり4byte の ARGB_8888 ではなく
+        //     1px あたり2byte で済む RGB_565 を使い、保持メモリを概ね半分にする。
+        //     見た目への影響は小さいサムネイルでは実用上ほぼ判別できない。
         int maxPreviewWidth = 480;
-        if (width > maxPreviewWidth) {
-            int targetHeight = Math.max(1, Math.round((float) height * maxPreviewWidth / (float) width));
-            Bitmap scaled = Bitmap.createScaledBitmap(bitmap, maxPreviewWidth, targetHeight, true);
-            if (scaled != bitmap) {
-                try {
-                    bitmap.recycle();
-                } catch (Exception ignored) {
-                }
+        float scale = width > maxPreviewWidth ? (float) maxPreviewWidth / (float) width : 1f;
+        int targetWidth = Math.max(1, Math.round(width * scale));
+        int targetHeight = Math.max(1, Math.round(height * scale));
+
+        Bitmap snapshot;
+        try {
+            snapshot = Bitmap.createBitmap(targetWidth, targetHeight, Bitmap.Config.RGB_565);
+            Canvas canvas = new Canvas(snapshot);
+            if (scale != 1f) {
+                canvas.scale(scale, scale);
             }
-            snapshot = scaled;
+            webView.draw(canvas);
+        } catch (OutOfMemoryError oom) {
+            // 低メモリ端末での保険: サムネイル生成に失敗してもクラッシュさせず、
+            // プレビューなし（背景色のみ）にフォールバックする。
+            snapshot = null;
+        }
+
+        if (snapshot == null) {
+            return;
         }
 
         tabSnapshots.put(webView, snapshot);
