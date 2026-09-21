@@ -3,7 +3,6 @@ package com.coara.browser.util;
 import android.app.KeyguardManager;
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.Build;
 
 public final class PinLockManager {
 
@@ -29,11 +28,7 @@ public final class PinLockManager {
             if (keyguardManager == null) {
                 return false;
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                return keyguardManager.isDeviceSecure();
-            }
-            //noinspection deprecation
-            return keyguardManager.isKeyguardSecure();
+            return keyguardManager.isDeviceSecure();
         } catch (Exception e) {
             return false;
         }
