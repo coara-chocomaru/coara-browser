@@ -20,7 +20,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="PIN設定"
+            android:text="起動保護"
             android:textColor="#1F1F1F"
             android:textSize="18sp"
             android:textStyle="bold" />
@@ -29,7 +29,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="6dp"
-            android:text="端末に設定されているPIN・パターン・パスワード・生体認証を使って、アプリ起動時にロックできます。"
+            android:text="端末に設定されている画面ロック（PIN・パターン・パスワード・生体認証）を使って、アプリ起動時にロックできます。"
             android:textColor="#6E7681"
             android:textSize="12sp" />
 
@@ -50,11 +50,11 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
-                android:text="端末のPINを使用"
+                android:text="端末に設定されている画面ロックを使用します"
                 android:textColor="#1F1F1F"
                 android:textSize="15sp" />
 
-            <com.google.android.material.materialswitch.MaterialSwitch
+            <com.google.android.material.switchmaterial.SwitchMaterial
                 android:id="@+id/switchPinLock"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content" />
