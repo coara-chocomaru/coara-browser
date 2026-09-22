@@ -24,6 +24,7 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.Message;
 import android.os.Parcel;
 import android.text.InputType;
 import android.util.Base64;
@@ -1286,6 +1287,30 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                final WebView transportWebView = new WebView(MainActivity.this);
+                transportWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
+                        String targetUrl = request.getUrl().toString();
+                        if (BrowserUrlRouter.isWebUrl(targetUrl)) {
+                            createNewTab(targetUrl);
+                        } else {
+                            BrowserUrlRouter.handleUrlLoading(MainActivity.this, getCurrentWebView(), targetUrl);
+                        }
+                        try {
+                            transportWebView.destroy();
+                        } catch (Exception ignored) {
+                        }
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(transportWebView);
+                resultMsg.sendToTarget();
+                return true;
+            }
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback,
                                                FileChooserParams fileChooserParams) {
