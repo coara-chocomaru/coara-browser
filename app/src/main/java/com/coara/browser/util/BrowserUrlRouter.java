@@ -64,6 +64,10 @@ public final class BrowserUrlRouter {
     }
 
     public static boolean handleUrlLoading(Activity activity, WebView webView, String rawUrl) {
+        return handleUrlLoading(activity, webView, rawUrl, true);
+    }
+
+    public static boolean handleUrlLoading(Activity activity, WebView webView, String rawUrl, boolean isMainFrame) {
         String url = rawUrl == null ? "" : rawUrl.trim();
         if (url.isEmpty()) {
             return true;
@@ -74,7 +78,15 @@ public final class BrowserUrlRouter {
             return false;
         }
 
-        if (isWebScheme(scheme) || isInternalWebScheme(scheme)) {
+        if (isWebScheme(scheme)) {
+            if (isMainFrame && isGoogleMapsAppUrl(url)) {
+                openPlaceInMapsApp(activity, webView, url);
+                return true;
+            }
+            return false;
+        }
+
+        if (isInternalWebScheme(scheme)) {
             return false;
         }
 
@@ -92,6 +104,59 @@ public final class BrowserUrlRouter {
         }
 
         return launchIntent(activity, webView, intent, null);
+    }
+
+    private static boolean isGoogleMapsAppUrl(String url) {
+        Uri uri;
+        try {
+            uri = Uri.parse(url);
+        } catch (Exception e) {
+            return false;
+        }
+        String host = uri.getHost();
+        if (host == null) {
+            return false;
+        }
+        host = host.toLowerCase(Locale.ROOT);
+        String path = uri.getPath();
+        if (path == null) {
+            path = "";
+        }
+        String lowerPath = path.toLowerCase(Locale.ROOT);
+        if (lowerPath.contains("/embed") || lowerPath.contains("/api/") || lowerPath.startsWith("/maps/vt")) {
+            return false;
+        }
+        if (host.equals("maps.app.goo.gl")) {
+            return true;
+        }
+        if (host.equals("goo.gl") && lowerPath.startsWith("/maps")) {
+            return true;
+        }
+        if ((host.equals("maps.google.com") || host.endsWith(".maps.google.com"))) {
+            return true;
+        }
+        if ((host.equals("www.google.com") || host.equals("google.com")) && lowerPath.startsWith("/maps")) {
+            return true;
+        }
+        return false;
+    }
+
+    private static void openPlaceInMapsApp(Activity activity, WebView webView, String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.setPackage("com.google.android.apps.maps");
+            intent.addCategory(Intent.CATEGORY_BROWSABLE);
+            if (intent.resolveActivity(activity.getPackageManager()) != null) {
+                activity.startActivity(intent);
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+        if (!openPlayStore(activity, "com.google.android.apps.maps")) {
+            if (webView != null) {
+                webView.post(() -> webView.loadUrl(url));
+            }
+        }
     }
 
     public static boolean handleIncomingViewIntent(Activity activity, WebView webView, Uri data) {
