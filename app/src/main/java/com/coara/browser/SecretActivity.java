@@ -81,6 +81,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.coara.browser.util.BrowserUrlRouter;
+import com.coara.browser.webview.WebViewOptimizationUtils;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -861,9 +862,10 @@ public class SecretActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         WebSettings settings = webView.getSettings();
-        String defaultUA = settings.getUserAgentString();
+        String defaultUA = WebViewOptimizationUtils.sanitizeUserAgent(settings.getUserAgentString());
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
+        settings.setUserAgentString(defaultUA);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
         }
@@ -1066,7 +1068,7 @@ public class SecretActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, request.getUrl().toString());
+                return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, request.getUrl().toString(), request.isForMainFrame());
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
@@ -1176,10 +1178,10 @@ public class SecretActivity extends AppCompatActivity {
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                         String targetUrl = request.getUrl().toString();
-                        if (BrowserUrlRouter.isWebUrl(targetUrl)) {
+                        boolean handled = BrowserUrlRouter.handleUrlLoading(SecretActivity.this, getCurrentWebView(),
+                                targetUrl, request.isForMainFrame());
+                        if (!handled) {
                             createNewTab(targetUrl);
-                        } else {
-                            BrowserUrlRouter.handleUrlLoading(SecretActivity.this, getCurrentWebView(), targetUrl);
                         }
                         try {
                             transportWebView.destroy();

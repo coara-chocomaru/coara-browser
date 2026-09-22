@@ -947,10 +947,11 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         WebSettings settings = webView.getSettings();
-        String defaultUA = settings.getUserAgentString();
+        String defaultUA = WebViewOptimizationUtils.sanitizeUserAgent(settings.getUserAgentString());
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
         applyCookiePolicy(webView);
+        settings.setUserAgentString(defaultUA);
         
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             if (sSetSaveFormDataMethod != null) {
@@ -1195,7 +1196,7 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return BrowserUrlRouter.handleUrlLoading(MainActivity.this, view, request.getUrl().toString());
+                return BrowserUrlRouter.handleUrlLoading(MainActivity.this, view, request.getUrl().toString(), request.isForMainFrame());
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
@@ -1294,10 +1295,10 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                         String targetUrl = request.getUrl().toString();
-                        if (BrowserUrlRouter.isWebUrl(targetUrl)) {
+                        boolean handled = BrowserUrlRouter.handleUrlLoading(MainActivity.this, getCurrentWebView(),
+                                targetUrl, request.isForMainFrame());
+                        if (!handled) {
                             createNewTab(targetUrl);
-                        } else {
-                            BrowserUrlRouter.handleUrlLoading(MainActivity.this, getCurrentWebView(), targetUrl);
                         }
                         try {
                             transportWebView.destroy();
