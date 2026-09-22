@@ -154,9 +154,17 @@ public final class BrowserUrlRouter {
                     return loadFallback(activity, webView, dataString);
                 }
             }
+            String storePackage = resolveStorePackage(intent, data);
+            if (storePackage != null && openPlayStore(activity, storePackage)) {
+                return true;
+            }
         } catch (ActivityNotFoundException ignored) {
             if (!TextUtils.isEmpty(fallbackUrl)) {
                 return loadFallback(activity, webView, fallbackUrl);
+            }
+            String storePackage = resolveStorePackage(intent, intent.getData());
+            if (storePackage != null && openPlayStore(activity, storePackage)) {
+                return true;
             }
         } catch (Exception ignored) {
             if (!TextUtils.isEmpty(fallbackUrl)) {
@@ -165,6 +173,46 @@ public final class BrowserUrlRouter {
         }
         Toast.makeText(activity, "対応アプリが見つかりませんでした", Toast.LENGTH_SHORT).show();
         return true;
+    }
+
+    private static String resolveStorePackage(Intent intent, Uri data) {
+        String pkg = intent.getPackage();
+        if (!TextUtils.isEmpty(pkg)) {
+            return pkg;
+        }
+        if (data != null) {
+            String scheme = data.getScheme();
+            if ("geo".equalsIgnoreCase(scheme) || "maps".equalsIgnoreCase(scheme)
+                    || "google.navigation".equalsIgnoreCase(scheme)) {
+                return "com.google.android.apps.maps";
+            }
+            String host = data.getHost();
+            if (host != null && (host.equals("maps.google.com") || host.endsWith(".maps.google.com")
+                    || host.equals("maps.app.goo.gl"))) {
+                return "com.google.android.apps.maps";
+            }
+        }
+        return null;
+    }
+
+    private static boolean openPlayStore(Activity activity, String packageName) {
+        try {
+            Intent marketIntent = new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("market://details?id=" + packageName));
+            if (marketIntent.resolveActivity(activity.getPackageManager()) != null) {
+                activity.startActivity(marketIntent);
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+        try {
+            Intent webIntent = new Intent(Intent.ACTION_VIEW,
+                    Uri.parse("https://play.google.com/store/apps/details?id=" + packageName));
+            activity.startActivity(webIntent);
+            return true;
+        } catch (Exception ignored) {
+        }
+        return false;
     }
 
     private static boolean loadFallback(Activity activity, WebView webView, String fallbackUrl) {

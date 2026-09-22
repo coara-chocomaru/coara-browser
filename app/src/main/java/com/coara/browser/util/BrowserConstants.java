@@ -22,7 +22,6 @@ public final class BrowserConstants {
     public static final String KEY_DOWNLOAD_HISTORY = "download_history";
     public static final String KEY_PIN_LOCK_ENABLED = "pin_lock_enabled";
 
-    public static final String APPEND_STR = " CoaraBrowser";
     public static final String START_PAGE = "file:///android_asset/index.html";
     public static final int FILE_SELECT_CODE = 1001;
     public static final int MAX_TABS = 30;
