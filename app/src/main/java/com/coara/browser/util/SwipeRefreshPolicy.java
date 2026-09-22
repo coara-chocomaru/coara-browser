@@ -92,9 +92,9 @@ public final class SwipeRefreshPolicy {
             Pattern.CASE_INSENSITIVE
     );
 
-    // Exact-label host match (Chrome/Via 方式): a bare "contains" check on "sai" would
-    // also match unrelated hosts such as "saitama.example.com" or "asai-shop.com".
-    // Matching only the leading label of the host (or the whole host) fixes that.
+    
+    
+    
     private static final Pattern SAI_HOST = Pattern.compile(
             "(^|\\.)(sai)\\.[a-z0-9.-]+$|^sai$",
             Pattern.CASE_INSENSITIVE
@@ -163,13 +163,13 @@ public final class SwipeRefreshPolicy {
         return webView.canScrollVertically(-1);
     }
 
-    /**
-     * Chrome/Via 方式のタッチ最適化版。
-     * SwipeRefreshLayout の setOnChildScrollUpCallback は指のドラッグ中に毎フレーム
-     * 呼び出されるため、ここで正規表現によるURL判定をやり直すのは無駄が大きい。
-     * ページ遷移時に一度だけ計算した eligibility をキャッシュして渡すことで、
-     * ドラッグ中は canScrollVertically の軽量チェックのみが走るようにする。
-     */
+     
+ 
+ 
+ 
+ 
+ 
+ 
     public static boolean shouldBlockPullToRefresh(WebView webView, boolean cachedEligible) {
         if (webView == null) return true;
         if (!cachedEligible) return true;

@@ -26,14 +26,14 @@ public final class TabStateStore {
                 bos.flush();
             }
             if (target.exists() && !target.delete()) {
-                // fall through and try overwrite below
+                
             }
             if (!temp.renameTo(target)) {
                 try (BufferedOutputStream bos = new BufferedOutputStream(new FileOutputStream(target))) {
                     bos.write(bytes);
                     bos.flush();
                 }
-                //noinspection ResultOfMethodCallIgnored
+                
                 temp.delete();
             }
         } catch (Exception ignored) {
@@ -72,7 +72,7 @@ public final class TabStateStore {
         File sentinel = new File(dir, name);
         if (!sentinel.exists()) {
             try {
-                //noinspection ResultOfMethodCallIgnored
+                
                 sentinel.createNewFile();
             } catch (Exception ignored) {
             }
