@@ -641,12 +641,12 @@ public class SecretActivity extends AppCompatActivity {
         deleteRecursively(new File(getFilesDir(), "favicons"));
         File cacheSentinel = new File(getCacheDir(), SENTINEL_FILENAME);
         if (cacheSentinel.exists()) {
-            //noinspection ResultOfMethodCallIgnored
+            
             cacheSentinel.delete();
         }
         File filesSentinel = new File(getFilesDir(), SENTINEL_FILENAME);
         if (filesSentinel.exists()) {
-            //noinspection ResultOfMethodCallIgnored
+            
             filesSentinel.delete();
         }
     }
@@ -659,7 +659,7 @@ public class SecretActivity extends AppCompatActivity {
         }
         for (File file : files) {
             if (file != null && file.getName().startsWith("tab_state_")) {
-                //noinspection ResultOfMethodCallIgnored
+                
                 file.delete();
             }
         }
@@ -677,7 +677,7 @@ public class SecretActivity extends AppCompatActivity {
                 }
             }
         }
-        //noinspection ResultOfMethodCallIgnored
+        
         file.delete();
     }
 
@@ -1087,9 +1087,9 @@ public class SecretActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                   super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  // 特定API対応
-             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  // SPA内部APIでキャッシュ無効
-             UiThread.postDelayed(() -> injectLazyLoading(view), 200);  // 遅延短縮で高速化
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
+             view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  
+             UiThread.postDelayed(() -> injectLazyLoading(view), 200);  
             }
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);

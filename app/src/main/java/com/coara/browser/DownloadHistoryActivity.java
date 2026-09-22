@@ -59,9 +59,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     private DownloadManager downloadManager;
     private final Handler updateHandler = UiThread.mainHandler();
     private ExecutorService executor = Executors.newSingleThreadExecutor();
-    // onPause/onResume のたびに世代番号を進めることで、既にキューに入っている
-    // バックグラウンド問い合わせの結果が、後から復帰したセッションのUIを
-    // 誤って更新してしまう（＝古い結果で新しい状態を上書きする）ことを防ぐ。
+    
+    
+    
     private final AtomicInteger pollGeneration = new AtomicInteger(0);
 
     private final Runnable updateRunnable = new Runnable() {
@@ -74,7 +74,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                 return;
             }
 
-            // まだ完了/失敗していないダウンロードIDだけを抽出する（軽量なのでUIスレッドで実行）。
+            
             final List<Long> pendingIds = new ArrayList<>();
             for (int i = 0, size = itemsSnapshot.size(); i < size; i++) {
                 DownloadItem item = itemsSnapshot.get(i);
@@ -88,13 +88,13 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                 return;
             }
 
-            // DownloadManager への問い合わせ（ContentProvider経由でブロッキングしうる）は
-            // メインスレッドを塞がないようバックグラウンドで実行する。
+            
+            
             executor.execute(() -> {
                 final Map<Long, DownloadItem> updates = new HashMap<>();
                 for (Long id : pendingIds) {
                     if (pollGeneration.get() != myGeneration) {
-                        return; // 画面が非表示になった等で世代が変わったため破棄
+                        return; 
                     }
                     DownloadItem updated = getDownloadItem(id);
                     if (updated != null) {

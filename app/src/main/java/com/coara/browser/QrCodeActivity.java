@@ -361,7 +361,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         if (urlStart != -1) {
             int urlEnd = urlStart + content.length();
             spannable.setSpan(new ForegroundColorSpan(Color.GRAY), urlStart, urlEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            spannable.setSpan(new AbsoluteSizeSpan(14, true), urlStart, urlEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); // Smaller size, e.g., 14sp
+            spannable.setSpan(new AbsoluteSizeSpan(14, true), urlStart, urlEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE); 
         }
     }
 
@@ -437,7 +437,7 @@ public class QrCodeActivity extends AppCompatActivity implements SurfaceHolder.C
         QRCodeWriter writer = new QRCodeWriter();
         try {
             BitMatrix bitMatrix = writer.encode(text, BarcodeFormat.QR_CODE, width, height);
-            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565); // Optimized: Use RGB_565 for lower memory usage
+            Bitmap bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565); 
             for (int x = 0; x < width; x++) {
                 for (int y = 0; y < height; y++) {
                     bitmap.setPixel(x, y, bitMatrix.get(x, y) ? Color.BLACK : Color.WHITE);

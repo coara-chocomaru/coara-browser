@@ -137,7 +137,7 @@ public class num extends AppCompatActivity {
                     if (divisor.compareTo(BigDecimal.ZERO) == 0) {
                         throw new ArithmeticException("ゼロ除算");
                     }
-                    x = x.divide(divisor, MathContext.DECIMAL64); // 高精度除算
+                    x = x.divide(divisor, MathContext.DECIMAL64); 
                 } else {
                     return x;
                 }

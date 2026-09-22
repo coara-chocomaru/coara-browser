@@ -11,16 +11,16 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
-/**
- * Application entry point.
- *
- * This class does not change any existing runtime behaviour: it only installs a
- * defensive, best-effort crash logger on top of whatever default handler Android
- * already had. Any uncaught exception is written to a small rotating log file
- * under getFilesDir()/crash_logs/ before control is handed back to the previous
- * handler, so the process still terminates exactly as it always did (no behaviour
- * change), but the next launch can optionally surface diagnostics.
- */
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
 public class BrowserApplication extends Application {
 
     private static final String CRASH_DIR_NAME = "crash_logs";
@@ -38,7 +38,7 @@ public class BrowserApplication extends Application {
             try {
                 writeCrashLog(thread, throwable);
             } catch (Throwable ignored) {
-                // Never let the logger itself interfere with the real crash handling.
+                
             }
             if (previous != null) {
                 previous.uncaughtException(thread, throwable);
@@ -68,7 +68,7 @@ public class BrowserApplication extends Application {
             throwable.printStackTrace(new PrintWriter(sw));
             pw.println(sw);
         } catch (Exception ignored) {
-            // Best effort only; never throw from inside a crash handler.
+            
         }
     }
 
@@ -80,7 +80,7 @@ public class BrowserApplication extends Application {
         java.util.Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
         int toDelete = files.length - MAX_CRASH_LOGS + 1;
         for (int i = 0; i < toDelete && i < files.length; i++) {
-            //noinspection ResultOfMethodCallIgnored
+            
             files[i].delete();
         }
     }

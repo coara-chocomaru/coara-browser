@@ -207,9 +207,9 @@ public class MainActivity extends AppCompatActivity {
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
-    // ページ遷移時に一度だけ計算した「Pull-to-Refresh を許可してよいか」を保持するキャッシュ。
-    // SwipeRefreshLayout の子スクロール判定はドラッグ中に毎フレーム呼ばれるため、
-    // ここに無ければ正規表現ベースのURL判定を毎フレーム再実行してしまう。
+    
+    
+    
     private final Map<WebView, Boolean> pullToRefreshEligibleCache = new HashMap<>();
 
     private final ActivityResultLauncher<Intent> launchProtectionLauncher = registerForActivityResult(
@@ -384,7 +384,7 @@ public class MainActivity extends AppCompatActivity {
             if (current == null) return true;
             Boolean cached = pullToRefreshEligibleCache.get(current);
             if (cached == null) {
-                // キャッシュがまだ無い場合のみフルの判定を行い、以降のフレームのために記録する。
+                
                 cached = SwipeRefreshPolicy.shouldEnablePullToRefresh(current, current.getUrl());
                 pullToRefreshEligibleCache.put(current, cached);
             }
@@ -1135,10 +1135,10 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
-                // WebView のレンダラープロセスが（低メモリ端末でのOSによるkillなどで）
-                // 落ちた場合、ここで false を返す（＝デフォルト動作）とアプリ全体が
-                // クラッシュしてしまう。true を返して自前でリカバリすることで、
-                // 対象タブだけを安全に破棄・再生成し、アプリ全体の強制終了を防ぐ。
+                
+                
+                
+                
                 try {
                     boolean crashed = detail != null && detail.didCrash();
                     String lastUrl = null;
@@ -1167,8 +1167,8 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, android.webkit.WebResourceError error) {
                 super.onReceivedError(view, request, error);
-                // 既存の見た目・挙動は変えない（WebView 標準のエラー表示に任せる）。
-                // メインフレームの読み込み失敗のみ最小限のログを残し、原因調査を助ける。
+                
+                
                 try {
                     if (request != null && request.isForMainFrame()) {
                         android.util.Log.w("CoaraBrowser", "Main frame load error: "
@@ -1413,17 +1413,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    /**
-     * onRenderProcessGone からの復旧処理。
-     * クラッシュしたレンダラーに紐づく WebView インスタンスはそのまま再利用できないため、
-     * 同じタブの位置に新しい WebView を差し替えて、直前のURLを再読み込みする。
-     * 他のタブや currentTabIndex には影響を与えない。
-     */
+     
+ 
+ 
+ 
+ 
+ 
     private void recoverFromRenderProcessGone(WebView crashed, String recoverUrl) {
         synchronized (webViews) {
             int index = webViews.indexOf(crashed);
             if (index == -1) {
-                // 既に閉じられている等で対象が見つからない場合は何もしない。
+                
                 try {
                     crashed.destroy();
                 } catch (Exception ignored) {
@@ -1468,7 +1468,7 @@ public class MainActivity extends AppCompatActivity {
                 urlEditText.setText(recoverUrl);
                 updatePullToRefreshState(replacement, recoverUrl);
             } else {
-                // 非表示タブの復旧は既存の loadTabsState と同じ方式（読み込んだ上で pause）に揃える。
+                
                 replacement.loadUrl(recoverUrl);
                 replacement.onPause();
             }
@@ -2708,13 +2708,13 @@ private void showHistoryDialog() {
             }
         }
 
-        // メモリ削減: タブ一覧のプレビューは小さいサムネイルとしてしか表示されないため、
-        // (1) 画面フル解像度のARGB_8888バッファを一度確保してから縮小するのではなく、
-        //     最初から目的のサイズへ Canvas.scale して直接描画することで、
-        //     ピーク時に必要な一時メモリと縮小処理そのものを丸ごと削減する。
-        // (2) プレビューに透過は不要なため、1px あたり4byte の ARGB_8888 ではなく
-        //     1px あたり2byte で済む RGB_565 を使い、保持メモリを概ね半分にする。
-        //     見た目への影響は小さいサムネイルでは実用上ほぼ判別できない。
+        
+        
+        
+        
+        
+        
+        
         int maxPreviewWidth = 480;
         float scale = width > maxPreviewWidth ? (float) maxPreviewWidth / (float) width : 1f;
         int targetWidth = Math.max(1, Math.round(width * scale));
@@ -2729,8 +2729,8 @@ private void showHistoryDialog() {
             }
             webView.draw(canvas);
         } catch (OutOfMemoryError oom) {
-            // 低メモリ端末での保険: サムネイル生成に失敗してもクラッシュさせず、
-            // プレビューなし（背景色のみ）にフォールバックする。
+            
+            
             snapshot = null;
         }
 
