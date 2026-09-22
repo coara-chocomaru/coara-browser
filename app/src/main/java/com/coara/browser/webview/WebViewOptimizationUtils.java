@@ -52,6 +52,9 @@ public final class WebViewOptimizationUtils {
                     WebSettingsCompat.DARK_STRATEGY_PREFER_WEB_THEME_OVER_USER_AGENT_DARKENING
             );
         }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, java.util.Collections.emptySet());
+        }
     }
 
     public static void applyCombinedOptimizations(WebView webView) {
