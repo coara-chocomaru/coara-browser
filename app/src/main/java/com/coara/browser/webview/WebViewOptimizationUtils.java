@@ -10,6 +10,7 @@ import androidx.webkit.WebViewFeature;
 public final class WebViewOptimizationUtils {
     private WebViewOptimizationUtils() {}
 
+    @SuppressWarnings("deprecation")
     public static void applyOptimizedSettings(WebSettings settings, boolean darkModeEnabled) {
         settings.setJavaScriptEnabled(true);
         settings.setAllowFileAccess(true);
@@ -26,7 +27,6 @@ public final class WebViewOptimizationUtils {
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(true);
         settings.setDefaultTextEncodingName("UTF-8");
-        settings.setRenderPriority(WebSettings.RenderPriority.HIGH);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             settings.setOffscreenPreRaster(true);
