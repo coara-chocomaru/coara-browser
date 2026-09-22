@@ -47,8 +47,8 @@ public final class TabOverviewDialog {
         RecyclerView recyclerView = new RecyclerView(activity);
         recyclerView.setLayoutManager(new GridLayoutManager(activity, 2));
         recyclerView.setNestedScrollingEnabled(true);
-        // Item size/type never changes after bind, so RecyclerView can skip a layout pass
-        // on every notify — a small but free performance win for the tab grid.
+        
+        
         recyclerView.setHasFixedSize(true);
         recyclerView.setItemViewCacheSize(8);
 
@@ -61,8 +61,8 @@ public final class TabOverviewDialog {
         TabOverviewAdapter adapter = new TabOverviewAdapter(activity, host, dialog);
         recyclerView.setAdapter(adapter);
 
-        // 追加の閉じ方: カードを左右にスワイプすると、既存の×ボタンに加えて
-        // そのタブを閉じられるようにする（既存の閉じ方は変更しない）。
+        
+        
         ItemTouchHelper swipeToCloseHelper = new ItemTouchHelper(
                 new SwipeToCloseCallback(activity, host, adapter));
         swipeToCloseHelper.attachToRecyclerView(recyclerView);
@@ -77,12 +77,12 @@ public final class TabOverviewDialog {
         dialog.show();
     }
 
-    /**
-     * 横方向のスワイプでタブを閉じるための ItemTouchHelper.Callback。
-     * Host はタブ数を直接返す設計のため、スワイプ後に実際にタブが削除されたか
-     * （最後の1枚はスタートページへ戻るだけで削除されない）を件数差分で判定し、
-     * 削除時のみアイテム削除アニメーションを、そうでない場合は再バインドのみを行う。
-     */
+     
+ 
+ 
+ 
+ 
+ 
     private static final class SwipeToCloseCallback extends ItemTouchHelper.SimpleCallback {
         private final Activity activity;
         private final Host host;
@@ -127,8 +127,8 @@ public final class TabOverviewDialog {
                     adapter.notifyItemRangeChanged(position, afterCount - position);
                 }
             } else {
-                // 最後の1タブはクローズされずスタートページへ遷移しただけなので、
-                // 見た目上は元の位置に留めて内容だけ更新する。
+                
+                
                 adapter.notifyItemChanged(position);
             }
         }

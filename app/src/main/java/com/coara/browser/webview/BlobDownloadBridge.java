@@ -24,7 +24,7 @@ public class BlobDownloadBridge {
             byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
             File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
             if (!downloadDir.exists()) {
-                //noinspection ResultOfMethodCallIgnored
+                
                 downloadDir.mkdirs();
             }
             File file = new File(downloadDir, fileName);
