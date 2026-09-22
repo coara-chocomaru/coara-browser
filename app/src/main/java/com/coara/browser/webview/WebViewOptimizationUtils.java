@@ -228,4 +228,13 @@ public final class WebViewOptimizationUtils {
                 + "})();";
         webView.evaluateJavascript(js, null);
     }
+
+    public static String sanitizeUserAgent(String userAgent) {
+        if (userAgent == null || userAgent.isEmpty()) {
+            return userAgent;
+        }
+        String sanitized = userAgent.replace("; wv)", ")");
+        sanitized = sanitized.replace(" Version/4.0", "");
+        return sanitized;
+    }
 }
