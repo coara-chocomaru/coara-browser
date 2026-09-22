@@ -23,6 +23,7 @@ public final class WebViewOptimizationUtils {
         settings.setDisplayZoomControls(false);
         settings.setBuiltInZoomControls(false);
         settings.setSupportZoom(false);
+        settings.setSupportMultipleWindows(true);
         settings.setCacheMode(WebSettings.LOAD_DEFAULT);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setMediaPlaybackRequiresUserGesture(true);
