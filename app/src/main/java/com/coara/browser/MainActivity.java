@@ -145,7 +145,6 @@ public class MainActivity extends AppCompatActivity {
     private static final String KEY_CURRENT_TAB = BrowserConstants.KEY_CURRENT_TAB;
     private static final String KEY_BOOKMARKS = BrowserConstants.KEY_BOOKMARKS;
     private static final String KEY_HISTORY = BrowserConstants.KEY_HISTORY;
-    private static final String APPEND_STR = BrowserConstants.APPEND_STR;
     private static final String START_PAGE = BrowserConstants.START_PAGE;
     private static final int FILE_SELECT_CODE = BrowserConstants.FILE_SELECT_CODE;
     private static final int MAX_TABS = BrowserConstants.MAX_TABS;
@@ -659,6 +658,7 @@ public class MainActivity extends AppCompatActivity {
         tabSnapshots.clear();
     }
 
+    @SuppressWarnings("deprecation")
     private void trimBrowserMemory(int level) {
         if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && faviconCache != null) {
             try {
@@ -916,8 +916,6 @@ public class MainActivity extends AppCompatActivity {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
-            String defaultUA = settings.getUserAgentString();
-            settings.setUserAgentString(defaultUA + APPEND_STR);
             webView.onPause();
             preloadedWebView = webView;
         }
@@ -983,12 +981,10 @@ public class MainActivity extends AppCompatActivity {
             settings.setUserAgentString("DoCoMo/2.0 SH902i(c100;TB)");
         } else if (deskuaEnabled) {
             String desktopUA = defaultUA.replace("Mobile", "").replace("Android", "");
-            settings.setUserAgentString(desktopUA + APPEND_STR);
+            settings.setUserAgentString(desktopUA);
         } else if (ct3uaEnabled) {
             settings.setUserAgentString("Mozilla/5.0 (Linux; Android 7.0; TAB-A03-BR3 Build/02.05.000; wv) " +
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
-        } else {
-            settings.setUserAgentString(defaultUA + APPEND_STR);
         }
 
         webView.addJavascriptInterface(new BlobDownloadBridge(this), "BlobDownloader");
@@ -1193,10 +1189,6 @@ public class MainActivity extends AppCompatActivity {
                 return BrowserUrlRouter.handleUrlLoading(MainActivity.this, view, request.getUrl().toString());
             }
             @Override
-            public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                return BrowserUrlRouter.handleUrlLoading(MainActivity.this, view, url);
-            }
-            @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 
                 SpaStateManager.getInstance().clearState(view);
@@ -1246,30 +1238,6 @@ public class MainActivity extends AppCompatActivity {
             if (swipeRefreshLayout.isRefreshing()) {
               swipeRefreshLayout.setRefreshing(false);
             }
-          String jsOverrideHistory = "(function(){" +
-          "try{" +
-          "if(!window.__coaraHistoryHooked){" +
-          "window.__coaraHistoryHooked=true;" +
-          "window.__coaraLastHref=location.href;" +
-          "var notifyUrlChange=function(force){" +
-          "var href=location.href;" +
-          "if(!force&&href===window.__coaraLastHref)return;" +
-          "window.__coaraLastHref=href;" +
-          "try{AndroidBridge.onUrlChange(href);}catch(ex){}" +
-          "};" +
-          "var pushState=history.pushState;" +
-          "history.pushState=function(){var r=pushState.apply(history,arguments);notifyUrlChange(true);return r;};" +
-          "var replaceState=history.replaceState;" +
-          "history.replaceState=function(){var r=replaceState.apply(history,arguments);notifyUrlChange(true);return r;};" +
-          "window.addEventListener('popstate',function(){notifyUrlChange(true);});" +
-          "window.addEventListener('hashchange',function(){notifyUrlChange(true);});" +
-          "notifyUrlChange(true);" +
-          "}else{" +
-          "try{AndroidBridge.onUrlChange(location.href);}catch(ex2){}" +
-          "}" +
-          "}catch(e){}" +
-          "})();"; 
-            view.evaluateJavascript(jsOverrideHistory, null); 
             if (view == getCurrentWebView()) {
                 captureTabSnapshot(view);
             }
@@ -1529,6 +1497,7 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    @SuppressWarnings("deprecation")
     private void maybeRequestLaunchProtection() {
         if (!com.coara.browser.util.PinLockManager.shouldPromptLock(this)) {
             return;
@@ -1610,8 +1579,14 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 try {
                     webViewContainer.removeAllViews();
-                    webViewContainer.addView(getCurrentWebView());
-                    updatePullToRefreshState(getCurrentWebView(), getCurrentWebView().getUrl());
+                    WebView newCurrent = getCurrentWebView();
+                    webViewContainer.addView(newCurrent);
+                    try {
+                        newCurrent.onResume();
+                    } catch (Exception ignored) {
+                    }
+                    urlEditText.setText(newCurrent.getUrl());
+                    updatePullToRefreshState(newCurrent, newCurrent.getUrl());
                     updateTabCount();
                 } catch (Exception ignored) {
                 }
@@ -2003,6 +1978,7 @@ public class MainActivity extends AppCompatActivity {
         return super.onPrepareOptionsMenu(menu);
     }
     @Override
+    @SuppressWarnings("deprecation")
     public boolean onOptionsItemSelected(MenuItem item) {
         int id = item.getItemId();
         if (id == R.id.action_tabs) {
@@ -2377,6 +2353,7 @@ private void saveScreenshot(Bitmap bitmap) {
     });
 }
 
+    @SuppressWarnings("deprecation")
     private void updateDarkMode() {
         for (WebView webView : webViews) {
             WebSettings settings = webView.getSettings();
@@ -2402,9 +2379,7 @@ private void saveScreenshot(Bitmap bitmap) {
         WebSettings settings = getCurrentWebView().getSettings();
         String originalUA = originalUserAgents.get(getCurrentWebView());
         if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+            settings.setUserAgentString(originalUA);
         }
         Toast.makeText(MainActivity.this, "CT3UA解除", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
@@ -2417,7 +2392,7 @@ private void saveScreenshot(Bitmap bitmap) {
             originalUA = settings.getUserAgentString();
         }
         String desktopUA = originalUA.replace("Mobile", "").replace("Android", "");
-        settings.setUserAgentString(desktopUA + APPEND_STR);
+        settings.setUserAgentString(desktopUA);
         Toast.makeText(MainActivity.this, "デスクトップ表示有効", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
     }
@@ -2426,9 +2401,7 @@ private void saveScreenshot(Bitmap bitmap) {
         WebSettings settings = getCurrentWebView().getSettings();
         String originalUA = originalUserAgents.get(getCurrentWebView());
         if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+            settings.setUserAgentString(originalUA);
         }
         reloadCurrentPage();
         Toast.makeText(MainActivity.this, "デスクトップ表示無効", Toast.LENGTH_SHORT).show();
@@ -2445,9 +2418,7 @@ private void saveScreenshot(Bitmap bitmap) {
         WebSettings settings = getCurrentWebView().getSettings();
         String originalUA = originalUserAgents.get(getCurrentWebView());
         if (originalUA != null) {
-            settings.setUserAgentString(originalUA + APPEND_STR);
-        } else {
-            settings.setUserAgentString(APPEND_STR.trim());
+            settings.setUserAgentString(originalUA);
         }
         Toast.makeText(MainActivity.this, "ガラケーUA解除", Toast.LENGTH_SHORT).show();
         reloadCurrentPage();
@@ -2494,6 +2465,7 @@ private void saveScreenshot(Bitmap bitmap) {
         webView.reload();
         Toast.makeText(MainActivity.this, "画像ブロック無効", Toast.LENGTH_SHORT).show();
     }
+    @SuppressWarnings("deprecation")
     private void showFindInPageBar() {
     if (findInPageBarView == null) {
         LayoutInflater inflater = LayoutInflater.from(this);
@@ -3218,7 +3190,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             });
             if (managementMode) {
             holder.itemView.setOnLongClickListener(v -> {
-                int currentPosition = holder.getAdapterPosition();
+                int currentPosition = holder.getBindingAdapterPosition();
                 if (currentPosition == RecyclerView.NO_POSITION) return true;
                 String[] options = {"編集", "削除"};
                 new MaterialAlertDialogBuilder(MainActivity.this)
