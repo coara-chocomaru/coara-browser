@@ -911,11 +911,18 @@ public class MainActivity extends AppCompatActivity {
         WebViewOptimizationUtils.applyOptimizedSettings(settings, darkModeEnabled);
     }
 
+    private void applyCookiePolicy(WebView webView) {
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.setAcceptCookie(true);
+        cookieManager.setAcceptThirdPartyCookies(webView, true);
+    }
+
     private void preInitializeWebView() {
         runOnUiThread(new Runnable() { @Override public void run() {
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
+            applyCookiePolicy(webView);
             webView.onPause();
             preloadedWebView = webView;
         }
@@ -942,6 +949,7 @@ public class MainActivity extends AppCompatActivity {
         String defaultUA = settings.getUserAgentString();
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
+        applyCookiePolicy(webView);
         
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             if (sSetSaveFormDataMethod != null) {

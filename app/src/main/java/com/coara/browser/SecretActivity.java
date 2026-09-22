@@ -829,6 +829,9 @@ public class SecretActivity extends AppCompatActivity {
             WebSettingsCompat.setForceDark(settings, darkModeEnabled ?
                     WebSettingsCompat.FORCE_DARK_ON : WebSettingsCompat.FORCE_DARK_OFF);
         }
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.REQUESTED_WITH_HEADER_ALLOW_LIST)) {
+            WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, java.util.Collections.emptySet());
+        }
     }
     private void preInitializeWebView() {
         runOnUiThread(() -> {
