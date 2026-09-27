@@ -79,19 +79,6 @@ public final class SwipeRefreshPolicy {
             Pattern.CASE_INSENSITIVE
     );
 
-    private static final Pattern DEEP_SPA_PATH = Pattern.compile(
-            "^(/[^/.?#]+){3,}$"
-    );
-
-    private static final Pattern FILE_EXT_AT_END = Pattern.compile(
-            "/[^/?#]+\\.[a-zA-Z0-9]{2,5}(\\?[^#]*)?$"
-    );
-
-    private static final Pattern SPA_QUERY_PARAMS = Pattern.compile(
-            "(^|&)(page|view|tab|section|step|panel|mode|screen|route)=",
-            Pattern.CASE_INSENSITIVE
-    );
-
     
     
     
@@ -141,15 +128,6 @@ public final class SwipeRefreshPolicy {
 
         if (fragment != null && HASH_ROUTING.matcher(fragment).find()) return false;
         if (HASH_ROUTING.matcher(url).find()) return false;
-
-        if (!normPath.isEmpty()) {
-            if (!FILE_EXT_AT_END.matcher(normPath).find()
-                    && DEEP_SPA_PATH.matcher(normPath).matches()) {
-                return false;
-            }
-        }
-
-        if (!normQuery.isEmpty() && SPA_QUERY_PARAMS.matcher(normQuery).find()) return false;
 
         return true;
     }
