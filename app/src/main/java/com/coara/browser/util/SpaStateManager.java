@@ -57,9 +57,13 @@ public final class SpaStateManager {
         synchronized (state) {
             state.lastUrl = url;
             state.sameDocumentNavigations++;
-            if (pageInitiated && state.sameDocumentNavigations == 1) {
-                state.score = clamp(state.score + 1);
+            int gain;
+            if (pageInitiated) {
+                gain = state.sameDocumentNavigations == 1 ? 3 : 1;
+            } else {
+                gain = 1;
             }
+            state.score = clamp(state.score + gain);
         }
     }
 
