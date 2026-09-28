@@ -5,10 +5,13 @@ import android.app.DownloadManager;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.database.Cursor;
-import android.os.SystemClock;
 import android.widget.Toast;
 
 import com.coara.browser.util.BrowserConstants;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -48,41 +51,58 @@ public class DownloadHistoryManager {
         }
     }
 
+    private static final ScheduledExecutorService MONITOR_EXECUTOR =
+            Executors.newScheduledThreadPool(2, runnable -> {
+                Thread thread = new Thread(runnable, "CoaraDownloadMonitor");
+                thread.setDaemon(true);
+                return thread;
+            });
+
     public static void monitorDownloadProgress(Context context, long downloadId, DownloadManager dm) {
-        Thread worker = new Thread(() -> {
-            long lastProgressTime = SystemClock.elapsedRealtime();
-            while (!Thread.currentThread().isInterrupted()) {
-                DownloadManager.Query query = new DownloadManager.Query();
-                query.setFilterById(downloadId);
+        if (dm == null || downloadId <= 0) {
+            return;
+        }
+        final java.util.concurrent.ScheduledFuture<?>[] futureHolder = new java.util.concurrent.ScheduledFuture<?>[1];
+        Runnable task = () -> {
+            boolean finish = false;
+            try {
+                DownloadManager.Query query = new DownloadManager.Query().setFilterById(downloadId);
                 try (Cursor cursor = dm.query(query)) {
-                    if (cursor != null && cursor.moveToFirst()) {
-                        int bytesDownloaded = safeGetInt(cursor, DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
+                    if (cursor == null || !cursor.moveToFirst()) {
+                        finish = true;
+                    } else {
                         int status = safeGetInt(cursor, DownloadManager.COLUMN_STATUS);
-                        if (status == DownloadManager.STATUS_SUCCESSFUL || status == DownloadManager.STATUS_FAILED) {
-                            break;
-                        }
-                        if (bytesDownloaded > 0) {
-                            lastProgressTime = SystemClock.elapsedRealtime();
-                        } else if (SystemClock.elapsedRealtime() - lastProgressTime > 60000) {
-                            dm.remove(downloadId);
-                            postToast(context, "ダウンロードが進行しなかったためキャンセルしました");
-                            break;
+                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            finish = true;
+                        } else if (status == DownloadManager.STATUS_FAILED) {
+                            int reason = safeGetInt(cursor, DownloadManager.COLUMN_REASON);
+                            String message = reason == 0
+                                    ? "ダウンロードに失敗しました"
+                                    : "ダウンロードに失敗しました (" + reason + ")";
+                            postToast(context, message);
+                            finish = true;
+                        } else {
+                            safeGetLong(cursor, DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR);
+                            safeGetLong(cursor, DownloadManager.COLUMN_TOTAL_SIZE_BYTES);
                         }
                     }
-                } catch (Exception e) {
-                    e.printStackTrace();
                 }
-
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
+            } catch (Exception ignored) {
             }
-        }, "DownloadMonitor-" + downloadId);
-        worker.setDaemon(true);
-        worker.start();
+            if (finish && futureHolder[0] != null) {
+                futureHolder[0].cancel(false);
+            }
+        };
+        futureHolder[0] = MONITOR_EXECUTOR.scheduleWithFixedDelay(task, 1L, 2L, TimeUnit.SECONDS);
+    }
+
+    private static long safeGetLong(Cursor cursor, String columnName) {
+        try {
+            int index = cursor.getColumnIndexOrThrow(columnName);
+            return cursor.getLong(index);
+        } catch (Exception ignored) {
+            return 0L;
+        }
     }
 
     private static void postToast(Context context, String message) {
