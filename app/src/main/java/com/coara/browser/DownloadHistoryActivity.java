@@ -782,7 +782,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                                                    DownloadSupport.addHeaderIfSafe(request, "Referer", currentItem.referer);
                                                    DownloadSupport.addHeaderIfSafe(request, "Cookie", CookieManager.getInstance().getCookie(currentItem.downloadUrl));
                                                    DownloadSupport.addHeaderIfSafe(request, "Authorization", BasicAuthManager.getAuthorizationHeaderForUrl(currentItem.downloadUrl, currentItem.basicAuthEnabled));
-                                                   request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                                                   request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
                                                    request.setAllowedOverMetered(true);
                                                    request.setAllowedOverRoaming(true);
                                                    String resumeName = DownloadSupport.resolveUniqueDownloadFileName(DownloadHistoryActivity.this, currentItem.title);

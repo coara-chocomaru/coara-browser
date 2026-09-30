@@ -373,6 +373,7 @@ public class DownloadHistoryManager {
                             break;
                         }
                         DownloadFallbackManager.clear(downloadId);
+                        DownloadFallbackManager.postCompleteNotification(context, downloadId, title);
                         break;
                     }
                     if (status == DownloadManager.STATUS_FAILED) {

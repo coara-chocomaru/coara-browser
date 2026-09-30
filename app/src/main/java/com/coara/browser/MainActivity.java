@@ -2403,9 +2403,10 @@ public class MainActivity extends AppCompatActivity {
             request.setTitle(fileName);
             request.setDescription("画像を保存中...");
             request.allowScanningByMediaScanner();
-            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_PICTURES, fileName);
-            dm.enqueue(request);
+            long downloadId = dm.enqueue(request);
+            DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
             Toast.makeText(MainActivity.this,
                     "画像の保存を開始しました", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
