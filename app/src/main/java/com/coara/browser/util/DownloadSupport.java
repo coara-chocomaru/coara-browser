@@ -17,7 +17,7 @@ import android.webkit.WebView;
 import com.coara.browser.DownloadHistoryManager;
 import android.database.Cursor;
 
-import java.io.UnsupportedEncodingException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -105,6 +105,40 @@ public final class DownloadSupport {
         }
     }
 
+    public static boolean shouldPreferDirectFallback(String url, String contentDisposition, String mimeType) {
+        if (isBlank(url) || !BrowserUrlRouter.isWebUrl(url)) {
+            return false;
+        }
+        if (!isBlank(contentDisposition)) {
+            return false;
+        }
+        String value = url.toLowerCase(Locale.ROOT);
+        String path = "";
+        String query = "";
+        try {
+            Uri uri = Uri.parse(url);
+            path = uri.getPath() == null ? "" : uri.getPath().toLowerCase(Locale.ROOT);
+            query = uri.getQuery() == null ? "" : uri.getQuery().toLowerCase(Locale.ROOT);
+        } catch (Exception ignored) {
+        }
+        String last = null;
+        try {
+            last = Uri.parse(url).getLastPathSegment();
+        } catch (Exception ignored) {
+        }
+        boolean lastHasExtension = hasRecognizedDownloadExtension(last);
+        String normalizedMime = normalizeMimeType(mimeType, url);
+        boolean genericMime = isBlank(mimeType) || "application/octet-stream".equals(normalizedMime);
+        boolean dynamicEndpoint = path.contains("/b/apk/") || path.contains("/b/xapk/") || path.contains("/b/apks/")
+                || query.contains("version=latest") || query.contains("download=") || query.contains("download_url=")
+                || query.contains("response-content-disposition=");
+        boolean packageLike = !isBlank(last) && last.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_-]*){1,8}");
+        if (!lastHasExtension && dynamicEndpoint) {
+            return true;
+        }
+        return !lastHasExtension && genericMime && (packageLike || value.contains("download"));
+    }
+
     public static String resolveFileName(String url, String contentDisposition, String mimeType) {
         String fileName = parseContentDispositionFileName(contentDisposition);
         if (isBlank(fileName)) {
@@ -132,6 +166,13 @@ public final class DownloadSupport {
             }
         }
         fileName = sanitizeFileName(fileName);
+        if (isBlank(fileName) || isWeakFileName(fileName)
+                || (!hasRecognizedDownloadExtension(fileName) && looksLikeApkContext(url, mimeType))) {
+            String packageName = extractPackageLikeFileName(url);
+            if (!isBlank(packageName) && looksLikeApkContext(url, mimeType)) {
+                fileName = packageName + ".apk";
+            }
+        }
         if (isBlank(fileName)) {
             String host = extractHost(url);
             fileName = !isBlank(host) ? host + "_download" : "download";
@@ -145,6 +186,121 @@ public final class DownloadSupport {
             fileName = sanitizeFileName(base) + ext;
         }
         return fileName;
+    }
+
+    public static String refineFileName(String fileName, String sourceUrl, String mimeType, byte[] sample, int sampleLength) {
+        String result = sanitizeFileName(fileName);
+        String normalizedMime = normalizeMimeType(mimeType, sourceUrl);
+        String extension = hasRecognizedDownloadExtension(result) ? extensionOf(result) : "";
+        String magicExtension = extensionFromMagic(sample, sampleLength);
+        if (isBlank(result) || isWeakFileName(result)) {
+            String packageName = extractPackageLikeFileName(sourceUrl);
+            if (!isBlank(packageName) && looksLikeApkContext(sourceUrl, normalizedMime)) {
+                result = packageName + ".apk";
+            } else if (!isBlank(magicExtension)) {
+                String base = isBlank(result) ? "download" : result;
+                result = stripExtension(base) + magicExtension;
+            }
+        } else if (extension.isEmpty() && !magicExtension.isEmpty()) {
+            result += magicExtension;
+        }
+        result = ensureExtension(result, normalizedMime, sourceUrl);
+        if (isBlank(result)) {
+            result = "download";
+        }
+        return sanitizeFileName(result);
+    }
+
+    public static boolean looksLikeHtml(byte[] data, int length) {
+        if (data == null || length <= 0) {
+            return false;
+        }
+        int safeLength = Math.min(length, data.length);
+        String sample = new String(data, 0, safeLength, StandardCharsets.UTF_8).trim().toLowerCase(Locale.ROOT);
+        return sample.startsWith("<!doctype html") || sample.startsWith("<html") || sample.startsWith("<head")
+                || sample.startsWith("<body") || sample.startsWith("<title") || sample.startsWith("<script")
+                || sample.startsWith("<meta") || sample.startsWith("<div");
+    }
+
+    public static boolean looksLikeExpectedBinary(String fileName, String mimeType, byte[] data, int length) {
+        if (looksLikeHtml(data, length)) {
+            String normalized = normalizeMimeType(mimeType, fileName);
+            return !normalized.startsWith("text/html") && !normalized.startsWith("application/xhtml+xml");
+        }
+        String ext = extensionOf(fileName).toLowerCase(Locale.ROOT);
+        String magic = extensionFromMagic(data, length);
+        if (ext.isEmpty() || magic.isEmpty()) {
+            return true;
+        }
+        if (ext.equals(".apk") || ext.equals(".xapk") || ext.equals(".apks") || ext.equals(".zip")) {
+            return magic.equals(".zip");
+        }
+        if (ext.equals(".pdf")) return magic.equals(".pdf");
+        if (ext.equals(".png")) return magic.equals(".png");
+        if (ext.equals(".jpg") || ext.equals(".jpeg")) return magic.equals(".jpg");
+        if (ext.equals(".gif")) return magic.equals(".gif");
+        if (ext.equals(".gz")) return magic.equals(".gz");
+        if (ext.equals(".7z")) return magic.equals(".7z");
+        if (ext.equals(".rar")) return magic.equals(".rar");
+        return true;
+    }
+
+    public static boolean hasRecognizedDownloadExtension(String value) {
+        if (isBlank(value)) return false;
+        String lower = value.toLowerCase(Locale.ROOT);
+        String[] extensions = {
+                ".apk", ".xapk", ".apks", ".zip", ".7z", ".rar", ".gz", ".bz2", ".tar", ".tgz",
+                ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".jpg", ".jpeg", ".png",
+                ".gif", ".webp", ".svg", ".bmp", ".mp3", ".m4a", ".mp4", ".webm", ".flac", ".wav",
+                ".bin", ".exe", ".dmg", ".iso", ".msi", ".deb", ".rpm", ".jar", ".aar", ".json", ".xml",
+                ".txt", ".csv", ".html", ".htm", ".css", ".js", ".mjs", ".7z.001"
+        };
+        for (String extension : extensions) {
+            if (lower.endsWith(extension)) return true;
+        }
+        return false;
+    }
+
+    private static String extractPackageLikeFileName(String url) {
+        if (isBlank(url)) return null;
+        try {
+            String last = Uri.parse(url).getLastPathSegment();
+            if (isBlank(last)) return null;
+            String decoded = URLDecoder.decode(last, StandardCharsets.UTF_8.name());
+            if (decoded.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_-]*){1,8}")) {
+                return sanitizeFileName(decoded);
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static boolean looksLikeApkContext(String url, String mimeType) {
+        String value = isBlank(url) ? "" : url.toLowerCase(Locale.ROOT);
+        String mime = isBlank(mimeType) ? "" : mimeType.toLowerCase(Locale.ROOT);
+        return mime.contains("apk") || value.contains("/b/apk/") || value.contains(".apk?") || value.contains("/apk/");
+    }
+
+    private static String extensionFromMagic(byte[] data, int length) {
+        if (data == null || length <= 0) return "";
+        int n = Math.min(length, data.length);
+        if (n >= 4 && (data[0] & 0xff) == 0x50 && (data[1] & 0xff) == 0x4b
+                && (data[2] & 0xff) == 0x03 && (data[3] & 0xff) == 0x04) return ".zip";
+        if (n >= 5 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F' && data[4] == '-') return ".pdf";
+        if (n >= 8 && (data[0] & 0xff) == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G'
+                && (data[4] & 0xff) == 0x0d && (data[5] & 0xff) == 0x0a && (data[6] & 0xff) == 0x1a && (data[7] & 0xff) == 0x0a) return ".png";
+        if (n >= 3 && (data[0] & 0xff) == 0xff && (data[1] & 0xff) == 0xd8 && (data[2] & 0xff) == 0xff) return ".jpg";
+        if (n >= 6 && data[0] == 'G' && data[1] == 'I' && data[2] == 'F' && data[3] == '8') return ".gif";
+        if (n >= 2 && (data[0] & 0xff) == 0x1f && (data[1] & 0xff) == 0x8b) return ".gz";
+        if (n >= 6 && (data[0] & 0xff) == 0x37 && (data[1] & 0xff) == 0x7a && (data[2] & 0xff) == 0xbc
+                && (data[3] & 0xff) == 0xaf && (data[4] & 0xff) == 0x27 && (data[5] & 0xff) == 0x1c) return ".7z";
+        if (n >= 4 && data[0] == 'R' && data[1] == 'a' && data[2] == 'r' && data[3] == '!') return ".rar";
+        return "";
+    }
+
+    private static String stripExtension(String value) {
+        String ext = extensionOf(value);
+        return ext.isEmpty() ? value : value.substring(0, value.length() - ext.length());
     }
 
     public static String resolveUniqueDownloadFileName(Context context, String fileName) {
@@ -472,13 +628,9 @@ public final class DownloadSupport {
         if (context == null || isBlank(localUri)) {
             return false;
         }
-        if (!isLikelyBinaryDownload(fileName, mimeType)) {
-            return false;
-        }
-        InputStreamHolder holder = null;
+        java.io.InputStream in = null;
         try {
             Uri uri = Uri.parse(localUri);
-            java.io.InputStream in;
             if ("content".equalsIgnoreCase(uri.getScheme())) {
                 in = context.getContentResolver().openInputStream(uri);
             } else if ("file".equalsIgnoreCase(uri.getScheme())) {
@@ -488,10 +640,7 @@ public final class DownloadSupport {
             } else {
                 in = new java.io.FileInputStream(new java.io.File(localUri));
             }
-            if (in == null) {
-                return false;
-            }
-            holder = new InputStreamHolder(in);
+            if (in == null) return false;
             byte[] head = new byte[4096];
             int length = 0;
             while (length < head.length) {
@@ -500,41 +649,17 @@ public final class DownloadSupport {
                 if (read == 0) continue;
                 length += read;
             }
-            String sample = new String(head, 0, length, StandardCharsets.UTF_8).trim().toLowerCase(Locale.ROOT);
-            return sample.startsWith("<!doctype html") || sample.startsWith("<html")
-                    || sample.startsWith("<head") || sample.startsWith("<body");
+            return !looksLikeExpectedBinary(fileName, mimeType, head, length);
         } catch (Exception ignored) {
             return false;
         } finally {
-            if (holder != null) {
+            if (in != null) {
                 try {
-                    holder.in.close();
+                    in.close();
                 } catch (Exception ignored) {
                 }
             }
         }
-    }
-
-    private static boolean isLikelyBinaryDownload(String fileName, String mimeType) {
-        if (!isBlank(mimeType)) {
-            String lower = mimeType.toLowerCase(Locale.ROOT);
-            if (lower.startsWith("text/") || lower.contains("html") || lower.contains("xml") || lower.contains("json")) {
-                return false;
-            }
-        }
-        String lowerName = isBlank(fileName) ? "" : fileName.toLowerCase(Locale.ROOT);
-        return lowerName.endsWith(".apk") || lowerName.endsWith(".xapk") || lowerName.endsWith(".apks")
-                || lowerName.endsWith(".zip") || lowerName.endsWith(".7z") || lowerName.endsWith(".rar")
-                || lowerName.endsWith(".gz") || lowerName.endsWith(".tar") || lowerName.endsWith(".bz2")
-                || lowerName.endsWith(".pdf") || lowerName.endsWith(".bin") || lowerName.endsWith(".exe")
-                || lowerName.endsWith(".dmg") || lowerName.endsWith(".iso") || lowerName.endsWith(".mp4")
-                || lowerName.endsWith(".mp3") || lowerName.endsWith(".m4a") || lowerName.endsWith(".jpg")
-                || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png") || lowerName.endsWith(".webp");
-    }
-
-    private static final class InputStreamHolder {
-        final java.io.InputStream in;
-        InputStreamHolder(java.io.InputStream in) { this.in = in; }
     }
 
     public static boolean isSafeHeaderValue(String value) {
@@ -657,14 +782,17 @@ public final class DownloadSupport {
             return fileName;
         }
         String ext = extensionOf(fileName);
-        if (!ext.isEmpty()) {
-            return fileName;
-        }
         String desired = extensionForMime(mimeType);
         if (desired.isEmpty()) {
             desired = extensionForMime(inferMimeTypeFromUrl(sourceUrl));
         }
-        return desired.isEmpty() ? fileName : fileName + desired;
+        if (hasRecognizedDownloadExtension(fileName)) {
+            return fileName;
+        }
+        if (!desired.isEmpty()) {
+            return fileName + desired;
+        }
+        return fileName;
     }
 
     private static String extensionForMime(String mimeType) {

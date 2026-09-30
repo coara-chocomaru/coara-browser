@@ -306,15 +306,49 @@ public final class DownloadFallbackManager {
                 String responseMime = connection.getContentType();
                 String finalMime = DownloadSupport.normalizeMimeType(responseMime, currentUrl);
                 String finalDisposition = connection.getHeaderField("Content-Disposition");
+                if (DownloadSupport.isBlank(finalDisposition)) {
+                    finalDisposition = connection.getHeaderField("X-Content-Disposition");
+                }
                 String fileName = DownloadSupport.resolveFileName(currentUrl, finalDisposition, finalMime);
+                if (isWeakFallbackName(fileName)) {
+                    String headerName = connection.getHeaderField("X-File-Name");
+                    if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Download-Name");
+                    if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Filename");
+                    if (!DownloadSupport.isBlank(headerName)) fileName = DownloadSupport.sanitizeFileName(headerName);
+                }
                 if (isWeakFallbackName(fileName) && !DownloadSupport.isBlank(spec.initialFileName)) {
                     fileName = spec.initialFileName;
                 }
+                long responseLength = connection.getContentLengthLong();
+                InputStream source = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
+                byte[] prefix = new byte[4096];
+                int prefixLength = 0;
+                while (prefixLength < prefix.length) {
+                    int read = source.read(prefix, prefixLength, prefix.length - prefixLength);
+                    if (read < 0) break;
+                    if (read == 0) continue;
+                    prefixLength += read;
+                    if (prefixLength >= 512) break;
+                }
+                if (DownloadSupport.looksLikeHtml(prefix, prefixLength)
+                        && !finalMime.startsWith("text/html") && !finalMime.startsWith("application/xhtml+xml")) {
+                    try {
+                        source.close();
+                    } catch (Exception ignored) {
+                    }
+                    return FallbackResult.failure("サーバーがHTMLエラーページを返しました");
+                }
+                fileName = DownloadSupport.refineFileName(fileName, currentUrl, finalMime, prefix, prefixLength);
+                if ((isOpaqueGeneratedName(fileName) || isExtensionless(fileName)) && !DownloadSupport.isBlank(spec.initialFileName)) {
+                    String preferred = DownloadSupport.refineFileName(spec.initialFileName, spec.url, finalMime, prefix, prefixLength);
+                    if (!DownloadSupport.isBlank(preferred)) {
+                        fileName = preferred;
+                    }
+                }
                 if (DownloadSupport.isBlank(fileName)) {
-                    fileName = spec.initialFileName;
+                    fileName = "download";
                 }
                 fileName = DownloadSupport.resolveUniqueDownloadFileName(spec.activity, fileName);
-                long responseLength = connection.getContentLengthLong();
                 long progressTotal = responseLength > 0 ? responseLength : spec.contentLength;
                 if (responseLength > 0) {
                     java.io.File dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
@@ -326,7 +360,8 @@ public final class DownloadFallbackManager {
                 PublicStorageWriter.Target target = null;
                 try {
                     target = PublicStorageWriter.openDownloadsTarget(spec.activity, fileName, finalMime);
-                    copyAndValidate(connection.getInputStream(), target.outputStream, progressTotal, responseLength, spec.activity,
+                    target.outputStream.write(prefix, 0, prefixLength);
+                    copyAndValidate(source, target.outputStream, prefixLength, responseLength, spec.activity,
                             downloadId, fileName, target.displayPath, finalMime, fileName);
                     PublicStorageWriter.finish(spec.activity, target);
                     long finalBytes = responseLength > 0 ? responseLength : progressTotal;
@@ -353,35 +388,25 @@ public final class DownloadFallbackManager {
         }
     }
 
-    private static void copyAndValidate(InputStream source, OutputStream target, long total, long strictTotal, Activity activity,
+    private static void copyAndValidate(InputStream source, OutputStream target, long initialBytes, long strictTotal, Activity activity,
                                         long downloadId, String fileName, String displayPath,
                                         String mimeType, String effectiveFileName) throws IOException {
-        try (BufferedInputStream in = new BufferedInputStream(source, BUFFER_SIZE);
+        try (BufferedInputStream in = source;
              BufferedOutputStream out = new BufferedOutputStream(target, BUFFER_SIZE)) {
             byte[] buffer = new byte[BUFFER_SIZE];
-            byte[] head = new byte[4096];
-            int headLen = 0;
-            long done = 0;
+            long done = initialBytes;
             long lastUpdate = 0;
             int read;
             while ((read = in.read(buffer)) != -1) {
-                if (headLen < head.length) {
-                    int take = Math.min(read, head.length - headLen);
-                    System.arraycopy(buffer, 0, head, headLen, take);
-                    headLen += take;
-                }
+                if (read == 0) continue;
                 out.write(buffer, 0, read);
                 done += read;
                 long now = System.currentTimeMillis();
                 if (now - lastUpdate >= PROGRESS_UPDATE_MS) {
                     lastUpdate = now;
                     DownloadHistoryManager.updateManualDownload(activity, downloadId, fileName, displayPath, null,
-                            DownloadManager.STATUS_RUNNING, done, total);
+                            DownloadManager.STATUS_RUNNING, done, strictTotal > 0 ? strictTotal : done);
                 }
-            }
-            String ext = extension(effectiveFileName);
-            if (looksLikeHtml(head, headLen) && !isHtmlExtension(ext) && isBinaryLikeDownload(effectiveFileName, mimeType)) {
-                throw new IOException("html error page");
             }
             out.flush();
             if (strictTotal > 0 && done != strictTotal) {
@@ -390,15 +415,6 @@ public final class DownloadFallbackManager {
             DownloadHistoryManager.updateManualDownload(activity, downloadId, fileName, displayPath, null,
                     DownloadManager.STATUS_SUCCESSFUL, done, strictTotal > 0 ? strictTotal : done);
         }
-    }
-
-    private static boolean looksLikeHtml(byte[] data, int length) {
-        if (data == null || length <= 0) {
-            return false;
-        }
-        String sample = new String(data, 0, length, StandardCharsets.UTF_8).trim().toLowerCase(java.util.Locale.ROOT);
-        return sample.startsWith("<!doctype html") || sample.startsWith("<html")
-                || sample.startsWith("<head") || sample.startsWith("<body");
     }
 
     private static void storeCookies(String url, HttpURLConnection connection) {
@@ -502,6 +518,20 @@ public final class DownloadFallbackManager {
                 || lowerName.endsWith(".bin") || lowerName.endsWith(".exe") || lowerName.endsWith(".dmg")
                 || lowerName.endsWith(".mp4") || lowerName.endsWith(".mp3") || lowerName.endsWith(".jpg")
                 || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png") || lowerName.endsWith(".webp");
+    }
+
+    private static boolean isExtensionless(String value) {
+        if (DownloadSupport.isBlank(value)) return true;
+        return !DownloadSupport.hasRecognizedDownloadExtension(value);
+    }
+
+    private static boolean isOpaqueGeneratedName(String value) {
+        if (DownloadSupport.isBlank(value)) return true;
+        String base = value;
+        int dot = base.lastIndexOf('.');
+        if (dot > 0) base = base.substring(0, dot);
+        return base.matches("(?i)[0-9a-f]{24,}") || base.matches("[0-9a-f]{8,}[-_][0-9a-f-]{12,}")
+                || base.matches("[A-Za-z0-9_-]{32,}");
     }
 
     private static String hostOf(String url) {
