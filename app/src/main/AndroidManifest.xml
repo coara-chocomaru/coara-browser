@@ -166,6 +166,21 @@
             android:exported="false"
             android:stopWithTask="false" />
 
+        <receiver
+            android:name=".util.DownloadCompletionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.DOWNLOAD_COMPLETE" />
+            </intent-filter>
+        </receiver>
+
+        <activity
+            android:name=".DownloadOpenActivity"
+            android:exported="false"
+            android:noHistory="true"
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.MaterialComponents.Light.NoActionBar" />
+
         <activity
             android:name=".DownloadHistoryActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
