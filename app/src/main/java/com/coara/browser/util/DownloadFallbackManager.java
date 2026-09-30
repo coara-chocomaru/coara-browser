@@ -391,7 +391,7 @@ public final class DownloadFallbackManager {
     private static void copyAndValidate(InputStream source, OutputStream target, long initialBytes, long strictTotal, Activity activity,
                                         long downloadId, String fileName, String displayPath,
                                         String mimeType, String effectiveFileName) throws IOException {
-        try (BufferedInputStream in = source;
+        try (BufferedInputStream in = new BufferedInputStream(source, BUFFER_SIZE);
              BufferedOutputStream out = new BufferedOutputStream(target, BUFFER_SIZE)) {
             byte[] buffer = new byte[BUFFER_SIZE];
             long done = initialBytes;
