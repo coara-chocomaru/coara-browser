@@ -48,6 +48,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import com.coara.browser.model.DownloadItem;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -559,44 +560,6 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         if (tvEmpty != null) tvEmpty.setVisibility(View.VISIBLE);
         if (recyclerView != null) recyclerView.setVisibility(View.GONE);
         Toast.makeText(this, "ダウンロード履歴を全消去しました", Toast.LENGTH_SHORT).show();
-    }
-
-    public static class DownloadItem {
-        public long downloadId;
-        public String title;
-        public String description;
-        public int status;
-        public long downloadedSize;
-        public long totalSize;
-        public String localUri;
-        public String downloadUrl;
-        public boolean isPaused;
-        public String filePath;
-        public String userAgent;
-        public String referer;
-        public boolean basicAuthEnabled;
-
-        public DownloadItem(long downloadId, String title, String description,
-                int status, long downloadedSize, long totalSize,
-                String localUri, String downloadUrl) {
-            this.downloadId = downloadId;
-            this.title = title;
-            this.description = description;
-            this.status = status;
-            this.downloadedSize = downloadedSize;
-            this.totalSize = totalSize;
-            this.localUri = localUri;
-            this.downloadUrl = downloadUrl;
-            this.isPaused = false;
-            this.filePath = "";
-            this.userAgent = "";
-            this.referer = "";
-            this.basicAuthEnabled = false;
-        }
-
-        public int getProgress() {
-            return totalSize > 0 ? (int) ((downloadedSize * 100) / totalSize) : 0;
-        }
     }
 
     public class DownloadAdapter extends RecyclerView.Adapter<DownloadAdapter.ViewHolder> {
