@@ -118,7 +118,7 @@ public final class CacheModePolicy {
             return WebSettings.LOAD_DEFAULT;
         }
 
-        return WebSettings.LOAD_CACHE_ELSE_NETWORK;
+        return WebSettings.LOAD_DEFAULT;
     }
 
 

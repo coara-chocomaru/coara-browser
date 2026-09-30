@@ -12,6 +12,7 @@ public final class BrowserVisualSettings {
     public static final String KEY_FONT_FAMILY = "font_family";
     public static final String KEY_BACKGROUND_TRANSPARENT = "background_transparent";
     public static final String KEY_BACKGROUND_PATH = "background_image_path";
+    public static final String KEY_BACKGROUND_TRANSPARENCY_PERCENT = "background_transparency_percent";
 
     private static final String DEFAULT = "default";
     private static final String STYLE_ID = "__coara_browser_visual_style";
@@ -176,6 +177,32 @@ public final class BrowserVisualSettings {
         }
     }
 
+
+    public static int getBackgroundTransparencyPercent(SharedPreferences preferences) {
+        int value;
+        try {
+            value = preferences.getInt(KEY_BACKGROUND_TRANSPARENCY_PERCENT, 0);
+        } catch (Exception ignored) {
+            value = 0;
+        }
+        return clampPercent(value);
+    }
+
+    public static void setBackgroundTransparencyPercent(SharedPreferences preferences, int value) {
+        int clamped = clampPercent(value);
+        if (clamped == 0) {
+            preferences.edit().remove(KEY_BACKGROUND_TRANSPARENCY_PERCENT).commit();
+        } else {
+            preferences.edit().putInt(KEY_BACKGROUND_TRANSPARENCY_PERCENT, clamped).commit();
+        }
+    }
+
+    private static int clampPercent(int value) {
+        if (value < 0) return 0;
+        if (value > 100) return 100;
+        return value;
+    }
+
     public static int resolveTextColor(SharedPreferences preferences) {
         String color = getTextColor(preferences);
         if (DEFAULT.equals(color)) {
@@ -195,6 +222,7 @@ public final class BrowserVisualSettings {
 
         String fontFamily = getFontFamily(preferences);
         boolean transparency = isTransparencyEnabled(preferences);
+        int transparencyPercent = getBackgroundTransparencyPercent(preferences);
         WebSettings settings = webView.getSettings();
 
         try {
@@ -227,7 +255,7 @@ public final class BrowserVisualSettings {
             return;
         }
 
-        injectStyle(webView, textColor, fontFamily, transparency);
+        injectStyle(webView, textColor, fontFamily, transparency, transparencyPercent);
     }
 
     public static boolean hasCustomVisualCss(SharedPreferences preferences) {
@@ -240,7 +268,7 @@ public final class BrowserVisualSettings {
         removeStyle(webView);
     }
 
-    private static void injectStyle(WebView webView, String textColor, String fontFamily, boolean transparency) {
+    private static void injectStyle(WebView webView, String textColor, String fontFamily, boolean transparency, int transparencyPercent) {
         try {
             StringBuilder css = new StringBuilder();
             if (!DEFAULT.equals(textColor)) {
@@ -254,7 +282,7 @@ public final class BrowserVisualSettings {
                         .append(" !important;}");
             }
             if (transparency) {
-                css.append("html,body,body:before,body:after{background:transparent !important;background-color:transparent !important;}");
+                css.append(buildTransparencyCss(transparencyPercent));
             }
 
             String script = "(function(){"
@@ -282,4 +310,26 @@ public final class BrowserVisualSettings {
         } catch (Exception ignored) {
         }
     }
+    private static String buildTransparencyCss(int percent) {
+        StringBuilder css = new StringBuilder();
+        int clamped = clampPercent(percent);
+        css.append("html,body,body:before,body:after{background-color:transparent !important;background-image:none !important;}");
+        if (clamped >= 20) {
+            css.append("main,section,article,aside,header,footer,nav,form,dialog,[role='main'],[role='article'],[role='dialog']{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 40) {
+            css.append("[class*='container'],[class*='content'],[class*='panel'],[class*='card'],[class*='surface'],[class*='layout'],[class*='wrapper'],[class*='background']{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 60) {
+            css.append("div,ul,ol,li,table,thead,tbody,tfoot,tr,td,th,blockquote,pre{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 80) {
+            css.append("body *:not(img):not(video):not(canvas):not(svg):not(input):not(textarea):not(select):not(option):not(button):not(progress):not(meter){background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 100) {
+            css.append("body *{background-color:transparent !important;background-image:none !important;}");
+        }
+        return css.toString();
+    }
+
 }
