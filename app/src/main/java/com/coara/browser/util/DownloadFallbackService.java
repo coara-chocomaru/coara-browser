@@ -23,25 +23,36 @@ public class DownloadFallbackService extends Service {
     public void onCreate() {
         super.onCreate();
         executor = Executors.newCachedThreadPool();
-        startForeground(29999, DownloadFallbackManager.buildServiceNotification(this));
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         long downloadId = intent != null ? intent.getLongExtra(EXTRA_DOWNLOAD_ID, -1L) : -1L;
         if (downloadId > 0) {
+            promoteToForeground(downloadId);
             launchDownload(downloadId, startId);
         } else {
             List<Long> ids = DownloadHistoryManager.getRunningManualDownloadIds(this);
             if (ids.isEmpty()) {
                 stopSelfResult(startId);
             } else {
+                promoteToForeground(ids.get(0));
                 for (Long id : ids) {
                     launchDownload(id, startId);
                 }
             }
         }
         return START_STICKY;
+    }
+
+    private void promoteToForeground(long downloadId) {
+        if (downloadId <= 0) return;
+        com.coara.browser.model.DownloadItem item = DownloadHistoryManager.getManualDownloadItem(this, downloadId);
+        String title = item == null ? "ダウンロード" : item.title;
+        long downloaded = item == null ? 0L : item.downloadedSize;
+        long total = item == null ? 0L : item.totalSize;
+        startForeground(DownloadFallbackManager.notificationId(downloadId),
+                DownloadFallbackManager.buildProgressNotification(this, downloadId, title, downloaded, total));
     }
 
     private void launchDownload(long downloadId, int startId) {
@@ -72,7 +83,7 @@ public class DownloadFallbackService extends Service {
             executor.shutdownNow();
         }
         activeGenerations.clear();
-        stopForeground(true);
+        stopForeground(false);
         super.onDestroy();
     }
 

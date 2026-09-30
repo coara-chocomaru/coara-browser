@@ -741,7 +741,7 @@ public final class DownloadFallbackManager {
         static CopyResult cancelled(long bytes) { return new CopyResult(bytes, false, true); }
     }
 
-    private static int notificationId(long downloadId) {
+    static int notificationId(long downloadId) {
         int hash = Long.valueOf(downloadId).hashCode() & 0x3fffffff;
         return 30000 + (hash % 1000000);
     }
@@ -771,17 +771,6 @@ public final class DownloadFallbackManager {
         if (total > 0) builder.setProgress(100, (int)Math.min(100L, (downloaded * 100L) / total), false);
         else builder.setProgress(0, 0, true);
         return builder.build();
-    }
-
-    public static Notification buildServiceNotification(Context context) {
-        return new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("ダウンロード")
-                .setContentText("ダウンロードを処理しています")
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .build();
     }
 
     private static void postProgressNotification(Context context, long downloadId, String fileName, long downloaded, long total) {
