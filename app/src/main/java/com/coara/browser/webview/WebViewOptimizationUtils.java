@@ -30,7 +30,7 @@ public final class WebViewOptimizationUtils {
         settings.setDefaultTextEncodingName("UTF-8");
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            settings.setOffscreenPreRaster(true);
+            settings.setOffscreenPreRaster(false);
         }
 
         settings.setNeedInitialFocus(false);
