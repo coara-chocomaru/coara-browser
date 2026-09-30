@@ -118,6 +118,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                             DownloadItem currentItem = current.get(i);
                             DownloadItem updated = updates.get(currentItem.downloadId);
                             if (updated == null) continue;
+                            currentItem.isPaused = updated.isPaused;
+                            currentItem.manual = updated.manual;
+                            currentItem.downloadUrl = updated.downloadUrl;
                             if (currentItem.status != updated.status ||
                                     currentItem.downloadedSize != updated.downloadedSize ||
                                     currentItem.totalSize != updated.totalSize) {
@@ -187,6 +190,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
     }
 
     private void loadDownloadHistory() {
+        DownloadHistoryManager.reconcileManualDownloads(this);
         executor.execute(() -> {
             List<DownloadItem> items = new ArrayList<>();
             String jsonStr = pref.getString(BrowserConstants.KEY_DOWNLOAD_HISTORY, "[]");
@@ -205,12 +209,14 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                         if (localUri.isEmpty() && !filePath.isEmpty()) {
                             localUri = Uri.fromFile(new File(filePath)).toString();
                         }
-                        if (obj.has("manualStatus")) {
-                            int status = obj.optInt("manualStatus", DownloadManager.STATUS_FAILED);
+                        if (obj.has("manualStatus") || obj.optBoolean("pausedByUser", false)) {
+                            int status = obj.has("manualStatus") ? obj.optInt("manualStatus", DownloadManager.STATUS_FAILED) : DownloadManager.STATUS_PAUSED;
                             long downloadedSize = obj.optLong("manualDownloaded", 0);
                             long totalSize = obj.optLong("manualTotal", 0);
                             item = new DownloadItem(downloadId, fileName, "", status, downloadedSize,
-                                    totalSize, localUri, "");
+                                    totalSize, localUri, obj.optString("downloadUrl", ""));
+                            item.manual = obj.has("manualStatus");
+                            item.isPaused = obj.optBoolean("manualPaused", false) || obj.optBoolean("pausedByUser", false);
                         } else {
                             boolean exists = itemExists(filePath, localUri);
                             long size = getItemSize(filePath, localUri);
@@ -333,7 +339,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return null;
+        return DownloadHistoryManager.getManualDownloadItem(this, downloadId);
     }
 
     private String getRobustFileName(Cursor cursor) {
@@ -532,6 +538,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     next.remove("manualStatus");
                     next.remove("manualDownloaded");
                     next.remove("manualTotal");
+                    next.remove("manualUpdatedAt");
+                    next.remove("manualPaused");
+                    next.remove("pausedByUser");
                     updated.put(next);
                 } else {
                     updated.put(obj);
@@ -614,7 +623,9 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                 item.title = "ダウンロード " + item.downloadId;
             }
 
-            if (!fileExists) {
+            boolean displayDeleted = !fileExists
+                    && (item.status == DownloadManager.STATUS_SUCCESSFUL || item.status == DownloadManager.STATUS_FAILED);
+            if (displayDeleted) {
                 holder.fileTitle.setText(item.title + " [削除済]");
                 holder.fileTitle.setPaintFlags(
                         holder.fileTitle.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
@@ -636,15 +647,19 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     statusText = "失敗";
                     break;
                 case DownloadManager.STATUS_RUNNING:
-                    statusText = "ダウンロード中 (" + formatSize(item.downloadedSize)
-                            + " / " + formatSize(item.totalSize)
-                            + ", " + item.getProgress() + "%)";
+                    statusText = item.totalSize > 0
+                            ? "ダウンロード中 (" + formatSize(item.downloadedSize)
+                                    + " / " + formatSize(item.totalSize)
+                                    + ", " + item.getProgress() + "%)"
+                            : "ダウンロード中 (" + formatSize(item.downloadedSize) + ")";
                     showProgress = true;
                     break;
                 case DownloadManager.STATUS_PAUSED:
-                    statusText = "一時停止中 (" + formatSize(item.downloadedSize)
-                            + " / " + formatSize(item.totalSize)
-                            + ", " + item.getProgress() + "%)";
+                    statusText = item.totalSize > 0
+                            ? "一時停止中 (" + formatSize(item.downloadedSize)
+                                    + " / " + formatSize(item.totalSize)
+                                    + ", " + item.getProgress() + "%)"
+                            : "一時停止中 (" + formatSize(item.downloadedSize) + ")";
                     showProgress = true;
                     break;
                 case DownloadManager.STATUS_PENDING:
@@ -654,14 +669,21 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     statusText = "不明";
             }
             if (item.isPaused) {
-                statusText = "一時停止中 (" + formatSize(item.downloadedSize)
-                        + " / " + formatSize(item.totalSize)
-                        + ", " + item.getProgress() + "%)";
+                statusText = item.totalSize > 0
+                        ? "一時停止中 (" + formatSize(item.downloadedSize)
+                                + " / " + formatSize(item.totalSize)
+                                + ", " + item.getProgress() + "%)"
+                        : "一時停止中 (" + formatSize(item.downloadedSize) + ")";
                 showProgress = true;
             }
             holder.fileStatus.setText(statusText);
             holder.progressBar.setVisibility(showProgress ? View.VISIBLE : View.GONE);
-            if (showProgress) holder.progressBar.setProgress(item.getProgress());
+            if (showProgress) {
+                holder.progressBar.setIndeterminate(item.totalSize <= 0);
+                if (item.totalSize > 0) holder.progressBar.setProgress(item.getProgress());
+            } else {
+                holder.progressBar.setIndeterminate(false);
+            }
 
             if (showOpenButton) {
                 holder.btnOpenFile.setVisibility(View.VISIBLE);
@@ -683,7 +705,7 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                 }
                 DownloadItem currentItem = items.get(adapterPosition);
                 AlertDialog.Builder builder = new AlertDialog.Builder(context);
-                if (!fileExists) {
+                if (!fileExists && currentItem.status == DownloadManager.STATUS_SUCCESSFUL) {
                     builder.setTitle("操作を選択")
                            .setItems(new String[]{"履歴から消去"}, (dialog, which) -> {
                                if (which == 0) {
@@ -725,31 +747,40 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     } else {
                         if (!currentItem.isPaused) {
                             builder.setTitle("操作を選択")
-                                   .setItems(new String[]{"キャンセル", "停止"}, (dialog, which) -> {
+                                   .setItems(new String[]{"キャンセル", "一時停止"}, (dialog, which) -> {
                                        if (which == 0) {
-                                           try {
-                                               downloadManager.remove(currentItem.downloadId);
-                                           } catch (Exception ignored) {
+                                           if (currentItem.manual) {
+                                               DownloadFallbackManager.cancelDownload(context, currentItem.downloadId);
+                                           } else {
+                                               try {
+                                                   downloadManager.remove(currentItem.downloadId);
+                                               } catch (Exception ignored) {
+                                               }
                                            }
-                                           Toast.makeText(context,
-                                                   "ダウンロードをキャンセルしました",
-                                                   Toast.LENGTH_SHORT).show();
                                            int currentPosition = items.indexOf(currentItem);
                                            if (currentPosition >= 0) {
                                                items.remove(currentPosition);
                                                notifyItemRemoved(currentPosition);
                                                removeHistoryRecord(currentItem.downloadId);
                                            }
+                                           Toast.makeText(context, "ダウンロードをキャンセルしました", Toast.LENGTH_SHORT).show();
                                        } else if (which == 1) {
-                                           downloadManager.remove(currentItem.downloadId);
-                                           currentItem.isPaused = true;
-                                           Toast.makeText(context,
-                                                   "ダウンロードを一時停止しました",
-                                                   Toast.LENGTH_SHORT).show();
-                                           int currentPosition = items.indexOf(currentItem);
-                                           if (currentPosition >= 0) {
-                                               notifyItemChanged(currentPosition);
+                                           if (currentItem.manual) {
+                                               if (!DownloadFallbackManager.pauseDownload(context, currentItem.downloadId)) {
+                                                   return;
+                                               }
+                                           } else {
+                                               DownloadHistoryManager.setDownloadManagerPaused(context, currentItem.downloadId, true);
+                                               try {
+                                                   downloadManager.remove(currentItem.downloadId);
+                                               } catch (Exception ignored) {
+                                               }
                                            }
+                                           currentItem.isPaused = true;
+                                           currentItem.status = DownloadManager.STATUS_PAUSED;
+                                           int currentPosition = items.indexOf(currentItem);
+                                           if (currentPosition >= 0) notifyItemChanged(currentPosition);
+                                           Toast.makeText(context, "ダウンロードを一時停止しました", Toast.LENGTH_SHORT).show();
                                        }
                                    })
                                    .setNegativeButton("閉じる", null)
@@ -758,60 +789,59 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                             builder.setTitle("操作を選択")
                                    .setItems(new String[]{"キャンセル", "再開"}, (dialog, which) -> {
                                        if (which == 0) {
-                                           try {
-                                               downloadManager.remove(currentItem.downloadId);
-                                           } catch (Exception ignored) {
+                                           if (currentItem.manual) {
+                                               DownloadFallbackManager.cancelDownload(context, currentItem.downloadId);
+                                           } else {
+                                               try { downloadManager.remove(currentItem.downloadId); } catch (Exception ignored) { }
                                            }
-                                           Toast.makeText(context,
-                                                   "ダウンロードをキャンセルしました",
-                                                   Toast.LENGTH_SHORT).show();
                                            int currentPosition = items.indexOf(currentItem);
                                            if (currentPosition >= 0) {
                                                items.remove(currentPosition);
                                                notifyItemRemoved(currentPosition);
                                                removeHistoryRecord(currentItem.downloadId);
                                            }
+                                           Toast.makeText(context, "ダウンロードをキャンセルしました", Toast.LENGTH_SHORT).show();
                                        } else if (which == 1) {
                                            try {
-                                               if (DownloadSupport.isBlank(currentItem.downloadUrl)) {
-                                                   throw new IllegalStateException("download url missing");
+                                               boolean started;
+                                               if (currentItem.manual) {
+                                                   started = DownloadFallbackManager.resumeDownload(context, currentItem.downloadId);
+                                                   if (started) {
+                                                       currentItem.isPaused = false;
+                                                       currentItem.status = DownloadManager.STATUS_RUNNING;
+                                                   }
+                                               } else {
+                                                   if (DownloadSupport.isBlank(currentItem.downloadUrl)) throw new IllegalStateException("download url missing");
+                                                   DownloadManager.Request request = new DownloadManager.Request(Uri.parse(currentItem.downloadUrl));
+                                                   request.setTitle(currentItem.title);
+                                                   request.setDescription(currentItem.description != null ? currentItem.description : "Downloading file...");
+                                                   DownloadSupport.addHeaderIfSafe(request, "User-Agent", currentItem.userAgent);
+                                                   DownloadSupport.addHeaderIfSafe(request, "Referer", currentItem.referer);
+                                                   DownloadSupport.addHeaderIfSafe(request, "Cookie", CookieManager.getInstance().getCookie(currentItem.downloadUrl));
+                                                   DownloadSupport.addHeaderIfSafe(request, "Authorization", BasicAuthManager.getAuthorizationHeaderForUrl(currentItem.downloadUrl, currentItem.basicAuthEnabled));
+                                                   request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                                                   request.setAllowedOverMetered(true);
+                                                   request.setAllowedOverRoaming(true);
+                                                   String resumeName = DownloadSupport.resolveUniqueDownloadFileName(DownloadHistoryActivity.this, currentItem.title);
+                                                   request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, resumeName);
+                                                   long oldId = currentItem.downloadId;
+                                                   long newId = downloadManager.enqueue(request);
+                                                   currentItem.downloadId = newId;
+                                                   currentItem.title = resumeName;
+                                                   currentItem.isPaused = false;
+                                                   currentItem.manual = false;
+                                                   replaceHistoryRecord(oldId, newId, currentItem.title, currentItem.filePath);
+                                                   DownloadFallbackManager.register(newId, new DownloadFallbackManager.Spec(
+                                                           DownloadHistoryActivity.this, null, currentItem.downloadUrl, currentItem.userAgent, null,
+                                                           getMimeTypeFromPath(currentItem.title), currentItem.totalSize, currentItem.referer, currentItem.title,
+                                                           getMimeTypeFromPath(currentItem.title), currentItem.basicAuthEnabled));
+                                                   DownloadHistoryManager.monitorDownloadProgress(DownloadHistoryActivity.this, newId, downloadManager);
+                                                   started = true;
                                                }
-                                               DownloadSupport.deleteLocalUri(context, currentItem.localUri);
-                                               DownloadManager.Request request =
-                                                       new DownloadManager.Request(Uri.parse(currentItem.downloadUrl));
-                                               request.setTitle(currentItem.title);
-                                               request.setDescription(currentItem.description != null
-                                                       ? currentItem.description : "Downloading file...");
-                                               DownloadSupport.addHeaderIfSafe(request, "User-Agent", currentItem.userAgent);
-                                               DownloadSupport.addHeaderIfSafe(request, "Referer", currentItem.referer);
-                                               DownloadSupport.addHeaderIfSafe(request, "Cookie", CookieManager.getInstance().getCookie(currentItem.downloadUrl));
-                                               DownloadSupport.addHeaderIfSafe(request, "Authorization",
-                                                       BasicAuthManager.getAuthorizationHeaderForUrl(currentItem.downloadUrl, currentItem.basicAuthEnabled));
-                                               request.setNotificationVisibility(
-                                                       DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                                               request.setAllowedOverMetered(true);
-                                               request.setAllowedOverRoaming(true);
-                                               String resumeName = DownloadSupport.resolveUniqueDownloadFileName(DownloadHistoryActivity.this, currentItem.title);
-                                               request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, resumeName);
-                                               currentItem.title = resumeName;
-                                               long oldId = currentItem.downloadId;
-                                               long newId = downloadManager.enqueue(request);
-                                               currentItem.downloadId = newId;
-                                               currentItem.isPaused = false;
-                                               replaceHistoryRecord(oldId, newId, currentItem.title, currentItem.filePath);
-                                               DownloadFallbackManager.register(newId, new DownloadFallbackManager.Spec(
-                                                       DownloadHistoryActivity.this, null, currentItem.downloadUrl, currentItem.userAgent, null,
-                                                       getMimeTypeFromPath(currentItem.title), currentItem.totalSize, currentItem.referer, currentItem.title,
-                                                       getMimeTypeFromPath(currentItem.title), currentItem.basicAuthEnabled));
-                                               DownloadHistoryManager.monitorDownloadProgress(
-                                                       DownloadHistoryActivity.this, newId, downloadManager);
-                                               Toast.makeText(context,
-                                                       "ダウンロードを再開しました",
-                                                       Toast.LENGTH_SHORT).show();
+                                               if (!started) throw new IllegalStateException("resume failed");
+                                               Toast.makeText(context, "ダウンロードを再開しました", Toast.LENGTH_SHORT).show();
                                                int currentPosition = items.indexOf(currentItem);
-                                               if (currentPosition >= 0) {
-                                                   notifyItemChanged(currentPosition);
-                                               }
+                                               if (currentPosition >= 0) notifyItemChanged(currentPosition);
                                            } catch (Exception e) {
                                                Toast.makeText(context, "ダウンロードを再開できませんでした", Toast.LENGTH_SHORT).show();
                                            }
