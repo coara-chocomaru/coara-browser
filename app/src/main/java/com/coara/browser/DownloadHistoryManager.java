@@ -263,19 +263,26 @@ public class DownloadHistoryManager {
         try {
             int index = cursor.getColumnIndexOrThrow(columnName);
             return cursor.getInt(index);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
         }
         return 0;
+    }
+
+    private static String safeGetString(Cursor cursor, String columnName) {
+        try {
+            int index = cursor.getColumnIndexOrThrow(columnName);
+            return cursor.getString(index);
+        } catch (Exception ignored) {
+            return "";
+        }
     }
 
     private static long safeGetLong(Cursor cursor, String columnName) {
         try {
             int index = cursor.getColumnIndexOrThrow(columnName);
             return cursor.getLong(index);
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Exception ignored) {
+            return 0L;
         }
-        return 0L;
     }
 }
