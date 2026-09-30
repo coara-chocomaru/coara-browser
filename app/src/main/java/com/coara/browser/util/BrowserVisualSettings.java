@@ -199,7 +199,7 @@ public final class BrowserVisualSettings {
 
     private static int clampPercent(int value) {
         if (value < 0) return 0;
-        if (value > 100) return 100;
+        if (value > 120) return 120;
         return value;
     }
 
@@ -314,20 +314,41 @@ public final class BrowserVisualSettings {
         StringBuilder css = new StringBuilder();
         int clamped = clampPercent(percent);
         css.append("html,body,body:before,body:after{background-color:transparent !important;background-image:none !important;}");
-        if (clamped >= 20) {
+        if (clamped >= 11) {
             css.append("main,section,article,aside,header,footer,nav,form,dialog,[role='main'],[role='article'],[role='dialog']{background-color:transparent !important;background-image:none !important;}");
         }
-        if (clamped >= 40) {
+        if (clamped >= 21) {
             css.append("[class*='container'],[class*='content'],[class*='panel'],[class*='card'],[class*='surface'],[class*='layout'],[class*='wrapper'],[class*='background']{background-color:transparent !important;background-image:none !important;}");
         }
-        if (clamped >= 60) {
-            css.append("div,ul,ol,li,table,thead,tbody,tfoot,tr,td,th,blockquote,pre{background-color:transparent !important;background-image:none !important;}");
+        if (clamped >= 31) {
+            css.append("section > div,article > div,main > div,aside > div,header > div,footer > div,nav > div,form > div{background-color:transparent !important;background-image:none !important;}");
         }
-        if (clamped >= 80) {
+        if (clamped >= 41) {
+            css.append("table,thead,tbody,tfoot,tr,td,th,ul,ol,li,blockquote,pre{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 51) {
+            css.append("[style*='background'],[style*='background-color'],[style*='background-image']{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 61) {
+            css.append("div{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 71) {
+            css.append("span,button,label,fieldset,legend,details,summary{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 81) {
             css.append("body *:not(img):not(video):not(canvas):not(svg):not(input):not(textarea):not(select):not(option):not(button):not(progress):not(meter){background-color:transparent !important;background-image:none !important;}");
         }
-        if (clamped >= 100) {
-            css.append("body *{background-color:transparent !important;background-image:none !important;}");
+        if (clamped >= 91) {
+            css.append("body *:not(img):not(video):not(canvas):not(svg){background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 101) {
+            css.append("html,body,body *{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 111) {
+            css.append("html,body,body *,body *:before,body *:after{background-color:transparent !important;background-image:none !important;}");
+        }
+        if (clamped >= 116) {
+            css.append("body *{box-shadow:none !important;}");
         }
         return css.toString();
     }

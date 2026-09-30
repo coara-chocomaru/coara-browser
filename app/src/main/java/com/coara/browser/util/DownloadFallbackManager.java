@@ -16,6 +16,7 @@ import androidx.core.app.NotificationManagerCompat;
 
 import com.coara.browser.BrowserApplication;
 import com.coara.browser.DownloadHistoryActivity;
+import com.coara.browser.DownloadOpenActivity;
 import com.coara.browser.DownloadHistoryManager;
 import com.coara.browser.model.DownloadItem;
 
@@ -746,6 +747,19 @@ public final class DownloadFallbackManager {
         return 30000 + (hash % 1000000);
     }
 
+    private static PendingIntent fileOpenPendingIntent(Context context, long downloadId) {
+        try {
+            Intent intent = new Intent(context, DownloadOpenActivity.class);
+            intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, notificationId(downloadId));
+            intent.putExtra(DownloadOpenActivity.EXTRA_DOWNLOAD_ID, downloadId);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (android.os.Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            return PendingIntent.getActivity(context, notificationId(downloadId), intent, flags);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
     private static PendingIntent historyPendingIntent(Context context, long downloadId) {
         try {
             Intent intent = new Intent(context, DownloadHistoryActivity.class);
@@ -805,9 +819,9 @@ public final class DownloadFallbackManager {
                     .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
                     .setContentText("ダウンロード完了")
                     .setOngoing(false)
-                    .setAutoCancel(true)
+                    .setAutoCancel(false)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT);
-            PendingIntent pendingIntent = historyPendingIntent(context, downloadId);
+            PendingIntent pendingIntent = fileOpenPendingIntent(context, downloadId);
             if (pendingIntent != null) builder.setContentIntent(pendingIntent);
             NotificationManagerCompat.from(context).notify(notificationId(downloadId), builder.build());
         } catch (Exception ignored) {
