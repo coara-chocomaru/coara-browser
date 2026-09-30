@@ -58,6 +58,9 @@
             <item android:id="@+id/action_deskua" android:title="デスクトップ表示" android:checkable="true" />
             <item android:id="@+id/action_ct3ua" android:title="CT3UA" android:checkable="true" />
             <item android:id="@+id/action_translate" android:title="日本語に翻訳" />
+            <item android:id="@+id/action_text_color" android:title="テキストカラー選択" />
+            <item android:id="@+id/action_font_family" android:title="フォント切り替え" />
+            <item android:id="@+id/action_background_settings" android:title="背景画像設定" />
         </menu>
     </item>
 
