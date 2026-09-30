@@ -51,8 +51,6 @@ public class DownloadOpenActivity extends Activity {
             return;
         }
 
-        cancelNotification(notificationId);
-
         String mimeType = resolveMimeType(target.uri, target.fileName, getIntent().getStringExtra(EXTRA_MIME_TYPE));
         Intent viewIntent = new Intent(Intent.ACTION_VIEW);
         viewIntent.setDataAndType(target.uri, mimeType == null ? "*/*" : mimeType);
@@ -60,9 +58,16 @@ public class DownloadOpenActivity extends Activity {
         viewIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
 
         try {
+            if (!exists(target.uri)) {
+                cancelNotification(notificationId);
+                Toast.makeText(this, "存在しません…", Toast.LENGTH_SHORT).show();
+                finish();
+                return;
+            }
             Intent chooser = Intent.createChooser(viewIntent, "アプリを選択");
             chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             startActivity(chooser);
+            cancelNotification(notificationId);
         } catch (ActivityNotFoundException e) {
             Toast.makeText(this, "開けるアプリがありません", Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
