@@ -20,12 +20,14 @@ public final class PublicStorageWriter {
         public final Uri mediaUri;
         public final File legacyFile;
         public final String displayPath;
+        public final String localUri;
 
-        Target(OutputStream outputStream, Uri mediaUri, File legacyFile, String displayPath) {
+        Target(OutputStream outputStream, Uri mediaUri, File legacyFile, String displayPath, String localUri) {
             this.outputStream = outputStream;
             this.mediaUri = mediaUri;
             this.legacyFile = legacyFile;
             this.displayPath = displayPath;
+            this.localUri = localUri;
         }
     }
 
@@ -33,7 +35,10 @@ public final class PublicStorageWriter {
     }
 
     public static Target openDownloadsTarget(Context context, String fileName, String mimeType) throws IOException {
-        return open(context, fileName, mimeType, Environment.DIRECTORY_DOWNLOADS, MediaStore.Downloads.EXTERNAL_CONTENT_URI);
+        Uri collection = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                ? MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                : null;
+        return open(context, fileName, mimeType, Environment.DIRECTORY_DOWNLOADS, collection);
     }
 
     public static Target openPicturesTarget(Context context, String fileName, String mimeType) throws IOException {
@@ -55,19 +60,31 @@ public final class PublicStorageWriter {
             if (uri == null) {
                 throw new IOException("insert failed");
             }
-            OutputStream out = context.getContentResolver().openOutputStream(uri);
-            if (out == null) {
-                throw new IOException("openOutputStream failed");
+            try {
+                OutputStream out = context.getContentResolver().openOutputStream(uri);
+                if (out == null) {
+                    context.getContentResolver().delete(uri, null, null);
+                    throw new IOException("openOutputStream failed");
+                }
+                return new Target(out, uri, null, publicDir + "/" + fileName, uri.toString());
+            } catch (Exception e) {
+                try {
+                    context.getContentResolver().delete(uri, null, null);
+                } catch (Exception ignored) {
+                }
+                if (e instanceof IOException) {
+                    throw (IOException) e;
+                }
+                throw new IOException("openOutputStream failed", e);
             }
-            return new Target(out, uri, null, publicDir + "/" + fileName);
         }
         File dir = Environment.getExternalStoragePublicDirectory(publicDir);
-        if (!dir.exists()) {
-            dir.mkdirs();
+        if (!dir.exists() && !dir.mkdirs() && !dir.exists()) {
+            throw new IOException("mkdir failed");
         }
         File file = new File(dir, fileName);
         OutputStream out = new FileOutputStream(file);
-        return new Target(out, null, file, file.getAbsolutePath());
+        return new Target(out, null, file, file.getAbsolutePath(), Uri.fromFile(file).toString());
     }
 
     public static void finish(Context context, Target target) {

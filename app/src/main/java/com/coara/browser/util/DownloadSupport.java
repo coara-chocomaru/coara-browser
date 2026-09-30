@@ -1,0 +1,784 @@
+package com.coara.browser.util;
+
+import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.Context;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.webkit.CookieManager;
+import android.webkit.MimeTypeMap;
+import android.webkit.URLUtil;
+import android.webkit.WebView;
+
+import com.coara.browser.DownloadHistoryManager;
+import android.database.Cursor;
+
+import java.io.UnsupportedEncodingException;
+import java.net.HttpURLConnection;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public final class DownloadSupport {
+    private static final Pattern FILENAME_STAR_PATTERN = Pattern.compile("(?:^|;)\\s*filename\\*\\s*=\\s*([^;]+)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern FILENAME_PATTERN = Pattern.compile("(?:^|;)\\s*filename\\s*=\\s*(\\\"(?:\\\\.|[^\\\"])*\\\"|[^;]+)", Pattern.CASE_INSENSITIVE);
+    private static final int MAX_FILENAME_LENGTH = 180;
+
+    private DownloadSupport() {
+    }
+
+    public static boolean isDataUrl(String url) {
+        return url != null && url.regionMatches(true, 0, "data:", 0, 5);
+    }
+
+    public static boolean isBlobUrl(String url) {
+        return url != null && url.regionMatches(true, 0, "blob:", 0, 5);
+    }
+
+    public static String normalizeMimeType(String mimeType, String sourceUrl) {
+        if (!isBlank(mimeType)) {
+            int semicolon = mimeType.indexOf(';');
+            String normalized = (semicolon >= 0 ? mimeType.substring(0, semicolon) : mimeType)
+                    .trim().toLowerCase(Locale.ROOT);
+            if (!normalized.isEmpty()) {
+                return normalized;
+            }
+        }
+        String inferred = inferMimeTypeFromUrl(sourceUrl);
+        return isBlank(inferred) ? "application/octet-stream" : inferred;
+    }
+
+    public static String inferMimeTypeFromUrl(String sourceUrl) {
+        if (isBlank(sourceUrl)) {
+            return null;
+        }
+        try {
+            String path = Uri.parse(sourceUrl).getPath();
+            if (isBlank(path)) {
+                path = sourceUrl;
+            }
+            String ext = MimeTypeMap.getFileExtensionFromUrl(path);
+            if (isBlank(ext)) {
+                return null;
+            }
+            ext = ext.toLowerCase(Locale.ROOT);
+            String mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
+            if (!isBlank(mime)) {
+                return mime.toLowerCase(Locale.ROOT);
+            }
+            switch (ext) {
+                case "apk": return "application/vnd.android.package-archive";
+                case "xapk": return "application/xapk-package-archive";
+                case "apks": return "application/octet-stream";
+                case "zip": return "application/zip";
+                case "7z": return "application/x-7z-compressed";
+                case "rar": return "application/vnd.rar";
+                case "gz": return "application/gzip";
+                case "tar": return "application/x-tar";
+                case "pdf": return "application/pdf";
+                case "json": return "application/json";
+                case "xml": return "application/xml";
+                case "html":
+                case "htm": return "text/html";
+                case "txt": return "text/plain";
+                case "jpg":
+                case "jpeg": return "image/jpeg";
+                case "png": return "image/png";
+                case "gif": return "image/gif";
+                case "webp": return "image/webp";
+                case "svg": return "image/svg+xml";
+                case "bmp": return "image/bmp";
+                case "mp3": return "audio/mpeg";
+                case "m4a": return "audio/mp4";
+                case "mp4": return "video/mp4";
+                case "webm": return "video/webm";
+                default: return null;
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public static String resolveFileName(String url, String contentDisposition, String mimeType) {
+        String fileName = parseContentDispositionFileName(contentDisposition);
+        if (isBlank(fileName)) {
+            fileName = DownloadHintStore.consume(url);
+        }
+        if (isBlank(fileName)) {
+            fileName = extractFileNameFromUrl(url);
+        }
+        if (isWeakFileName(fileName)) {
+            String queryName = extractFileNameFromQuery(url);
+            if (!isBlank(queryName)) {
+                fileName = queryName;
+            }
+        }
+        if (isBlank(fileName)) {
+            try {
+                fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
+            } catch (Exception ignored) {
+            }
+        }
+        if (isWeakFileName(fileName)) {
+            String queryName = extractFileNameFromQuery(url);
+            if (!isBlank(queryName)) {
+                fileName = queryName;
+            }
+        }
+        fileName = sanitizeFileName(fileName);
+        if (isBlank(fileName)) {
+            String host = extractHost(url);
+            fileName = !isBlank(host) ? host + "_download" : "download";
+        }
+        fileName = ensureExtension(fileName, mimeType, url);
+        fileName = sanitizeFileName(fileName);
+        if (fileName.length() > MAX_FILENAME_LENGTH) {
+            String ext = extensionOf(fileName);
+            int maxBase = Math.max(1, MAX_FILENAME_LENGTH - ext.length());
+            String base = fileName.substring(0, Math.min(maxBase, fileName.length() - ext.length()));
+            fileName = sanitizeFileName(base) + ext;
+        }
+        return fileName;
+    }
+
+    public static String resolveUniqueDownloadFileName(Context context, String fileName) {
+        String safe = sanitizeFileName(fileName);
+        if (isBlank(safe)) {
+            safe = "download";
+        }
+        if (context != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                Uri collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI;
+                String candidate = safe;
+                for (int i = 0; i <= 9999; i++) {
+                    String selection = MediaStore.MediaColumns.DISPLAY_NAME + " = ?";
+                    try (Cursor cursor = context.getContentResolver().query(collection,
+                            new String[]{MediaStore.MediaColumns.DISPLAY_NAME}, selection,
+                            new String[]{candidate}, null)) {
+                        if (cursor == null || !cursor.moveToFirst()) {
+                            return candidate;
+                        }
+                    }
+                    String ext = extensionOf(safe);
+                    String base = ext.isEmpty() ? safe : safe.substring(0, safe.length() - ext.length());
+                    if (i == 9999) {
+                        return base + "_" + System.currentTimeMillis() + ext;
+                    }
+                    candidate = i == 0 ? base + " (1)" + ext : base + " (" + (i + 1) + ")" + ext;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return resolveUniqueDownloadFileName(safe);
+    }
+
+    public static String buildTimestampFileName(String prefix, String mimeType) {
+        String p = isBlank(prefix) ? "download_" : sanitizeFileName(prefix);
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.getDefault())
+                .format(new java.util.Date());
+        String ext = extensionForMime(mimeType);
+        return sanitizeFileName(p + stamp) + ext;
+    }
+
+    public static String resolveUniqueDownloadFileName(String fileName) {
+        String safe = sanitizeFileName(fileName);
+        if (isBlank(safe)) {
+            safe = "download";
+        }
+        java.io.File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        java.io.File candidate = new java.io.File(dir, safe);
+        if (!candidate.exists()) {
+            return safe;
+        }
+        String ext = extensionOf(safe);
+        String base = ext.isEmpty() ? safe : safe.substring(0, safe.length() - ext.length());
+        for (int i = 1; i <= 9999; i++) {
+            String next = base + " (" + i + ")" + ext;
+            if (!new java.io.File(dir, next).exists()) {
+                return next;
+            }
+        }
+        return base + "_" + System.currentTimeMillis() + ext;
+    }
+
+
+    public static boolean saveDataUrl(Activity activity, String url, String fileNameHint, String mimeTypeHint) {
+        if (activity == null || !isDataUrl(url)) {
+            return false;
+        }
+        try {
+            int comma = url.indexOf(',');
+            if (comma < 5) {
+                return false;
+            }
+            String metadata = url.substring(5, comma);
+            String dataPart = url.substring(comma + 1);
+            boolean base64 = metadata.toLowerCase(Locale.ROOT).contains(";base64");
+            String declaredMime = metadata;
+            int semicolon = declaredMime.indexOf(';');
+            if (semicolon >= 0) {
+                declaredMime = declaredMime.substring(0, semicolon);
+            }
+            String mime = normalizeMimeType(!isBlank(declaredMime) ? declaredMime : mimeTypeHint, null);
+            byte[] data;
+            if (base64) {
+                data = android.util.Base64.decode(dataPart, android.util.Base64.DEFAULT);
+            } else {
+                String decoded = Uri.decode(dataPart);
+                data = decoded.getBytes(StandardCharsets.UTF_8);
+            }
+            String name = resolveFileName(fileNameHint, null, mime);
+            if (isBlank(fileNameHint)) {
+                name = buildTimestampFileName("download_", mime);
+            }
+            name = resolveUniqueDownloadFileName(activity, name);
+            PublicStorageWriter.Target target = null;
+            try {
+                target = PublicStorageWriter.openDownloadsTarget(activity, name, mime);
+                target.outputStream.write(data);
+                target.outputStream.flush();
+                PublicStorageWriter.finish(activity, target);
+                long id = DownloadHistoryManager.nextManualDownloadId();
+                DownloadHistoryManager.addDownloadHistory(activity, id, name, target.displayPath, null, null, false);
+                DownloadHistoryManager.updateManualDownload(activity, id, name, target.displayPath, target.localUri,
+                        DownloadManager.STATUS_SUCCESSFUL, data.length, data.length);
+                return true;
+            } catch (Exception e) {
+                if (target != null) {
+                    PublicStorageWriter.abort(activity, target);
+                }
+                return false;
+            }
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public static long enqueue(Activity activity, WebView webView, String url, String userAgent,
+                               String contentDisposition, String mimeType, long contentLength,
+                               boolean basicAuthEnabled, String description) {
+        if (activity == null || isBlank(url) || !BrowserUrlRouter.isWebUrl(url)) {
+            throw new IllegalArgumentException("invalid download url");
+        }
+        if (isDataUrl(url) || isBlobUrl(url)) {
+            throw new IllegalArgumentException("special download url");
+        }
+        String effectiveMime = normalizeMimeType(mimeType, url);
+        if (contentLength > 0) {
+            java.io.File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            long free = dir.getUsableSpace();
+            if (free > 0 && contentLength > free) {
+                throw new IllegalStateException("insufficient storage");
+            }
+        }
+        String fileName = resolveFileName(url, contentDisposition, effectiveMime);
+        fileName = resolveUniqueDownloadFileName(activity, fileName);
+        Uri uri = Uri.parse(url);
+        DownloadManager.Request request = new DownloadManager.Request(uri);
+        if (!isBlank(effectiveMime) && !"application/octet-stream".equals(effectiveMime)) {
+            try {
+                request.setMimeType(effectiveMime);
+            } catch (Exception ignored) {
+            }
+        }
+        addHeaderIfSafe(request, "Accept", "*/*");
+        addHeaderIfSafe(request, "Accept-Encoding", "identity");
+        addHeaderIfSafe(request, "User-Agent", userAgent);
+        WebView referrerView = webView;
+        String referer = null;
+        try {
+            referer = referrerView != null ? referrerView.getUrl() : null;
+        } catch (Exception ignored) {
+        }
+        if (BrowserUrlRouter.isWebUrl(referer)) {
+            addHeaderIfSafe(request, "Referer", referer);
+        }
+        String cookie = null;
+        try {
+            cookie = CookieManager.getInstance().getCookie(url);
+        } catch (Exception ignored) {
+        }
+        addHeaderIfSafe(request, "Cookie", cookie);
+        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(url, basicAuthEnabled);
+        addHeaderIfSafe(request, "Authorization", authorization);
+        request.setTitle(fileName);
+        request.setDescription(isBlank(description) ? "Downloading file..." : description);
+        request.allowScanningByMediaScanner();
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setAllowedOverMetered(true);
+        request.setAllowedOverRoaming(true);
+        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        DownloadManager dm = (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
+        if (dm == null) {
+            throw new IllegalStateException("download manager unavailable");
+        }
+        long id = dm.enqueue(request);
+        String filePath = new java.io.File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), fileName).getAbsolutePath();
+        DownloadFallbackManager.Spec spec = new DownloadFallbackManager.Spec(
+                activity, webView, url, userAgent, contentDisposition, mimeType,
+                contentLength, referer, fileName, effectiveMime, basicAuthEnabled);
+        try {
+            DownloadHistoryManager.addDownloadHistory(activity, id, fileName, filePath, userAgent, referer, basicAuthEnabled);
+        } catch (Exception ignored) {
+        }
+        try {
+            DownloadFallbackManager.register(id, spec);
+        } catch (Exception ignored) {
+        }
+        try {
+            DownloadHistoryManager.monitorDownloadProgress(activity, id, dm);
+        } catch (Exception ignored) {
+        }
+        return id;
+    }
+
+
+    public static void scheduleExternalTabClose(Activity activity, WebView webView, long downloadId,
+                                                String downloadUrl, Runnable closeAction) {
+        if (activity == null || webView == null || downloadId <= 0 || closeAction == null) {
+            return;
+        }
+        Handler handler = new Handler(Looper.getMainLooper());
+        final long start = System.currentTimeMillis();
+        Runnable[] poll = new Runnable[1];
+        poll[0] = () -> {
+            if (activity.isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && activity.isDestroyed())) {
+                return;
+            }
+            try {
+                DownloadManager dm = (DownloadManager) activity.getSystemService(Context.DOWNLOAD_SERVICE);
+                if (dm == null) {
+                    return;
+                }
+                try (Cursor cursor = dm.query(new DownloadManager.Query().setFilterById(downloadId))) {
+                    if (cursor != null && cursor.moveToFirst()) {
+                        int status = cursor.getInt(cursor.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS));
+                        if (status == DownloadManager.STATUS_RUNNING || status == DownloadManager.STATUS_PENDING || status == DownloadManager.STATUS_PAUSED) {
+                            if (System.currentTimeMillis() - start < 20000L) {
+                                handler.postDelayed(poll[0], 350L);
+                            }
+                            return;
+                        }
+                        if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                            String localUri = null;
+                            String title = null;
+                            String mimeType = null;
+                            int uriIndex = cursor.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI);
+                            if (uriIndex >= 0) {
+                                localUri = cursor.getString(uriIndex);
+                            }
+                            int titleIndex = cursor.getColumnIndex(DownloadManager.COLUMN_TITLE);
+                            if (titleIndex >= 0) {
+                                title = cursor.getString(titleIndex);
+                            }
+                            int mimeIndex = cursor.getColumnIndex(DownloadManager.COLUMN_MEDIA_TYPE);
+                            if (mimeIndex >= 0) {
+                                mimeType = cursor.getString(mimeIndex);
+                            }
+                            if (isSuspiciousDownloadedFile(activity, localUri, title, mimeType)) {
+                                if (System.currentTimeMillis() - start < 20000L) {
+                                    handler.postDelayed(poll[0], 500L);
+                                }
+                                return;
+                            }
+                            UiThread.postDelayed(() -> {
+                                try {
+                                    if (!activity.isFinishing() && (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || !activity.isDestroyed())
+                                            && ExternalDownloadTabTracker.shouldCloseAfterDownload(webView, downloadUrl)) {
+                                        closeAction.run();
+                                    }
+                                } catch (Exception ignored) {
+                                }
+                            }, 750L);
+                            return;
+                        }
+                        if (status == DownloadManager.STATUS_FAILED) {
+                            return;
+                        }
+                    }
+                }
+                int manualStatus = DownloadHistoryManager.getManualDownloadStatus(activity, downloadId);
+                if (manualStatus == DownloadManager.STATUS_SUCCESSFUL) {
+                    UiThread.postDelayed(() -> {
+                        try {
+                            if (!activity.isFinishing() && (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || !activity.isDestroyed())
+                                    && ExternalDownloadTabTracker.shouldCloseAfterDownload(webView, downloadUrl)) {
+                                closeAction.run();
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }, 750L);
+                    return;
+                }
+                if (manualStatus == DownloadManager.STATUS_FAILED) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            if (System.currentTimeMillis() - start < 20000L) {
+                handler.postDelayed(poll[0], 350L);
+            }
+        };
+        handler.postDelayed(poll[0], 350L);
+    }
+    public static void addHeaderIfSafe(DownloadManager.Request request, String name, String value) {
+        if (request == null || isBlank(value) || !isSafeHeaderValue(value)) {
+            return;
+        }
+        try {
+            request.addRequestHeader(name, value);
+        } catch (Exception ignored) {
+        }
+    }
+
+    public static void addHeader(HttpURLConnection connection, String name, String value) {
+        if (connection == null || isBlank(value) || !isSafeHeaderValue(value)) {
+            return;
+        }
+        try {
+            connection.setRequestProperty(name, value);
+        } catch (Exception ignored) {
+        }
+    }
+
+
+    public static boolean deleteLocalUri(Context context, String localUri) {
+        if (context == null || isBlank(localUri)) {
+            return false;
+        }
+        try {
+            Uri uri = Uri.parse(localUri);
+            if ("content".equalsIgnoreCase(uri.getScheme())) {
+                return context.getContentResolver().delete(uri, null, null) > 0;
+            }
+            if ("file".equalsIgnoreCase(uri.getScheme())) {
+                String path = uri.getPath();
+                return !isBlank(path) && new java.io.File(path).delete();
+            }
+            java.io.File file = new java.io.File(localUri);
+            return file.delete();
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    public static boolean isSuspiciousDownloadedFile(Context context, String localUri, String fileName, String mimeType) {
+        if (context == null || isBlank(localUri)) {
+            return false;
+        }
+        if (!isLikelyBinaryDownload(fileName, mimeType)) {
+            return false;
+        }
+        InputStreamHolder holder = null;
+        try {
+            Uri uri = Uri.parse(localUri);
+            java.io.InputStream in;
+            if ("content".equalsIgnoreCase(uri.getScheme())) {
+                in = context.getContentResolver().openInputStream(uri);
+            } else if ("file".equalsIgnoreCase(uri.getScheme())) {
+                String path = uri.getPath();
+                if (isBlank(path)) return false;
+                in = new java.io.FileInputStream(path);
+            } else {
+                in = new java.io.FileInputStream(new java.io.File(localUri));
+            }
+            if (in == null) {
+                return false;
+            }
+            holder = new InputStreamHolder(in);
+            byte[] head = new byte[4096];
+            int length = 0;
+            while (length < head.length) {
+                int read = in.read(head, length, head.length - length);
+                if (read < 0) break;
+                if (read == 0) continue;
+                length += read;
+            }
+            String sample = new String(head, 0, length, StandardCharsets.UTF_8).trim().toLowerCase(Locale.ROOT);
+            return sample.startsWith("<!doctype html") || sample.startsWith("<html")
+                    || sample.startsWith("<head") || sample.startsWith("<body");
+        } catch (Exception ignored) {
+            return false;
+        } finally {
+            if (holder != null) {
+                try {
+                    holder.in.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
+    private static boolean isLikelyBinaryDownload(String fileName, String mimeType) {
+        if (!isBlank(mimeType)) {
+            String lower = mimeType.toLowerCase(Locale.ROOT);
+            if (lower.startsWith("text/") || lower.contains("html") || lower.contains("xml") || lower.contains("json")) {
+                return false;
+            }
+        }
+        String lowerName = isBlank(fileName) ? "" : fileName.toLowerCase(Locale.ROOT);
+        return lowerName.endsWith(".apk") || lowerName.endsWith(".xapk") || lowerName.endsWith(".apks")
+                || lowerName.endsWith(".zip") || lowerName.endsWith(".7z") || lowerName.endsWith(".rar")
+                || lowerName.endsWith(".gz") || lowerName.endsWith(".tar") || lowerName.endsWith(".bz2")
+                || lowerName.endsWith(".pdf") || lowerName.endsWith(".bin") || lowerName.endsWith(".exe")
+                || lowerName.endsWith(".dmg") || lowerName.endsWith(".iso") || lowerName.endsWith(".mp4")
+                || lowerName.endsWith(".mp3") || lowerName.endsWith(".m4a") || lowerName.endsWith(".jpg")
+                || lowerName.endsWith(".jpeg") || lowerName.endsWith(".png") || lowerName.endsWith(".webp");
+    }
+
+    private static final class InputStreamHolder {
+        final java.io.InputStream in;
+        InputStreamHolder(java.io.InputStream in) { this.in = in; }
+    }
+
+    public static boolean isSafeHeaderValue(String value) {
+        if (value == null) {
+            return false;
+        }
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '\r' || c == '\n' || c == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String parseContentDispositionFileName(String header) {
+        if (isBlank(header)) {
+            return null;
+        }
+        try {
+            Matcher star = FILENAME_STAR_PATTERN.matcher(header);
+            if (star.find()) {
+                String value = stripQuotes(star.group(1).trim());
+                int firstTick = value.indexOf('\'');
+                int secondTick = firstTick < 0 ? -1 : value.indexOf('\'', firstTick + 1);
+                if (firstTick >= 0 && secondTick > firstTick) {
+                    String charset = value.substring(0, firstTick);
+                    String encoded = value.substring(secondTick + 1);
+                    try {
+                        return decodeRfc5987(encoded, charset.isEmpty() ? "UTF-8" : charset);
+                    } catch (Exception ignored) {
+                        try {
+                            return decodeRfc5987(encoded, StandardCharsets.UTF_8.name());
+                        } catch (Exception ignored2) {
+                        }
+                    }
+                }
+                try {
+                    return decodeRfc5987(value, StandardCharsets.UTF_8.name());
+                } catch (Exception ignored) {
+                }
+            }
+            Matcher normal = FILENAME_PATTERN.matcher(header);
+            if (normal.find()) {
+                return stripQuotes(normal.group(1).trim()).replace("\\\"", "\"");
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static String extractFileNameFromUrl(String url) {
+        if (isBlank(url)) {
+            return null;
+        }
+        try {
+            Uri uri = Uri.parse(url);
+            String last = uri.getLastPathSegment();
+            if (isBlank(last)) {
+                return null;
+            }
+            return URLDecoder.decode(last, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String extractFileNameFromQuery(String url) {
+        if (isBlank(url)) {
+            return null;
+        }
+        try {
+            Uri uri = Uri.parse(url);
+            String[] keys = {"filename", "fileName", "name", "file", "download_name", "downloadName", "download", "attachment", "response-content-disposition"};
+            for (String key : keys) {
+                String value = uri.getQueryParameter(key);
+                if (!isBlank(value)) {
+                    String candidate = value.trim();
+                    if ("1".equalsIgnoreCase(candidate) || "0".equalsIgnoreCase(candidate)
+                            || "true".equalsIgnoreCase(candidate) || "false".equalsIgnoreCase(candidate)
+                            || "download".equalsIgnoreCase(candidate) || "file".equalsIgnoreCase(candidate)
+                            || "attachment".equalsIgnoreCase(candidate)) {
+                        continue;
+                    }
+                    if (key.toLowerCase(Locale.ROOT).contains("disposition") && candidate.toLowerCase(Locale.ROOT).contains("filename")) {
+                        String parsed = parseContentDispositionFileName(candidate);
+                        if (!isBlank(parsed)) {
+                            return parsed;
+                        }
+                    }
+                    return candidate;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static boolean isWeakFileName(String fileName) {
+        if (isBlank(fileName)) {
+            return true;
+        }
+        String lower = sanitizeFileName(fileName).toLowerCase(Locale.ROOT);
+        return "download".equals(lower) || "download.file".equals(lower)
+                || "file".equals(lower) || "downloadfile".equals(lower)
+                || "untitled".equals(lower);
+    }
+
+    private static String extractHost(String url) {
+        try {
+            String host = Uri.parse(url).getHost();
+            return sanitizeFileName(host);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String ensureExtension(String fileName, String mimeType, String sourceUrl) {
+        if (isBlank(fileName)) {
+            return fileName;
+        }
+        String ext = extensionOf(fileName);
+        if (!ext.isEmpty()) {
+            return fileName;
+        }
+        String desired = extensionForMime(mimeType);
+        if (desired.isEmpty()) {
+            desired = extensionForMime(inferMimeTypeFromUrl(sourceUrl));
+        }
+        return desired.isEmpty() ? fileName : fileName + desired;
+    }
+
+    private static String extensionForMime(String mimeType) {
+        if (isBlank(mimeType)) {
+            return "";
+        }
+        String normalized = mimeType.toLowerCase(Locale.ROOT);
+        int semicolon = normalized.indexOf(';');
+        if (semicolon >= 0) {
+            normalized = normalized.substring(0, semicolon);
+        }
+        String ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(normalized);
+        if (!isBlank(ext)) {
+            return "." + ext.toLowerCase(Locale.ROOT);
+        }
+        if (normalized.contains("xapk")) return ".xapk";
+        if (normalized.contains("7z")) return ".7z";
+        if (normalized.contains("rar")) return ".rar";
+        if (normalized.contains("gzip")) return ".gz";
+        if (normalized.contains("tar")) return ".tar";
+        if (normalized.contains("apk")) return ".apk";
+        if (normalized.contains("pdf")) return ".pdf";
+        if (normalized.contains("json")) return ".json";
+        if (normalized.contains("xml")) return ".xml";
+        if (normalized.contains("html")) return ".html";
+        if (normalized.contains("plain")) return ".txt";
+        if (normalized.contains("jpeg")) return ".jpg";
+        if (normalized.contains("png")) return ".png";
+        if (normalized.contains("gif")) return ".gif";
+        if (normalized.contains("webp")) return ".webp";
+        if (normalized.contains("svg")) return ".svg";
+        if (normalized.contains("bmp")) return ".bmp";
+        if (normalized.contains("mpeg")) return ".mp3";
+        if (normalized.contains("mp4")) return ".mp4";
+        if (normalized.contains("webm")) return ".webm";
+        return "";
+    }
+
+    private static String extensionOf(String fileName) {
+        if (isBlank(fileName)) {
+            return "";
+        }
+        int slash = Math.max(fileName.lastIndexOf('/'), fileName.lastIndexOf('\\'));
+        int dot = fileName.lastIndexOf('.');
+        if (dot <= slash || dot >= fileName.length() - 1) {
+            return "";
+        }
+        return fileName.substring(dot);
+    }
+
+    public static String sanitizeFileName(String value) {
+        if (value == null) {
+            return "";
+        }
+        StringBuilder out = new StringBuilder(value.length());
+        boolean lastWasSpace = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (Character.isISOControl(c)) {
+                continue;
+            }
+            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
+                c = '_';
+            }
+            if (Character.isWhitespace(c)) {
+                if (lastWasSpace) {
+                    continue;
+                }
+                c = ' ';
+                lastWasSpace = true;
+            } else {
+                lastWasSpace = false;
+            }
+            out.append(c);
+        }
+        String result = out.toString().trim();
+        while (result.endsWith(".") || result.endsWith(" ")) {
+            result = result.substring(0, result.length() - 1);
+        }
+        if (result.equals(".") || result.equals("..")) {
+            result = "download";
+        }
+        String upper = result.toUpperCase(Locale.ROOT);
+        switch (upper) {
+            case "CON": case "PRN": case "AUX": case "NUL":
+            case "COM1": case "COM2": case "COM3": case "COM4": case "COM5": case "COM6": case "COM7": case "COM8": case "COM9":
+            case "LPT1": case "LPT2": case "LPT3": case "LPT4": case "LPT5": case "LPT6": case "LPT7": case "LPT8": case "LPT9":
+                result = "_" + result;
+                break;
+            default:
+                break;
+        }
+        return result;
+    }
+
+    private static String decodeRfc5987(String value, String charset) throws Exception {
+        if (value == null) {
+            return null;
+        }
+        String safe = value.replace("+", "%2B");
+        return URLDecoder.decode(safe, charset);
+    }
+
+    private static String stripQuotes(String value) {
+        if (value == null || value.length() < 2) {
+            return value;
+        }
+        if ((value.startsWith("\"") && value.endsWith("\"")) || (value.startsWith("'") && value.endsWith("'"))) {
+            return value.substring(1, value.length() - 1);
+        }
+        return value;
+    }
+
+    public static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+}
