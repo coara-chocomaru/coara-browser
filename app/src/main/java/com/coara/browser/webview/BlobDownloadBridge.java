@@ -303,23 +303,26 @@ public class BlobDownloadBridge {
 
     private void postCompleteNotification(Session session) {
         Intent intent = new Intent(context, DownloadOpenActivity.class);
-        intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, session.notificationId);
+        int completionNotificationId = com.coara.browser.util.DownloadFallbackManager.completionNotificationId(session.downloadId);
+        intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, completionNotificationId);
         intent.putExtra(DownloadOpenActivity.EXTRA_DOWNLOAD_ID, session.downloadId);
         intent.putExtra(DownloadOpenActivity.EXTRA_LOCAL_URI, session.target == null ? null : session.target.localUri);
         intent.putExtra(DownloadOpenActivity.EXTRA_FILE_PATH, session.target == null ? null : session.target.displayPath);
         intent.putExtra(DownloadOpenActivity.EXTRA_FILE_NAME, session.fileName);
-        PendingIntent pendingIntent = PendingIntent.getActivity(context, session.notificationId, intent,
+        PendingIntent pendingIntent = PendingIntent.getActivity(context, completionNotificationId, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_COMPLETE_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(session.fileName)
-                .setContentText("ダウンロード完了")
+                .setContentText("ダウンロードを完了しました")
                 .setOngoing(true)
                 .setAutoCancel(false)
                 .setOnlyAlertOnce(true)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);
-        showNotification(session.notificationId, builder);
+        NotificationManagerCompat.from(context).cancel(session.notificationId);
+        showNotification(completionNotificationId, builder);
     }
 
     private void postFailedNotification(Session session) {
