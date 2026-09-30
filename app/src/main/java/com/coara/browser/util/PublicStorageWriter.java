@@ -87,20 +87,23 @@ public final class PublicStorageWriter {
         return new Target(out, null, file, file.getAbsolutePath(), Uri.fromFile(file).toString());
     }
 
-    public static void finish(Context context, Target target) {
+    public static boolean finish(Context context, Target target) {
         if (target == null) {
-            return;
+            return false;
         }
         try {
             target.outputStream.close();
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            return false;
         }
         if (target.mediaUri != null) {
             ContentValues values = new ContentValues();
             values.put(MediaStore.MediaColumns.IS_PENDING, 0);
             try {
-                context.getContentResolver().update(target.mediaUri, values, null, null);
+                int updated = context.getContentResolver().update(target.mediaUri, values, null, null);
+                return updated > 0;
             } catch (Exception ignored) {
+                return false;
             }
         } else if (target.legacyFile != null) {
             try {
@@ -108,7 +111,9 @@ public final class PublicStorageWriter {
                         new String[]{target.legacyFile.getAbsolutePath()}, null, null);
             } catch (Exception ignored) {
             }
+            return target.legacyFile.exists();
         }
+        return false;
     }
 
     public static void abort(Context context, Target target) {

@@ -2,13 +2,22 @@ package com.coara.browser.util;
 
 import android.app.Activity;
 import android.app.DownloadManager;
+import android.app.PendingIntent;
+import android.app.Notification;
 import android.content.Context;
+import android.content.Intent;
 import android.net.Uri;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
 import android.widget.Toast;
 
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+
+import com.coara.browser.BrowserApplication;
+import com.coara.browser.DownloadHistoryActivity;
 import com.coara.browser.DownloadHistoryManager;
+import com.coara.browser.model.DownloadItem;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -23,6 +32,7 @@ import java.util.Deque;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -69,8 +79,88 @@ public final class DownloadFallbackManager {
     private static final int READ_TIMEOUT_MS = 30000;
     private static final int BUFFER_SIZE = 65536;
     private static final long PROGRESS_UPDATE_MS = 500;
+    private static final ConcurrentHashMap<Long, DownloadControl> CONTROLS = new ConcurrentHashMap<>();
+    private static final AtomicLong CONTROL_GENERATION = new AtomicLong(0L);
+    private static final ConcurrentHashMap<Long, HttpURLConnection> ACTIVE_CONNECTIONS = new ConcurrentHashMap<>();
+
+    private static final class DownloadControl {
+        volatile boolean paused;
+        volatile boolean cancelled;
+        volatile long generation;
+    }
 
     private DownloadFallbackManager() {
+    }
+
+    private static DownloadControl newControl() {
+        DownloadControl control = new DownloadControl();
+        control.generation = CONTROL_GENERATION.incrementAndGet();
+        return control;
+    }
+
+    public static boolean isActive(long downloadId) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        return control != null && !control.cancelled && !control.paused;
+    }
+
+    public static long getGeneration(long downloadId) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        return control == null ? -1L : control.generation;
+    }
+
+    public static long ensureGeneration(Context context, long downloadId) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        if (control != null) return control.generation;
+        DownloadItem item = DownloadHistoryManager.getManualDownloadItem(context, downloadId);
+        if (item == null || item.isPaused || DownloadSupport.isBlank(item.downloadUrl)) return -1L;
+        DownloadControl created = newControl();
+        DownloadControl existing = CONTROLS.putIfAbsent(downloadId, created);
+        return existing == null ? created.generation : existing.generation;
+    }
+
+    private static boolean isCurrentGeneration(long downloadId, long generation) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        return generation < 0L || (control != null && control.generation == generation);
+    }
+
+    public static void startDownloadService(Context context, long downloadId) {
+        if (context == null || downloadId <= 0) return;
+        try {
+            Context appContext = context.getApplicationContext();
+            Intent intent = new Intent(appContext, DownloadFallbackService.class);
+            intent.putExtra(DownloadFallbackService.EXTRA_DOWNLOAD_ID, downloadId);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                appContext.startForegroundService(intent);
+            } else {
+                appContext.startService(intent);
+            }
+        } catch (Exception e) {
+            EXECUTOR.execute(() -> runPersistedDownload(context, downloadId));
+        }
+    }
+
+    public static boolean runPersistedDownload(Context context, long downloadId) {
+        if (context == null || downloadId <= 0) return false;
+        Context appContext = context.getApplicationContext();
+        DownloadControl control = CONTROLS.get(downloadId);
+        if (control == null) {
+            control = newControl();
+            DownloadControl existing = CONTROLS.putIfAbsent(downloadId, control);
+            if (existing != null) control = existing;
+        }
+        if (control.cancelled || control.paused) return false;
+        long generation = control.generation;
+        Spec spec = SPECS.get(downloadId);
+        if (spec == null) {
+            DownloadItem item = DownloadHistoryManager.getManualDownloadItem(appContext, downloadId);
+            if (item == null || item.isPaused || DownloadSupport.isBlank(item.downloadUrl)) return false;
+            String mime = DownloadSupport.normalizeMimeType(null, item.title);
+            spec = new Spec(null, null, item.downloadUrl, item.userAgent, null, mime, item.totalSize,
+                    item.referer, item.title, mime, item.basicAuthEnabled);
+            SPECS.put(downloadId, spec);
+        }
+        runFallback(spec, downloadId, appContext, generation);
+        return true;
     }
 
     public static void register(long downloadId, Spec spec) {
@@ -93,12 +183,19 @@ public final class DownloadFallbackManager {
             String filePath = new java.io.File(
                     android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS),
                     fileName).getAbsolutePath();
-            DownloadHistoryManager.addDownloadHistory(activity, id, fileName, filePath, userAgent, referer, basicAuthEnabled);
+            DownloadHistoryManager.addDownloadHistory(activity, id, fileName, filePath, userAgent, referer, basicAuthEnabled,
+                    url, effectiveMime, contentDisposition);
+            DownloadHistoryManager.updateManualDownloadMetadata(activity, id, url, userAgent, referer, effectiveMime,
+                    contentDisposition, basicAuthEnabled, fileName, filePath, null);
             DownloadHistoryManager.updateManualDownload(activity, id, fileName, filePath,
                     DownloadManager.STATUS_RUNNING, 0L, contentLength);
             Spec spec = new Spec(activity, webView, url, userAgent, contentDisposition, mimeType, contentLength,
                     referer, fileName, effectiveMime, basicAuthEnabled);
-            EXECUTOR.execute(() -> runFallback(spec, id));
+            DownloadControl control = newControl();
+            CONTROLS.put(id, control);
+            SPECS.put(id, spec);
+            postProgressNotification(activity, id, fileName, 0L, contentLength);
+            startDownloadService(activity, id);
             return id;
         } catch (Exception e) {
             return -1L;
@@ -107,6 +204,74 @@ public final class DownloadFallbackManager {
 
     public static void clear(long downloadId) {
         SPECS.remove(downloadId);
+        CONTROLS.remove(downloadId);
+        ACTIVE_CONNECTIONS.remove(downloadId);
+    }
+
+    public static boolean pauseDownload(Context context, long downloadId) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        if (control == null) {
+            return false;
+        }
+        control.paused = true;
+        HttpURLConnection connection = ACTIVE_CONNECTIONS.get(downloadId);
+        if (connection != null) {
+            try {
+                connection.disconnect();
+            } catch (Exception ignored) {
+            }
+        }
+        DownloadItem item = DownloadHistoryManager.getManualDownloadItem(context, downloadId);
+        if (item != null) {
+            DownloadHistoryManager.updateManualDownload(context, downloadId, item.title, item.filePath, item.localUri,
+                    DownloadManager.STATUS_PAUSED, item.downloadedSize, item.totalSize);
+            postPausedNotification(context, downloadId, item.title);
+        }
+        return true;
+    }
+
+    public static boolean cancelDownload(Context context, long downloadId) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        if (control == null) {
+            return false;
+        }
+        control.cancelled = true;
+        HttpURLConnection connection = ACTIVE_CONNECTIONS.get(downloadId);
+        if (connection != null) {
+            try {
+                connection.disconnect();
+            } catch (Exception ignored) {
+            }
+        }
+        DownloadItem item = DownloadHistoryManager.getManualDownloadItem(context, downloadId);
+        if (item != null) {
+            DownloadHistoryManager.updateManualDownload(context, downloadId, item.title, item.filePath, item.localUri,
+                    DownloadManager.STATUS_FAILED, item.downloadedSize, item.totalSize);
+            postFailedNotification(context, downloadId, item.title, "ダウンロードをキャンセルしました");
+        }
+        return true;
+    }
+
+    public static boolean resumeDownload(Context context, long downloadId) {
+        DownloadItem item = DownloadHistoryManager.getManualDownloadItem(context, downloadId);
+        if (item == null || !item.manual || DownloadSupport.isBlank(item.downloadUrl)) {
+            return false;
+        }
+        DownloadControl control = CONTROLS.get(downloadId);
+        if (control == null) {
+            control = newControl();
+            DownloadControl existing = CONTROLS.putIfAbsent(downloadId, control);
+            if (existing != null) control = existing;
+        }
+        control.generation = CONTROL_GENERATION.incrementAndGet();
+        control.paused = false;
+        control.cancelled = false;
+        SPECS.remove(downloadId);
+        DownloadHistoryManager.updateManualDownload(context, downloadId, item.title, item.filePath, item.localUri,
+                DownloadManager.STATUS_RUNNING, 0L, item.totalSize);
+        postProgressNotification(context, downloadId, item.title, 0L, item.totalSize);
+        startDownloadService(context, downloadId);
+        return true;
     }
 
     public static boolean shouldFallback(int reason) {
@@ -120,21 +285,29 @@ public final class DownloadFallbackManager {
     }
 
     public static void onDownloadManagerFailure(Context context, DownloadManager dm, long downloadId, int reason) {
+        if (DownloadHistoryManager.getManualDownloadStatus(context, downloadId) == DownloadManager.STATUS_PAUSED) {
+            return;
+        }
         Spec spec = SPECS.remove(downloadId);
         if (spec == null || !shouldFallback(reason)) {
             return;
         }
+        CONTROLS.putIfAbsent(downloadId, newControl());
         removeDownload(dm, downloadId);
-        EXECUTOR.execute(() -> runFallback(spec, downloadId));
+        startDownloadService(context, downloadId);
     }
 
     public static void onPendingTimeout(Context context, DownloadManager dm, long downloadId) {
+        if (DownloadHistoryManager.getManualDownloadStatus(context, downloadId) == DownloadManager.STATUS_PAUSED) {
+            return;
+        }
         Spec spec = SPECS.remove(downloadId);
         if (spec == null) {
             return;
         }
+        CONTROLS.putIfAbsent(downloadId, newControl());
         removeDownload(dm, downloadId);
-        EXECUTOR.execute(() -> runFallback(spec, downloadId));
+        startDownloadService(context, downloadId);
     }
 
     public static void onSuspiciousSuccessfulDownload(Context context, DownloadManager dm, long downloadId, String localUri) {
@@ -142,9 +315,10 @@ public final class DownloadFallbackManager {
         if (spec == null) {
             return;
         }
+        CONTROLS.putIfAbsent(downloadId, newControl());
         DownloadSupport.deleteLocalUri(context, localUri);
         removeDownload(dm, downloadId);
-        EXECUTOR.execute(() -> runFallback(spec, downloadId));
+        startDownloadService(context, downloadId);
     }
 
     private static void removeDownload(DownloadManager dm, long downloadId) {
@@ -157,16 +331,37 @@ public final class DownloadFallbackManager {
     }
 
     private static void runFallback(Spec spec, long downloadId) {
-        if (spec.activity == null) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        long generation = control == null ? -1L : control.generation;
+        runFallback(spec, downloadId, spec.activity, generation);
+    }
+
+    private static void runFallback(Spec spec, long downloadId, Context context) {
+        DownloadControl control = CONTROLS.get(downloadId);
+        long generation = control == null ? -1L : control.generation;
+        runFallback(spec, downloadId, context, generation);
+    }
+
+    private static void runFallback(Spec spec, long downloadId, Context context, long generation) {
+        final Context appContext = context != null ? context.getApplicationContext() : (spec.activity != null ? spec.activity.getApplicationContext() : null);
+        if (appContext == null || !isCurrentGeneration(downloadId, generation)) {
             return;
         }
-        if (isActivityUnavailable(spec.activity)) {
-            DownloadHistoryManager.updateManualDownload(spec.activity, downloadId,
-                    spec.initialFileName, "", DownloadManager.STATUS_FAILED, 0L, spec.contentLength);
+        if (spec.activity != null && isActivityUnavailable(spec.activity)) {
+            DownloadHistoryManager.updateManualDownload(appContext, downloadId, spec.initialFileName, "",
+                    DownloadManager.STATUS_FAILED, 0L, spec.contentLength);
+            postFailedNotification(appContext, downloadId, spec.initialFileName, "ダウンロードを開始できませんでした");
+            CONTROLS.remove(downloadId);
+            SPECS.remove(downloadId);
             return;
         }
-        FallbackResult first = perform(spec, spec.url, null, null, null, null, 0, downloadId);
-        if (first.needsCredentials && spec.basicAuthEnabled) {
+        DownloadHistoryManager.updateManualDownloadMetadata(appContext, downloadId, spec.url, spec.userAgent, spec.referer,
+                spec.effectiveMimeType, spec.contentDisposition, spec.basicAuthEnabled, spec.initialFileName, "", null);
+        DownloadHistoryManager.updateManualDownload(appContext, downloadId, spec.initialFileName, "",
+                DownloadManager.STATUS_RUNNING, 0L, spec.contentLength);
+        postProgressNotification(appContext, downloadId, spec.initialFileName, 0L, spec.contentLength);
+        FallbackResult first = perform(spec, spec.url, null, null, null, null, 0, downloadId, appContext, generation);
+        if (first.needsCredentials && spec.basicAuthEnabled && spec.activity != null) {
             final String realm = first.realm == null ? "" : first.realm;
             final String authHost = hostOf(first.authUrl == null ? spec.url : first.authUrl);
             BasicAuthManager.markAuthenticationFailure(spec.activity, spec.webView, authHost, realm);
@@ -174,32 +369,68 @@ public final class DownloadFallbackManager {
                     spec.activity, spec.webView, authHost, realm,
                     (username, password) -> {
                         if (username == null || password == null) {
-                            DownloadHistoryManager.updateManualDownload(spec.activity, downloadId, spec.initialFileName, "",
+                            DownloadHistoryManager.updateManualDownload(appContext, downloadId, spec.initialFileName, "",
                                     DownloadManager.STATUS_FAILED, 0L, spec.contentLength);
+                            postFailedNotification(appContext, downloadId, spec.initialFileName, "Basic認証をキャンセルしました");
                             toast(spec.activity, "Basic認証をキャンセルしました");
+                            CONTROLS.remove(downloadId);
+                            SPECS.remove(downloadId);
                             return;
                         }
                         EXECUTOR.execute(() -> {
-                            FallbackResult second = perform(spec, spec.url, username, password, authHost, null, 0, downloadId);
+                            FallbackResult second = perform(spec, spec.url, username, password, authHost, null, 0, downloadId, appContext, generation);
+                            if (!isCurrentGeneration(downloadId, generation)) {
+                                return;
+                            }
                             if (!second.success) {
-                                DownloadHistoryManager.updateManualDownload(spec.activity, downloadId, spec.initialFileName, "",
-                                        DownloadManager.STATUS_FAILED, 0L, spec.contentLength);
-                                toast(spec.activity, second.needsCredentials ? "Basic認証に失敗しました"
-                                        : (second.message == null ? "ダウンロードに失敗しました" : second.message));
+                                int status = second.paused ? DownloadManager.STATUS_PAUSED : DownloadManager.STATUS_FAILED;
+                                DownloadItem item = DownloadHistoryManager.getManualDownloadItem(appContext, downloadId);
+                                long done = item == null ? 0L : item.downloadedSize;
+                                long total = item == null ? spec.contentLength : item.totalSize;
+                                String name = item == null ? spec.initialFileName : item.title;
+                                String path = item == null ? "" : item.filePath;
+                                String uri = item == null ? "" : item.localUri;
+                                DownloadHistoryManager.updateManualDownload(appContext, downloadId, name, path, uri, status, done, total);
+                                if (status == DownloadManager.STATUS_PAUSED) {
+                                    postPausedNotification(appContext, downloadId, name);
+                                } else {
+                                    postFailedNotification(appContext, downloadId, name, second.message == null ? "ダウンロードに失敗しました" : second.message);
+                                    toast(spec.activity, second.message == null ? "ダウンロードに失敗しました" : second.message);
+                                }
+                                CONTROLS.remove(downloadId);
+                                SPECS.remove(downloadId);
                             }
                         });
                     }));
             return;
         }
+        if (!isCurrentGeneration(downloadId, generation)) {
+            return;
+        }
         if (!first.success) {
-            DownloadHistoryManager.updateManualDownload(spec.activity, downloadId, spec.initialFileName, "",
-                    DownloadManager.STATUS_FAILED, 0L, spec.contentLength);
-            toast(spec.activity, first.message == null ? "ダウンロードに失敗しました" : first.message);
+            int status = first.paused ? DownloadManager.STATUS_PAUSED : DownloadManager.STATUS_FAILED;
+            DownloadItem item = DownloadHistoryManager.getManualDownloadItem(appContext, downloadId);
+            long done = item == null ? 0L : item.downloadedSize;
+            long total = item == null ? spec.contentLength : item.totalSize;
+            String name = item == null ? spec.initialFileName : item.title;
+            String path = item == null ? "" : item.filePath;
+            String uri = item == null ? "" : item.localUri;
+            DownloadHistoryManager.updateManualDownload(appContext, downloadId, name, path, uri, status, done, total);
+            if (status == DownloadManager.STATUS_PAUSED) {
+                postPausedNotification(appContext, downloadId, name);
+            } else if (first.cancelled) {
+                postFailedNotification(appContext, downloadId, name, "ダウンロードをキャンセルしました");
+            } else {
+                postFailedNotification(appContext, downloadId, name, first.message == null ? "ダウンロードに失敗しました" : first.message);
+                toast(spec.activity, first.message == null ? "ダウンロードに失敗しました" : first.message);
+            }
+            CONTROLS.remove(downloadId);
+            SPECS.remove(downloadId);
         }
     }
 
     private static FallbackResult perform(Spec spec, String initialUrl, String username, String password,
-                                          String credentialHost, String forcedReferer, int redirectCount, long downloadId) {
+                                          String credentialHost, String forcedReferer, int redirectCount, long downloadId, Context context, long generation) {
         if (redirectCount > MAX_REDIRECTS) {
             return FallbackResult.failure("リダイレクトが多すぎます");
         }
@@ -210,6 +441,9 @@ public final class DownloadFallbackManager {
         int transientRetryCount = 0;
         try {
             while (true) {
+                if (!isCurrentGeneration(downloadId, generation)) {
+                    return FallbackResult.paused();
+                }
                 if (visited.contains(currentUrl)) {
                     return FallbackResult.failure("リダイレクトループを検出しました");
                 }
@@ -223,6 +457,7 @@ public final class DownloadFallbackManager {
                     return FallbackResult.failure("対応していないURLです");
                 }
                 connection = (HttpURLConnection) url.openConnection();
+                ACTIVE_CONNECTIONS.put(downloadId, connection);
                 connection.setInstanceFollowRedirects(false);
                 connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
                 connection.setReadTimeout(READ_TIMEOUT_MS);
@@ -302,6 +537,13 @@ public final class DownloadFallbackManager {
                 if (status < 200 || status >= 300) {
                     return FallbackResult.failure("HTTPエラー: " + status);
                 }
+                DownloadControl control = CONTROLS.get(downloadId);
+                if (control != null && control.cancelled) {
+                    return FallbackResult.cancelled("ダウンロードをキャンセルしました");
+                }
+                if (control != null && control.paused) {
+                    return FallbackResult.paused();
+                }
                 String responseMime = connection.getContentType();
                 String finalDisposition = connection.getHeaderField("Content-Disposition");
                 String alternateDisposition = connection.getHeaderField("X-Content-Disposition");
@@ -359,7 +601,7 @@ public final class DownloadFallbackManager {
                 if (DownloadSupport.isBlank(fileName)) {
                     fileName = "download";
                 }
-                fileName = DownloadSupport.resolveUniqueDownloadFileName(spec.activity, fileName);
+                fileName = DownloadSupport.resolveUniqueDownloadFileName(context, fileName);
                 long progressTotal = responseLength > 0 ? responseLength : spec.contentLength;
                 if (responseLength > 0) {
                     java.io.File dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
@@ -370,24 +612,65 @@ public final class DownloadFallbackManager {
                 }
                 PublicStorageWriter.Target target = null;
                 try {
-                    target = PublicStorageWriter.openDownloadsTarget(spec.activity, fileName, finalMime);
+                    target = PublicStorageWriter.openDownloadsTarget(context, fileName, finalMime);
                     target.outputStream.write(prefix, 0, prefixLength);
-                    copyAndValidate(source, target.outputStream, prefixLength, responseLength, spec.activity,
-                            downloadId, fileName, target.displayPath, finalMime, fileName);
-                    PublicStorageWriter.finish(spec.activity, target);
+                    CopyResult copy = copyAndValidate(source, target.outputStream, prefixLength, responseLength, context,
+                            downloadId, fileName, target.displayPath, finalMime, fileName, generation);
+                    if (copy.cancelled) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.cancelled("ダウンロードをキャンセルしました");
+                    }
+                    if (copy.paused) {
+                        PublicStorageWriter.abort(context, target);
+                        DownloadHistoryManager.updateManualDownload(context, downloadId, fileName, target.displayPath, target.localUri,
+                                DownloadManager.STATUS_PAUSED, copy.bytes, responseLength > 0 ? responseLength : progressTotal);
+                        return FallbackResult.paused();
+                    }
+                    if (!isCurrentGeneration(downloadId, generation)) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.paused();
+                    }
+                    DownloadControl beforeFinish = CONTROLS.get(downloadId);
+                    if (beforeFinish != null && beforeFinish.cancelled) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.cancelled("ダウンロードをキャンセルしました");
+                    }
+                    if (beforeFinish != null && beforeFinish.paused) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.paused();
+                    }
+                    if (responseLength > 0 && copy.bytes != responseLength) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.failure("ダウンロードサイズが一致しません");
+                    }
+                    if (!PublicStorageWriter.finish(context, target)) {
+                        PublicStorageWriter.abort(context, target);
+                        return FallbackResult.failure("保存を確定できませんでした");
+                    }
                     long finalBytes = responseLength > 0 ? responseLength : progressTotal;
-                    DownloadHistoryManager.updateManualDownload(spec.activity, downloadId, fileName, target.displayPath, target.localUri,
+                    DownloadHistoryManager.updateManualDownloadMetadata(context, downloadId, spec.url, spec.userAgent, spec.referer,
+                            finalMime, finalDisposition, spec.basicAuthEnabled, fileName, target.displayPath, target.localUri);
+                    DownloadHistoryManager.updateManualDownload(context, downloadId, fileName, target.displayPath, target.localUri,
                             DownloadManager.STATUS_SUCCESSFUL, finalBytes, finalBytes);
+                    postCompleteNotification(context, downloadId, fileName);
                     toast(spec.activity, "ダウンロードを完了しました");
+                    CONTROLS.remove(downloadId);
+                    SPECS.remove(downloadId);
                     return FallbackResult.success();
                 } catch (Exception e) {
-                    if (target != null) {
-                        PublicStorageWriter.abort(spec.activity, target);
+                    DownloadControl currentControl = CONTROLS.get(downloadId);
+                    if (target != null && (currentControl == null || (!currentControl.paused && !currentControl.cancelled))) {
+                        PublicStorageWriter.abort(context, target);
                     }
+                    if (currentControl != null && currentControl.cancelled) return FallbackResult.cancelled("ダウンロードをキャンセルしました");
+                    if (currentControl != null && currentControl.paused) return FallbackResult.paused();
                     return FallbackResult.failure("保存に失敗しました");
                 }
             }
         } catch (Exception e) {
+            DownloadControl currentControl = CONTROLS.get(downloadId);
+            if (currentControl != null && currentControl.cancelled) return FallbackResult.cancelled("ダウンロードをキャンセルしました");
+            if (currentControl != null && currentControl.paused) return FallbackResult.paused();
             return FallbackResult.failure("通信に失敗しました");
         } finally {
             if (connection != null) {
@@ -396,36 +679,175 @@ public final class DownloadFallbackManager {
                 } catch (Exception ignored) {
                 }
             }
+            ACTIVE_CONNECTIONS.remove(downloadId);
         }
     }
 
-    private static void copyAndValidate(BufferedInputStream source, OutputStream target, long initialBytes, long strictTotal, Activity activity,
-                                        long downloadId, String fileName, String displayPath,
-                                        String mimeType, String effectiveFileName) throws IOException {
+    private static CopyResult copyAndValidate(BufferedInputStream source, OutputStream target, long initialBytes, long strictTotal, Context context,
+                                             long downloadId, String fileName, String displayPath,
+                                             String mimeType, String effectiveFileName, long generation) throws IOException {
+        long done = initialBytes;
+        long lastUpdate = 0L;
+        DownloadControl control = CONTROLS.get(downloadId);
         try (BufferedInputStream in = source;
              BufferedOutputStream out = new BufferedOutputStream(target, BUFFER_SIZE)) {
             byte[] buffer = new byte[BUFFER_SIZE];
-            long done = initialBytes;
-            long lastUpdate = 0;
             int read;
             while ((read = in.read(buffer)) != -1) {
                 if (read == 0) continue;
+                if (!isCurrentGeneration(downloadId, generation)) {
+                    return CopyResult.paused(done);
+                }
+                control = CONTROLS.get(downloadId);
+                if (control != null && control.cancelled) {
+                    return CopyResult.cancelled(done);
+                }
+                if (control != null && control.paused) {
+                    return CopyResult.paused(done);
+                }
                 out.write(buffer, 0, read);
                 done += read;
                 long now = System.currentTimeMillis();
                 if (now - lastUpdate >= PROGRESS_UPDATE_MS) {
                     lastUpdate = now;
-                    DownloadHistoryManager.updateManualDownload(activity, downloadId, fileName, displayPath, null,
-                            DownloadManager.STATUS_RUNNING, done, strictTotal > 0 ? strictTotal : done);
+                    long total = strictTotal > 0 ? strictTotal : done;
+                    DownloadHistoryManager.updateManualDownload(context, downloadId, fileName, displayPath, null,
+                            DownloadManager.STATUS_RUNNING, done, total);
+                    postProgressNotification(context, downloadId, fileName, done, strictTotal);
                 }
             }
             out.flush();
-            if (strictTotal > 0 && done != strictTotal) {
-                throw new IOException("size mismatch");
+            if (!isCurrentGeneration(downloadId, generation)) {
+                return CopyResult.paused(done);
             }
-            DownloadHistoryManager.updateManualDownload(activity, downloadId, fileName, displayPath, null,
-                    DownloadManager.STATUS_SUCCESSFUL, done, strictTotal > 0 ? strictTotal : done);
+            control = CONTROLS.get(downloadId);
+            if (control != null && control.cancelled) return CopyResult.cancelled(done);
+            if (control != null && control.paused) return CopyResult.paused(done);
+            return CopyResult.success(done);
         }
+    }
+
+    private static final class CopyResult {
+        final long bytes;
+        final boolean paused;
+        final boolean cancelled;
+        private CopyResult(long bytes, boolean paused, boolean cancelled) {
+            this.bytes = bytes;
+            this.paused = paused;
+            this.cancelled = cancelled;
+        }
+        static CopyResult success(long bytes) { return new CopyResult(bytes, false, false); }
+        static CopyResult paused(long bytes) { return new CopyResult(bytes, true, false); }
+        static CopyResult cancelled(long bytes) { return new CopyResult(bytes, false, true); }
+    }
+
+    private static int notificationId(long downloadId) {
+        int hash = Long.valueOf(downloadId).hashCode() & 0x3fffffff;
+        return 30000 + (hash % 1000000);
+    }
+
+    private static PendingIntent historyPendingIntent(Context context, long downloadId) {
+        try {
+            Intent intent = new Intent(context, DownloadHistoryActivity.class);
+            intent.putExtra("download_id", downloadId);
+            int flags = PendingIntent.FLAG_UPDATE_CURRENT;
+            if (android.os.Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
+            return PendingIntent.getActivity(context, notificationId(downloadId), intent, flags);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public static Notification buildProgressNotification(Context context, long downloadId, String fileName, long downloaded, long total) {
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
+                .setContentText(total > 0 ? ((downloaded * 100L) / total) + "%" : formatBytes(downloaded))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW);
+        PendingIntent pendingIntent = historyPendingIntent(context, downloadId);
+        if (pendingIntent != null) builder.setContentIntent(pendingIntent);
+        if (total > 0) builder.setProgress(100, (int)Math.min(100L, (downloaded * 100L) / total), false);
+        else builder.setProgress(0, 0, true);
+        return builder.build();
+    }
+
+    public static Notification buildServiceNotification(Context context) {
+        return new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("ダウンロード")
+                .setContentText("ダウンロードを処理しています")
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build();
+    }
+
+    private static void postProgressNotification(Context context, long downloadId, String fileName, long downloaded, long total) {
+        if (context == null) return;
+        try {
+            NotificationManagerCompat.from(context).notify(notificationId(downloadId),
+                    buildProgressNotification(context, downloadId, fileName, downloaded, total));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void postPausedNotification(Context context, long downloadId, String fileName) {
+        try {
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.stat_sys_download)
+                    .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
+                    .setContentText("ダウンロードを一時停止しました")
+                    .setOngoing(false)
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_LOW);
+            PendingIntent pendingIntent = historyPendingIntent(context, downloadId);
+            if (pendingIntent != null) builder.setContentIntent(pendingIntent);
+            NotificationManagerCompat.from(context).notify(notificationId(downloadId), builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void postCompleteNotification(Context context, long downloadId, String fileName) {
+        try {
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                    .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
+                    .setContentText("ダウンロード完了")
+                    .setOngoing(false)
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            PendingIntent pendingIntent = historyPendingIntent(context, downloadId);
+            if (pendingIntent != null) builder.setContentIntent(pendingIntent);
+            NotificationManagerCompat.from(context).notify(notificationId(downloadId), builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void postFailedNotification(Context context, long downloadId, String fileName, String message) {
+        try {
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                    .setSmallIcon(android.R.drawable.stat_sys_warning)
+                    .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
+                    .setContentText(DownloadSupport.isBlank(message) ? "ダウンロード失敗" : message)
+                    .setOngoing(false)
+                    .setAutoCancel(true)
+                    .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+            PendingIntent pendingIntent = historyPendingIntent(context, downloadId);
+            if (pendingIntent != null) builder.setContentIntent(pendingIntent);
+            NotificationManagerCompat.from(context).notify(notificationId(downloadId), builder.build());
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes < 1024L) return bytes + " B";
+        double kb = bytes / 1024.0;
+        if (kb < 1024.0) return String.format(java.util.Locale.getDefault(), "%.1f KB", kb);
+        double mb = kb / 1024.0;
+        if (mb < 1024.0) return String.format(java.util.Locale.getDefault(), "%.1f MB", mb);
+        return String.format(java.util.Locale.getDefault(), "%.2f GB", mb / 1024.0);
     }
 
     private static void storeCookies(String url, HttpURLConnection connection) {
@@ -598,25 +1020,37 @@ public final class DownloadFallbackManager {
         final String realm;
         final String authUrl;
         final String message;
+        final boolean paused;
+        final boolean cancelled;
 
-        private FallbackResult(boolean success, boolean needsCredentials, String realm, String authUrl, String message) {
+        private FallbackResult(boolean success, boolean needsCredentials, String realm, String authUrl, String message, boolean paused, boolean cancelled) {
             this.success = success;
             this.needsCredentials = needsCredentials;
             this.realm = realm;
             this.authUrl = authUrl;
             this.message = message;
+            this.paused = paused;
+            this.cancelled = cancelled;
         }
 
         static FallbackResult success() {
-            return new FallbackResult(true, false, null, null, null);
+            return new FallbackResult(true, false, null, null, null, false, false);
         }
 
         static FallbackResult failure(String message) {
-            return new FallbackResult(false, false, null, null, message);
+            return new FallbackResult(false, false, null, null, message, false, false);
+        }
+
+        static FallbackResult paused() {
+            return new FallbackResult(false, false, null, null, "paused", true, false);
+        }
+
+        static FallbackResult cancelled(String message) {
+            return new FallbackResult(false, false, null, null, message, false, true);
         }
 
         static FallbackResult authRequired(String realm, String authUrl) {
-            return new FallbackResult(false, true, realm, authUrl, null);
+            return new FallbackResult(false, true, realm, authUrl, null, false, false);
         }
     }
 }

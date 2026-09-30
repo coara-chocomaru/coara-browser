@@ -543,7 +543,8 @@ public final class DownloadSupport {
                 activity, webView, url, userAgent, contentDisposition, mimeType,
                 contentLength, referer, fileName, effectiveMime, basicAuthEnabled);
         try {
-            DownloadHistoryManager.addDownloadHistory(activity, id, fileName, filePath, userAgent, referer, basicAuthEnabled);
+            DownloadHistoryManager.addDownloadHistory(activity, id, fileName, filePath, userAgent, referer, basicAuthEnabled,
+                    url, effectiveMime, contentDisposition);
         } catch (Exception ignored) {
         }
         try {
