@@ -93,6 +93,7 @@ import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.SpaStateManager;
 import com.coara.browser.util.CacheModePolicy;
 import com.coara.browser.util.BrowserConstants;
+import com.coara.browser.util.BasicAuthManager;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -157,6 +158,7 @@ public class MainActivity extends AppCompatActivity {
     private static Method sSetDatabaseEnabledMethod;
     private static Method sSetAppCacheEnabledMethod;
     private static Method sSetAppCachePathMethod;
+    private static boolean sWebViewDataDirectoryConfigured = false;
     private View findInPageBarView;
     private EditText etFindQuery;
     private TextView tvFindCount;
@@ -274,8 +276,12 @@ public class MainActivity extends AppCompatActivity {
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            WebView.setDataDirectorySuffix("MainActivity");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !sWebViewDataDirectoryConfigured) {
+            try {
+                WebView.setDataDirectorySuffix("MainActivity");
+            } catch (IllegalStateException ignored) {
+            }
+            sWebViewDataDirectoryConfigured = true;
         }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
@@ -587,6 +593,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        BasicAuthManager.cancelPendingForActivity(MainActivity.this);
         super.onDestroy();
         pendingSpaHistoryTasks.clear();
         releaseAllWebViews();
@@ -1227,6 +1234,9 @@ public class MainActivity extends AppCompatActivity {
             public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
                 super.onReceivedHttpError(view, request, errorResponse);
                 try {
+                    if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
+                        BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
+                    }
                     if (request != null && request.isForMainFrame() && errorResponse != null) {
                         android.util.Log.w("CoaraBrowser", "Main frame HTTP error: "
                                 + request.getUrl() + " status=" + errorResponse.getStatusCode());
@@ -1299,37 +1309,7 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if (!basicAuthEnabled) {
-                    super.onReceivedHttpAuthRequest(view, handler, host, realm);
-                    return;
-                }
-                LinearLayout layout = new LinearLayout(MainActivity.this);
-                layout.setOrientation(LinearLayout.VERTICAL);
-                int padding = (int)(16 * getResources().getDisplayMetrics().density);
-                layout.setPadding(padding, padding, padding, padding);
-                final EditText usernameInput = new EditText(MainActivity.this);
-                usernameInput.setHint("ユーザー名");
-                usernameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
-                layout.addView(usernameInput);
-                final EditText passwordInput = new EditText(MainActivity.this);
-                passwordInput.setHint("パスワード");
-                passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                layout.addView(passwordInput);
-                new MaterialAlertDialogBuilder(MainActivity.this)
-                    .setTitle("Basic認証情報を入力")
-                    .setView(layout)
-                    .setPositiveButton("ログイン", (dialog, which) -> {
-                        String username = usernameInput.getText().toString().trim();
-                        String password = passwordInput.getText().toString().trim();
-                        if (!username.isEmpty() && !password.isEmpty()) {
-                            handler.proceed(username, password);
-                        } else {
-                            Toast.makeText(MainActivity.this, "ユーザー名とパスワードを入力してください", Toast.LENGTH_SHORT).show();
-                            handler.cancel();
-                        }
-                    })
-                    .setNegativeButton("キャンセル", (dialog, which) -> handler.cancel())
-                    .show();
+                BasicAuthManager.handleHttpAuthRequest(MainActivity.this, view, handler, basicAuthEnabled, host, realm);
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -1337,6 +1317,19 @@ public class MainActivity extends AppCompatActivity {
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
                 final WebView transportWebView = new WebView(MainActivity.this);
                 transportWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) {
+                        BasicAuthManager.handleHttpAuthRequest(MainActivity.this, v, handler, basicAuthEnabled, host, realm);
+                    }
+
+                    @Override
+                    public void onReceivedHttpError(WebView v, WebResourceRequest request, WebResourceResponse errorResponse) {
+                        if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
+                            BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
+                        }
+                        super.onReceivedHttpError(v, request, errorResponse);
+                    }
+
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                         String targetUrl = request.getUrl().toString();
@@ -1704,6 +1697,10 @@ public class MainActivity extends AppCompatActivity {
         if (!isBlank(cookies)) {
             request.addRequestHeader("Cookie", cookies);
         }
+        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(url);
+        if (!isBlank(authorization)) {
+            request.addRequestHeader("Authorization", authorization);
+        }
         if (!isBlank(userAgent)) {
             request.addRequestHeader("User-Agent", userAgent);
         }
@@ -1900,6 +1897,19 @@ public class MainActivity extends AppCompatActivity {
             }
             DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(imageUrl));
+            String cookies = CookieManager.getInstance().getCookie(imageUrl);
+            if (!isBlank(cookies)) {
+                request.addRequestHeader("Cookie", cookies);
+            }
+            String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(imageUrl);
+            if (!isBlank(authorization)) {
+                request.addRequestHeader("Authorization", authorization);
+            }
+            WebView currentWebView = getCurrentWebView();
+            String refererUrl = currentWebView != null ? currentWebView.getUrl() : null;
+            if (!isBlank(refererUrl) && BrowserUrlRouter.isWebUrl(refererUrl)) {
+                request.addRequestHeader("Referer", refererUrl);
+            }
             if (!inferredMimeType.endsWith("/*")) {
                 request.setMimeType(inferredMimeType);
             }
@@ -2180,7 +2190,9 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_qr) {
             startActivity(new Intent(MainActivity.this, QrCodeActivity.class));
         } else if (id == R.id.action_pgdl) {
-            startActivity(new Intent(MainActivity.this, pagedl.class));
+            Intent intent = new Intent(MainActivity.this, pagedl.class);
+            intent.putExtra(BasicAuthManager.EXTRA_BASIC_AUTH_ENABLED, basicAuthEnabled);
+            startActivity(intent);
         } else if (id == R.id.action_txtphoto) {
             startActivity(new Intent(MainActivity.this, txtphoto.class));
         } else if (id == R.id.action_num) {
@@ -2305,14 +2317,16 @@ public class MainActivity extends AppCompatActivity {
             if (!basicAuthEnabled) {
                 basicAuthEnabled = true;
                 item.setChecked(true);
+                pref.edit().putBoolean(KEY_BASIC_AUTH, true).apply();
                 Toast.makeText(MainActivity.this, "Basic認証 ON", Toast.LENGTH_SHORT).show();
             } else {
                 basicAuthEnabled = false;
                 item.setChecked(false);
+                pref.edit().putBoolean(KEY_BASIC_AUTH, false).apply();
                 clearBasicAuthCacheAndReload();
                 Toast.makeText(MainActivity.this, "Basic認証 OFF", Toast.LENGTH_SHORT).show();
             }
-            pref.edit().putBoolean(KEY_BASIC_AUTH, basicAuthEnabled).apply();
+            invalidateOptionsMenu();
         } else if (id == R.id.action_clear_history) {
             WebView current = getCurrentWebView();
             if (current != null) {
@@ -2325,6 +2339,7 @@ public class MainActivity extends AppCompatActivity {
             clearSSL();
             clearTabs();
             WebViewDatabase.getInstance(MainActivity.this).clearFormData();
+            BasicAuthManager.clear(MainActivity.this);
             CookieManager cookieManager = CookieManager.getInstance();
             cookieManager.removeAllCookies(null);
             cookieManager.flush();
@@ -2358,11 +2373,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearBasicAuthCacheAndReload() {
+        BasicAuthManager.clear(MainActivity.this);
         WebView current = getCurrentWebView();
         if (current != null) {
+            current.stopLoading();
             current.clearCache(true);
-            current.reload();
-            reloadCurrentPage();
+            String currentUrl = current.getUrl();
+            if (currentUrl != null && !currentUrl.isEmpty()) {
+                current.loadUrl(currentUrl);
+            } else {
+                current.reload();
+            }
         }
     }
 

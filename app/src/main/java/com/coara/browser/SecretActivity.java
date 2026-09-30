@@ -80,6 +80,8 @@ import com.google.android.material.appbar.MaterialToolbar;
 import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
+import com.coara.browser.util.BasicAuthManager;
+import com.coara.browser.util.BrowserConstants;
 import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.WebViewOptimizationUtils;
 import com.coara.browser.util.UiThread;
@@ -139,6 +141,7 @@ public class SecretActivity extends AppCompatActivity {
     private static Method sSetDatabaseEnabledMethod;
     private static Method sSetAppCacheEnabledMethod;
     private static Method sSetAppCachePathMethod;
+    private static boolean sWebViewDataDirectoryConfigured = false;
     private View findInPageBarView;
     private EditText etFindQuery;
     private TextView tvFindCount;
@@ -241,6 +244,13 @@ public class SecretActivity extends AppCompatActivity {
     }
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && !sWebViewDataDirectoryConfigured) {
+        try {
+            WebView.setDataDirectorySuffix("SecretActivity");
+        } catch (IllegalStateException ignored) {
+        }
+        sWebViewDataDirectoryConfigured = true;
+    }
     super.onCreate(savedInstanceState);
     setContentView(R.layout.secret_main);
 
@@ -549,6 +559,7 @@ public class SecretActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        BasicAuthManager.cancelPendingForActivity(SecretActivity.this);
         super.onDestroy();
         pendingSpaHistoryTasks.clear();
         backgroundExecutor.shutdown();
@@ -1137,37 +1148,15 @@ public class SecretActivity extends AppCompatActivity {
           }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
-                if (!basicAuthEnabled) {
-                    super.onReceivedHttpAuthRequest(view, handler, host, realm);
-                    return;
+                BasicAuthManager.handleHttpAuthRequest(SecretActivity.this, view, handler, basicAuthEnabled, host, realm);
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
+                if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
+                    BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
                 }
-                LinearLayout layout = new LinearLayout(SecretActivity.this);
-                layout.setOrientation(LinearLayout.VERTICAL);
-                int padding = (int)(16 * getResources().getDisplayMetrics().density);
-                layout.setPadding(padding, padding, padding, padding);
-                final EditText usernameInput = new EditText(SecretActivity.this);
-                usernameInput.setHint("ユーザー名");
-                usernameInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PERSON_NAME);
-                layout.addView(usernameInput);
-                final EditText passwordInput = new EditText(SecretActivity.this);
-                passwordInput.setHint("パスワード");
-                passwordInput.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
-                layout.addView(passwordInput);
-                new MaterialAlertDialogBuilder(SecretActivity.this)
-                    .setTitle("Basic認証情報を入力")
-                    .setView(layout)
-                    .setPositiveButton("ログイン", (dialog, which) -> {
-                        String username = usernameInput.getText().toString().trim();
-                        String password = passwordInput.getText().toString().trim();
-                        if (!username.isEmpty() && !password.isEmpty()) {
-                            handler.proceed(username, password);
-                        } else {
-                            Toast.makeText(SecretActivity.this, "ユーザー名とパスワードを入力してください", Toast.LENGTH_SHORT).show();
-                            handler.cancel();
-                        }
-                    })
-                    .setNegativeButton("キャンセル", (dialog, which) -> handler.cancel())
-                    .show();
+                super.onReceivedHttpError(view, request, errorResponse);
             }
         });
         webView.setWebChromeClient(new WebChromeClient() {
@@ -1175,6 +1164,19 @@ public class SecretActivity extends AppCompatActivity {
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
                 final WebView transportWebView = new WebView(SecretActivity.this);
                 transportWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) {
+                        BasicAuthManager.handleHttpAuthRequest(SecretActivity.this, v, handler, basicAuthEnabled, host, realm);
+                    }
+
+                    @Override
+                    public void onReceivedHttpError(WebView v, WebResourceRequest request, WebResourceResponse errorResponse) {
+                        if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
+                            BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
+                        }
+                        super.onReceivedHttpError(v, request, errorResponse);
+                    }
+
                     @Override
                     public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest request) {
                         String targetUrl = request.getUrl().toString();
@@ -1343,7 +1345,18 @@ public class SecretActivity extends AppCompatActivity {
             request.setMimeType(mimeType);
         }
         String cookies = CookieManager.getInstance().getCookie(url);
-        request.addRequestHeader("cookie", cookies);
+        if (cookies != null && !cookies.isEmpty()) {
+            request.addRequestHeader("Cookie", cookies);
+        }
+        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(url);
+        if (authorization != null && !authorization.isEmpty()) {
+            request.addRequestHeader("Authorization", authorization);
+        }
+        WebView currentWebView = getCurrentWebView();
+        String refererUrl = currentWebView != null ? currentWebView.getUrl() : null;
+        if (refererUrl != null && !refererUrl.isEmpty() && BrowserUrlRouter.isWebUrl(refererUrl)) {
+            request.addRequestHeader("Referer", refererUrl);
+        }
         if (userAgent != null) {
             request.addRequestHeader("User-Agent", userAgent);
         }
@@ -1487,6 +1500,19 @@ public class SecretActivity extends AppCompatActivity {
         DownloadManager.Request request =
             new DownloadManager.Request(Uri.parse(imageUrl));
         request.setMimeType("image/*");
+        String cookies = CookieManager.getInstance().getCookie(imageUrl);
+        if (cookies != null && !cookies.isEmpty()) {
+            request.addRequestHeader("Cookie", cookies);
+        }
+        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(imageUrl);
+        if (authorization != null && !authorization.isEmpty()) {
+            request.addRequestHeader("Authorization", authorization);
+        }
+        WebView currentWebView = getCurrentWebView();
+        String refererUrl = currentWebView != null ? currentWebView.getUrl() : null;
+        if (refererUrl != null && !refererUrl.isEmpty() && BrowserUrlRouter.isWebUrl(refererUrl)) {
+            request.addRequestHeader("Referer", refererUrl);
+        }
         String fileName = URLUtil.guessFileName(imageUrl, null, "image/*");
         request.setTitle(fileName);
         request.setDescription("画像を保存中...");
@@ -1712,7 +1738,9 @@ private class AndroidBridge {
         } else if (id == R.id.action_qr) {
             startActivity(new Intent(SecretActivity.this, QrCodeActivity.class));
         } else if (id == R.id.action_pgdl) {
-            startActivity(new Intent(SecretActivity.this, pagedl.class));
+            Intent intent = new Intent(SecretActivity.this, pagedl.class);
+            intent.putExtra(BasicAuthManager.EXTRA_BASIC_AUTH_ENABLED, basicAuthEnabled);
+            startActivity(intent);
         } else if (id == R.id.action_txtphoto) {
             startActivity(new Intent(SecretActivity.this, txtphoto.class));
         } else if (id == R.id.action_num) {
@@ -1860,6 +1888,7 @@ private class AndroidBridge {
             clearPageCache();
             clearTabs();
             WebViewDatabase.getInstance(SecretActivity.this).clearFormData();
+            BasicAuthManager.clear(SecretActivity.this);
             CookieManager cookieManager = CookieManager.getInstance();
             cookieManager.removeAllCookies(null);
             cookieManager.flush();
@@ -1884,11 +1913,17 @@ private class AndroidBridge {
     }
 
     private void clearBasicAuthCacheAndReload() {
+        BasicAuthManager.clear(SecretActivity.this);
         WebView current = getCurrentWebView();
         if (current != null) {
+            current.stopLoading();
             current.clearCache(true);
-            current.reload();
-            reloadCurrentPage();
+            String currentUrl = current.getUrl();
+            if (currentUrl != null && !currentUrl.isEmpty()) {
+                current.loadUrl(currentUrl);
+            } else {
+                current.reload();
+            }
         }
     }
 
@@ -1938,10 +1973,7 @@ private class AndroidBridge {
         purgeSecretTabPersistence();
 
         WebViewDatabase db = WebViewDatabase.getInstance(this);
-        try {
-            db.clearHttpAuthUsernamePassword();
-        } catch (Exception ignored) {
-        }
+        BasicAuthManager.clear(SecretActivity.this);
         try {
             db.clearFormData();
         } catch (Exception ignored) {

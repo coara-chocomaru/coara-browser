@@ -11,6 +11,7 @@ import android.widget.EditText;
 import android.widget.Switch;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import com.coara.browser.util.BasicAuthManager;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -50,13 +51,23 @@ public class pagedl extends AppCompatActivity {
     private Button saveButton;
     private WebView webView;
     private volatile boolean isSaving = false;
+    private boolean basicAuthEnabled;
+    private static boolean sWebViewDataDirectoryConfigured = false;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P && !sWebViewDataDirectoryConfigured) {
+            try {
+                WebView.setDataDirectorySuffix("MainActivity");
+            } catch (IllegalStateException ignored) {
+            }
+            sWebViewDataDirectoryConfigured = true;
+        }
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_pgdl);
+        basicAuthEnabled = getIntent().getBooleanExtra(BasicAuthManager.EXTRA_BASIC_AUTH_ENABLED, false);
 
         urlInput = findViewById(R.id.urlInput);
         jsSwitch = findViewById(R.id.jsSwitch);
@@ -99,6 +110,19 @@ public class pagedl extends AppCompatActivity {
 
     private void saveWithJavaScriptEnabled(String urlString, String siteName) {
         webView.setWebViewClient(new WebViewClient() {
+            @Override
+            public void onReceivedHttpAuthRequest(WebView view, android.webkit.HttpAuthHandler httpAuthHandler, String host, String realm) {
+                BasicAuthManager.handleHttpAuthRequest(pagedl.this, view, httpAuthHandler, basicAuthEnabled, host, realm);
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceResponse errorResponse) {
+                if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
+                    BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
+                }
+                super.onReceivedHttpError(view, request, errorResponse);
+            }
+
             @Override
             public void onPageFinished(WebView view, String url) {
                 String pageTitle = view.getTitle();
@@ -158,7 +182,17 @@ public class pagedl extends AppCompatActivity {
     }
 
     private void saveWithoutJavaScript(String urlString, String siteName) {
+        saveWithoutJavaScript(urlString, siteName, null, null, false);
+    }
+
+    private void saveWithoutJavaScript(
+            String urlString,
+            String siteName,
+            String username,
+            String password,
+            boolean authRetry) {
         HttpURLConnection conn = null;
+        boolean waitingForAuth = false;
         try {
             URL url = new URL(urlString);
             conn = (HttpURLConnection) url.openConnection();
@@ -169,7 +203,50 @@ public class pagedl extends AppCompatActivity {
             conn.setRequestProperty("User-Agent", USER_AGENT);
             conn.setRequestProperty("Accept", ACCEPT_HEADER);
             conn.setRequestProperty("Accept-Language", ACCEPT_LANGUAGE);
+            String cookies = CookieManager.getInstance().getCookie(urlString);
+            if (cookies != null && !cookies.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookies);
+            }
+            String authorization = null;
+            if (username != null && password != null) {
+                authorization = BasicAuthManager.buildAuthorizationHeader(username, password);
+            } else {
+                authorization = BasicAuthManager.getAuthorizationHeaderForUrl(urlString);
+            }
+            if (authorization != null && !authorization.isEmpty()) {
+                conn.setRequestProperty("Authorization", authorization);
+            }
             int responseCode = conn.getResponseCode();
+            if (responseCode == HttpURLConnection.HTTP_UNAUTHORIZED
+                    && basicAuthEnabled && !authRetry) {
+                String realm = extractBasicAuthRealm(conn.getHeaderField("WWW-Authenticate"));
+                if (conn != null) {
+                    conn.disconnect();
+                    conn = null;
+                }
+                BasicAuthManager.markAuthenticationFailure(url.getHost());
+                waitingForAuth = true;
+                final String retryRealm = realm;
+                runOnUiThread(() -> BasicAuthManager.requestCredentials(
+                        pagedl.this,
+                        webView,
+                        url.getHost(),
+                        retryRealm,
+                        (retryUsername, retryPassword) -> {
+                            if (retryUsername == null || retryPassword == null) {
+                                isSaving = false;
+                                Toast.makeText(pagedl.this, "Basic認証をキャンセルしました", Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            executor.execute(() -> saveWithoutJavaScript(
+                                    urlString,
+                                    siteName,
+                                    retryUsername,
+                                    retryPassword,
+                                    true));
+                        }));
+                return;
+            }
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 Log.e(TAG, "HTTP error code: " + responseCode);
                 runOnUiThread(() ->
@@ -213,8 +290,21 @@ public class pagedl extends AppCompatActivity {
             if (conn != null) {
                 conn.disconnect();
             }
-            isSaving = false;
+            if (!waitingForAuth) {
+                isSaving = false;
+            }
         }
+    }
+
+    private String extractBasicAuthRealm(String header) {
+        if (header == null || header.isEmpty()) {
+            return "";
+        }
+        Matcher matcher = Pattern.compile("(?i)Basic\\s+realm\\s*=\\s*\\\"([^\\\"]*)\\\"").matcher(header);
+        if (matcher.find()) {
+            return matcher.group(1);
+        }
+        return "";
     }
 
     private void clearCacheAndCookies() {
@@ -271,6 +361,15 @@ public class pagedl extends AppCompatActivity {
             conn.setInstanceFollowRedirects(true);
             conn.setConnectTimeout(CONNECT_TIMEOUT_MS);
             conn.setReadTimeout(READ_TIMEOUT_MS);
+            String cookies = CookieManager.getInstance().getCookie(resourceUrl);
+            if (cookies != null && !cookies.isEmpty()) {
+                conn.setRequestProperty("Cookie", cookies);
+            }
+            String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(resourceUrl);
+            if (authorization != null && !authorization.isEmpty()) {
+                conn.setRequestProperty("Authorization", authorization);
+            }
+            conn.setRequestProperty("User-Agent", USER_AGENT);
             try (InputStream in = conn.getInputStream();
                  OutputStream out = new FileOutputStream(destination)) {
                 byte[] buffer = new byte[4096];
@@ -372,6 +471,7 @@ public class pagedl extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        BasicAuthManager.cancelPendingForActivity(pagedl.this);
         super.onDestroy();
         executor.shutdownNow();
     }
