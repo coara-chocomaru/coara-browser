@@ -13,6 +13,7 @@ public final class BrowserVisualSettings {
     public static final String KEY_BACKGROUND_TRANSPARENT = "background_transparent";
     public static final String KEY_BACKGROUND_PATH = "background_image_path";
     public static final String KEY_BACKGROUND_TRANSPARENCY_PERCENT = "background_transparency_percent";
+    public static final String KEY_OFFSCREEN_PRE_RASTER = "offscreen_pre_raster";
 
     private static final String DEFAULT = "default";
     private static final String STYLE_ID = "__coara_browser_visual_style";
@@ -197,6 +198,18 @@ public final class BrowserVisualSettings {
         }
     }
 
+    public static boolean isOffscreenPreRasterEnabled(SharedPreferences preferences) {
+        return preferences.getBoolean(KEY_OFFSCREEN_PRE_RASTER, false);
+    }
+
+    public static void setOffscreenPreRasterEnabled(SharedPreferences preferences, boolean enabled) {
+        if (enabled) {
+            preferences.edit().putBoolean(KEY_OFFSCREEN_PRE_RASTER, true).commit();
+        } else {
+            preferences.edit().remove(KEY_OFFSCREEN_PRE_RASTER).commit();
+        }
+    }
+
     private static int clampPercent(int value) {
         if (value < 0) return 0;
         if (value > 120) return 120;
@@ -247,6 +260,13 @@ public final class BrowserVisualSettings {
         try {
             webView.setBackgroundColor(transparency ? Color.TRANSPARENT : Color.WHITE);
         } catch (Exception ignored) {
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+            try {
+                settings.setOffscreenPreRaster(isOffscreenPreRasterEnabled(preferences));
+            } catch (Exception ignored) {
+            }
         }
 
         String textColor = getTextColor(preferences);
