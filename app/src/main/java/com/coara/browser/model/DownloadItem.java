@@ -11,6 +11,9 @@ public class DownloadItem {
     public String downloadUrl;
     public boolean isPaused;
     public boolean manual;
+    public String userAgent;
+    public String referer;
+    public boolean basicAuthEnabled;
     public String filePath;
 
     public DownloadItem(long downloadId, String title, String description, int status, long downloadedSize, long totalSize, String localUri, String downloadUrl) {
@@ -23,7 +26,11 @@ public class DownloadItem {
         this.localUri = localUri;
         this.downloadUrl = downloadUrl;
         this.isPaused = false;
+        this.manual = false;
         this.filePath = "";
+        this.userAgent = "";
+        this.referer = "";
+        this.basicAuthEnabled = false;
     }
 
     public int getProgress() {
