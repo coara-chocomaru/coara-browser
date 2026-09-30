@@ -61,6 +61,7 @@
             <item android:id="@+id/action_text_color" android:title="テキストカラー選択" />
             <item android:id="@+id/action_font_family" android:title="フォント切り替え" />
             <item android:id="@+id/action_background_settings" android:title="背景画像設定" />
+            <item android:id="@+id/action_offscreen_pre_raster" android:title="先読みレンダリング" android:checkable="true" />
         </menu>
     </item>
 
