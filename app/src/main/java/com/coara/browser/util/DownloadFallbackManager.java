@@ -13,7 +13,6 @@ import com.coara.browser.DownloadHistoryManager;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
@@ -304,23 +303,15 @@ public final class DownloadFallbackManager {
                     return FallbackResult.failure("HTTPエラー: " + status);
                 }
                 String responseMime = connection.getContentType();
-                String finalMime = DownloadSupport.normalizeMimeType(responseMime, currentUrl);
                 String finalDisposition = connection.getHeaderField("Content-Disposition");
-                if (DownloadSupport.isBlank(finalDisposition)) {
-                    finalDisposition = connection.getHeaderField("X-Content-Disposition");
-                }
-                String fileName = DownloadSupport.resolveFileName(currentUrl, finalDisposition, finalMime);
-                if (isWeakFallbackName(fileName)) {
-                    String headerName = connection.getHeaderField("X-File-Name");
-                    if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Download-Name");
-                    if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Filename");
-                    if (!DownloadSupport.isBlank(headerName)) fileName = DownloadSupport.sanitizeFileName(headerName);
-                }
-                if (isWeakFallbackName(fileName) && !DownloadSupport.isBlank(spec.initialFileName)) {
-                    fileName = spec.initialFileName;
-                }
+                String alternateDisposition = connection.getHeaderField("X-Content-Disposition");
+                String headerName = connection.getHeaderField("X-File-Name");
+                if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Download-Name");
+                if (DownloadSupport.isBlank(headerName)) headerName = connection.getHeaderField("X-Filename");
+                String contentLocation = connection.getHeaderField("Content-Location");
+                String finalMime = DownloadSupport.normalizeMimeType(responseMime, currentUrl);
                 long responseLength = connection.getContentLengthLong();
-                InputStream source = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
+                BufferedInputStream source = new BufferedInputStream(connection.getInputStream(), BUFFER_SIZE);
                 byte[] prefix = new byte[4096];
                 int prefixLength = 0;
                 while (prefixLength < prefix.length) {
@@ -330,6 +321,7 @@ public final class DownloadFallbackManager {
                     prefixLength += read;
                     if (prefixLength >= 512) break;
                 }
+                finalMime = DownloadSupport.refineMimeType(finalMime, currentUrl, prefix, prefixLength);
                 if (DownloadSupport.looksLikeHtml(prefix, prefixLength)
                         && !finalMime.startsWith("text/html") && !finalMime.startsWith("application/xhtml+xml")) {
                     try {
@@ -337,6 +329,25 @@ public final class DownloadFallbackManager {
                     } catch (Exception ignored) {
                     }
                     return FallbackResult.failure("サーバーがHTMLエラーページを返しました");
+                }
+                if (prefixLength == 0 && (isBinaryLikeDownload(spec.initialFileName, finalMime)
+                        || DownloadSupport.hasRecognizedDownloadExtension(spec.initialFileName))) {
+                    try {
+                        source.close();
+                    } catch (Exception ignored) {
+                    }
+                    return FallbackResult.failure("ダウンロードデータが空です");
+                }
+                String fileName = DownloadSupport.resolveResponseFileName(currentUrl, finalDisposition, responseMime,
+                        contentLocation, alternateDisposition);
+                if (!DownloadSupport.isBlank(headerName)) {
+                    String headerCandidate = DownloadSupport.resolveResponseFileName(currentUrl, null, responseMime, null, headerName);
+                    if (isWeakFallbackName(fileName) || isOpaqueFallbackName(fileName)) {
+                        fileName = headerCandidate;
+                    }
+                }
+                if ((isWeakFallbackName(fileName) || isOpaqueFallbackName(fileName)) && !DownloadSupport.isBlank(spec.initialFileName)) {
+                    fileName = spec.initialFileName;
                 }
                 fileName = DownloadSupport.refineFileName(fileName, currentUrl, finalMime, prefix, prefixLength);
                 if ((isOpaqueGeneratedName(fileName) || isExtensionless(fileName)) && !DownloadSupport.isBlank(spec.initialFileName)) {
@@ -388,10 +399,10 @@ public final class DownloadFallbackManager {
         }
     }
 
-    private static void copyAndValidate(InputStream source, OutputStream target, long initialBytes, long strictTotal, Activity activity,
+    private static void copyAndValidate(BufferedInputStream source, OutputStream target, long initialBytes, long strictTotal, Activity activity,
                                         long downloadId, String fileName, String displayPath,
                                         String mimeType, String effectiveFileName) throws IOException {
-        try (BufferedInputStream in = new BufferedInputStream(source, BUFFER_SIZE);
+        try (BufferedInputStream in = source;
              BufferedOutputStream out = new BufferedOutputStream(target, BUFFER_SIZE)) {
             byte[] buffer = new byte[BUFFER_SIZE];
             long done = initialBytes;
@@ -497,7 +508,17 @@ public final class DownloadFallbackManager {
     private static boolean isWeakFallbackName(String value) {
         if (DownloadSupport.isBlank(value)) return true;
         String lower = value.toLowerCase(java.util.Locale.ROOT);
-        return "download".equals(lower) || "file".equals(lower) || "untitled".equals(lower);
+        return "download".equals(lower) || "file".equals(lower) || "untitled".equals(lower)
+                || lower.startsWith("download.") || lower.startsWith("file.") || lower.startsWith("untitled.");
+    }
+
+    private static boolean isOpaqueFallbackName(String value) {
+        if (DownloadSupport.isBlank(value)) return true;
+        String base = value;
+        String ext = extension(base);
+        if (!DownloadSupport.isBlank(ext)) base = base.substring(0, base.length() - ext.length());
+        return base.matches("(?i)[0-9a-f]{24,}") || base.matches("[0-9a-f]{8,}[-_][0-9a-f-]{12,}")
+                || base.matches("[A-Za-z0-9_-]{32,}");
     }
 
     private static boolean isHtmlExtension(String ext) {

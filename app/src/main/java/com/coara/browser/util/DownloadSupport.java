@@ -22,12 +22,8 @@ import java.net.HttpURLConnection;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 public final class DownloadSupport {
-    private static final Pattern FILENAME_STAR_PATTERN = Pattern.compile("(?:^|;)\\s*filename\\*\\s*=\\s*([^;]+)", Pattern.CASE_INSENSITIVE);
-    private static final Pattern FILENAME_PATTERN = Pattern.compile("(?:^|;)\\s*filename\\s*=\\s*(\\\"(?:\\\\.|[^\\\"])*\\\"|[^;]+)", Pattern.CASE_INSENSITIVE);
     private static final int MAX_FILENAME_LENGTH = 180;
 
     private DownloadSupport() {
@@ -109,17 +105,24 @@ public final class DownloadSupport {
         if (isBlank(url) || !BrowserUrlRouter.isWebUrl(url)) {
             return false;
         }
-        if (!isBlank(contentDisposition)) {
-            return false;
-        }
         String value = url.toLowerCase(Locale.ROOT);
         String path = "";
         String query = "";
+        String host = "";
         try {
             Uri uri = Uri.parse(url);
             path = uri.getPath() == null ? "" : uri.getPath().toLowerCase(Locale.ROOT);
             query = uri.getQuery() == null ? "" : uri.getQuery().toLowerCase(Locale.ROOT);
+            host = uri.getHost() == null ? "" : uri.getHost().toLowerCase(Locale.ROOT);
         } catch (Exception ignored) {
+        }
+        boolean apkPureEndpoint = path.contains("/b/apk/") || path.contains("/b/xapk/") || path.contains("/b/apks/")
+                || host.endsWith(".winudf.com") || value.contains("_fn=") || value.contains("_p=");
+        if (apkPureEndpoint) {
+            return true;
+        }
+        if (!isBlank(contentDisposition)) {
+            return false;
         }
         String last = null;
         try {
@@ -129,9 +132,9 @@ public final class DownloadSupport {
         boolean lastHasExtension = hasRecognizedDownloadExtension(last);
         String normalizedMime = normalizeMimeType(mimeType, url);
         boolean genericMime = isBlank(mimeType) || "application/octet-stream".equals(normalizedMime);
-        boolean dynamicEndpoint = path.contains("/b/apk/") || path.contains("/b/xapk/") || path.contains("/b/apks/")
-                || query.contains("version=latest") || query.contains("download=") || query.contains("download_url=")
-                || query.contains("response-content-disposition=");
+        boolean dynamicEndpoint = query.contains("version=latest") || query.contains("download=")
+                || query.contains("download_url=") || query.contains("response-content-disposition=")
+                || query.contains("response_content_disposition=");
         boolean packageLike = !isBlank(last) && last.matches("[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_-]*){1,8}");
         if (!lastHasExtension && dynamicEndpoint) {
             return true;
@@ -144,14 +147,14 @@ public final class DownloadSupport {
         if (isBlank(fileName)) {
             fileName = DownloadHintStore.consume(url);
         }
-        if (isBlank(fileName)) {
-            fileName = extractFileNameFromUrl(url);
-        }
-        if (isWeakFileName(fileName)) {
-            String queryName = extractFileNameFromQuery(url);
+        String queryName = extractFileNameFromQuery(url);
+        if (isBlank(fileName) || isWeakFileName(fileName) || isOpaqueFileName(fileName)) {
             if (!isBlank(queryName)) {
                 fileName = queryName;
             }
+        }
+        if (isBlank(fileName)) {
+            fileName = extractFileNameFromUrl(url);
         }
         if (isBlank(fileName)) {
             try {
@@ -159,8 +162,7 @@ public final class DownloadSupport {
             } catch (Exception ignored) {
             }
         }
-        if (isWeakFileName(fileName)) {
-            String queryName = extractFileNameFromQuery(url);
+        if (isWeakFileName(fileName) || isOpaqueFileName(fileName)) {
             if (!isBlank(queryName)) {
                 fileName = queryName;
             }
@@ -178,37 +180,85 @@ public final class DownloadSupport {
             fileName = !isBlank(host) ? host + "_download" : "download";
         }
         fileName = ensureExtension(fileName, mimeType, url);
-        fileName = sanitizeFileName(fileName);
-        if (fileName.length() > MAX_FILENAME_LENGTH) {
-            String ext = extensionOf(fileName);
-            int maxBase = Math.max(1, MAX_FILENAME_LENGTH - ext.length());
-            String base = fileName.substring(0, Math.min(maxBase, fileName.length() - ext.length()));
-            fileName = sanitizeFileName(base) + ext;
-        }
+        fileName = truncateFileName(sanitizeFileName(fileName), MAX_FILENAME_LENGTH);
         return fileName;
+    }
+
+    public static String resolveResponseFileName(String url, String contentDisposition, String contentType,
+                                                 String contentLocation, String alternateFileName) {
+        String fileName = parseContentDispositionFileName(contentDisposition);
+        if (isBlank(fileName)) {
+            fileName = extractNameParameter(contentType);
+        }
+        if (isBlank(fileName)) {
+            fileName = parseContentDispositionFileName(contentLocation);
+            if (isBlank(fileName)) {
+                fileName = extractFileNameFromUrl(contentLocation);
+            }
+        }
+        if (isBlank(fileName)) {
+            fileName = extractFileNameFromQuery(url);
+        }
+        if (!isBlank(alternateFileName) && (isBlank(fileName) || isWeakFileName(fileName) || isOpaqueFileName(fileName))) {
+            String alternate = parseContentDispositionFileName(alternateFileName);
+            if (isBlank(alternate)) alternate = alternateFileName;
+            if (!isBlank(alternate) && (isBlank(fileName) || isWeakFileName(fileName) || isOpaqueFileName(fileName))) {
+                fileName = alternate;
+            }
+        }
+        if (isBlank(fileName) || isWeakFileName(fileName) || isOpaqueFileName(fileName)) {
+            String resolved = resolveFileName(url, contentDisposition, contentType);
+            if (!isBlank(resolved)) {
+                fileName = resolved;
+            }
+        }
+        return truncateFileName(sanitizeFileName(fileName), MAX_FILENAME_LENGTH);
+    }
+
+    public static String refineMimeType(String mimeType, String sourceUrl, byte[] sample, int sampleLength) {
+        String normalized = normalizeMimeType(mimeType, sourceUrl);
+        String magic = extensionFromMagic(sample, sampleLength);
+        if (looksLikeApkContext(sourceUrl, normalized) && ".zip".equals(magic)) {
+            return "application/vnd.android.package-archive";
+        }
+        if ("application/octet-stream".equals(normalized)) {
+            if (".pdf".equals(magic)) return "application/pdf";
+            if (".png".equals(magic)) return "image/png";
+            if (".jpg".equals(magic)) return "image/jpeg";
+            if (".gif".equals(magic)) return "image/gif";
+            if (".gz".equals(magic)) return "application/gzip";
+            if (".7z".equals(magic)) return "application/x-7z-compressed";
+            if (".rar".equals(magic)) return "application/vnd.rar";
+            if (".zip".equals(magic)) return "application/zip";
+        }
+        return normalized;
     }
 
     public static String refineFileName(String fileName, String sourceUrl, String mimeType, byte[] sample, int sampleLength) {
         String result = sanitizeFileName(fileName);
-        String normalizedMime = normalizeMimeType(mimeType, sourceUrl);
+        String normalizedMime = refineMimeType(mimeType, sourceUrl, sample, sampleLength);
         String extension = hasRecognizedDownloadExtension(result) ? extensionOf(result) : "";
         String magicExtension = extensionFromMagic(sample, sampleLength);
-        if (isBlank(result) || isWeakFileName(result)) {
+        if (isBlank(result) || isWeakFileName(result) || isOpaqueFileName(result)) {
             String packageName = extractPackageLikeFileName(sourceUrl);
             if (!isBlank(packageName) && looksLikeApkContext(sourceUrl, normalizedMime)) {
                 result = packageName + ".apk";
             } else if (!isBlank(magicExtension)) {
-                String base = isBlank(result) ? "download" : result;
-                result = stripExtension(base) + magicExtension;
+                String base = isBlank(result) ? "download" : stripExtension(result);
+                result = base + magicExtension;
             }
         } else if (extension.isEmpty() && !magicExtension.isEmpty()) {
             result += magicExtension;
+        }
+        if (looksLikeApkContext(sourceUrl, normalizedMime) && ".zip".equals(magicExtension)
+                && (isBlank(extension) || ".zip".equalsIgnoreCase(extension))) {
+            result = stripExtension(result) + ".apk";
         }
         result = ensureExtension(result, normalizedMime, sourceUrl);
         if (isBlank(result)) {
             result = "download";
         }
-        return sanitizeFileName(result);
+        return truncateFileName(sanitizeFileName(result), MAX_FILENAME_LENGTH);
     }
 
     public static boolean looksLikeHtml(byte[] data, int length) {
@@ -216,10 +266,14 @@ public final class DownloadSupport {
             return false;
         }
         int safeLength = Math.min(length, data.length);
-        String sample = new String(data, 0, safeLength, StandardCharsets.UTF_8).trim().toLowerCase(Locale.ROOT);
+        String sample = new String(data, 0, safeLength, StandardCharsets.UTF_8);
+        if (!sample.isEmpty() && sample.charAt(0) == '\ufeff') {
+            sample = sample.substring(1);
+        }
+        sample = sample.trim().toLowerCase(Locale.ROOT);
         return sample.startsWith("<!doctype html") || sample.startsWith("<html") || sample.startsWith("<head")
                 || sample.startsWith("<body") || sample.startsWith("<title") || sample.startsWith("<script")
-                || sample.startsWith("<meta") || sample.startsWith("<div");
+                || sample.startsWith("<meta") || sample.startsWith("<div") || sample.startsWith("<iframe");
     }
 
     public static boolean looksLikeExpectedBinary(String fileName, String mimeType, byte[] data, int length) {
@@ -278,14 +332,23 @@ public final class DownloadSupport {
     private static boolean looksLikeApkContext(String url, String mimeType) {
         String value = isBlank(url) ? "" : url.toLowerCase(Locale.ROOT);
         String mime = isBlank(mimeType) ? "" : mimeType.toLowerCase(Locale.ROOT);
-        return mime.contains("apk") || value.contains("/b/apk/") || value.contains(".apk?") || value.contains("/apk/");
+        String host = "";
+        try {
+            host = Uri.parse(url).getHost();
+            host = host == null ? "" : host.toLowerCase(Locale.ROOT);
+        } catch (Exception ignored) {
+        }
+        return mime.contains("apk") || value.contains("/b/apk/") || value.contains(".apk?") || value.contains("/apk/")
+                || host.endsWith(".winudf.com") || value.contains("_fn=") || value.contains("_p=");
     }
 
     private static String extensionFromMagic(byte[] data, int length) {
         if (data == null || length <= 0) return "";
         int n = Math.min(length, data.length);
-        if (n >= 4 && (data[0] & 0xff) == 0x50 && (data[1] & 0xff) == 0x4b
-                && (data[2] & 0xff) == 0x03 && (data[3] & 0xff) == 0x04) return ".zip";
+        if (n >= 4 && data[0] == 'P' && data[1] == 'K'
+                && (((data[2] & 0xff) == 0x03 && (data[3] & 0xff) == 0x04)
+                || ((data[2] & 0xff) == 0x05 && (data[3] & 0xff) == 0x06)
+                || ((data[2] & 0xff) == 0x07 && (data[3] & 0xff) == 0x08))) return ".zip";
         if (n >= 5 && data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F' && data[4] == '-') return ".pdf";
         if (n >= 8 && (data[0] & 0xff) == 0x89 && data[1] == 'P' && data[2] == 'N' && data[3] == 'G'
                 && (data[4] & 0xff) == 0x0d && (data[5] & 0xff) == 0x0a && (data[6] & 0xff) == 0x1a && (data[7] & 0xff) == 0x0a) return ".png";
@@ -680,33 +743,103 @@ public final class DownloadSupport {
             return null;
         }
         try {
-            Matcher star = FILENAME_STAR_PATTERN.matcher(header);
-            if (star.find()) {
-                String value = stripQuotes(star.group(1).trim());
-                int firstTick = value.indexOf('\'');
-                int secondTick = firstTick < 0 ? -1 : value.indexOf('\'', firstTick + 1);
-                if (firstTick >= 0 && secondTick > firstTick) {
-                    String charset = value.substring(0, firstTick);
-                    String encoded = value.substring(secondTick + 1);
-                    try {
-                        return decodeRfc5987(encoded, charset.isEmpty() ? "UTF-8" : charset);
-                    } catch (Exception ignored) {
-                        try {
-                            return decodeRfc5987(encoded, StandardCharsets.UTF_8.name());
-                        } catch (Exception ignored2) {
+            String filenameStar = null;
+            String filename = null;
+            int start = 0;
+            boolean quoted = false;
+            boolean escaped = false;
+            for (int i = 0; i <= header.length(); i++) {
+                boolean end = i == header.length();
+                char c = end ? ';' : header.charAt(i);
+                if (c == '\\' && quoted && !escaped) {
+                    escaped = true;
+                    continue;
+                }
+                if (c == '"' && !escaped) {
+                    quoted = !quoted;
+                }
+                escaped = false;
+                if (c == ';' && !quoted) {
+                    String parameter = header.substring(start, i).trim();
+                    int equals = parameter.indexOf('=');
+                    if (equals > 0) {
+                        String name = parameter.substring(0, equals).trim().toLowerCase(Locale.ROOT);
+                        String value = parameter.substring(equals + 1).trim();
+                        if ("filename*".equals(name)) {
+                            String decoded = decodeFilenameStar(value);
+                            if (!isBlank(decoded)) filenameStar = decoded;
+                        } else if ("filename".equals(name)) {
+                            String decoded = decodeLegacyFilename(value);
+                            if (!isBlank(decoded)) filename = decoded;
                         }
                     }
-                }
-                try {
-                    return decodeRfc5987(value, StandardCharsets.UTF_8.name());
-                } catch (Exception ignored) {
+                    start = i + 1;
                 }
             }
-            Matcher normal = FILENAME_PATTERN.matcher(header);
-            if (normal.find()) {
-                return stripQuotes(normal.group(1).trim()).replace("\\\"", "\"");
-            }
+            return !isBlank(filenameStar) ? filenameStar : filename;
         } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static String decodeFilenameStar(String value) {
+        String candidate = stripQuotes(value);
+        if (isBlank(candidate)) return null;
+        int firstTick = candidate.indexOf('\'');
+        int secondTick = firstTick < 0 ? -1 : candidate.indexOf('\'', firstTick + 1);
+        if (firstTick >= 0 && secondTick > firstTick) {
+            String charset = candidate.substring(0, firstTick);
+            String encoded = candidate.substring(secondTick + 1);
+            try {
+                return decodeRfc5987(encoded, isBlank(charset) ? "UTF-8" : charset);
+            } catch (Exception ignored) {
+                try {
+                    return decodeRfc5987(encoded, StandardCharsets.UTF_8.name());
+                } catch (Exception ignored2) {
+                }
+            }
+        }
+        try {
+            return decodeRfc5987(candidate, StandardCharsets.UTF_8.name());
+        } catch (Exception ignored) {
+            return candidate;
+        }
+    }
+
+    private static String decodeLegacyFilename(String value) {
+        String candidate = unescapeQuotedString(stripQuotes(value));
+        candidate = decodeEncodedWord(candidate);
+        if (candidate.indexOf('%') >= 0) {
+            try {
+                candidate = URLDecoder.decode(candidate.replace("+", "%2B"), StandardCharsets.UTF_8.name());
+            } catch (Exception ignored) {
+            }
+        }
+        return candidate;
+    }
+
+    private static String extractNameParameter(String contentType) {
+        if (isBlank(contentType)) return null;
+        int start = 0;
+        boolean quoted = false;
+        boolean escaped = false;
+        for (int i = 0; i <= contentType.length(); i++) {
+            boolean end = i == contentType.length();
+            char c = end ? ';' : contentType.charAt(i);
+            if (c == '\\' && quoted && !escaped) {
+                escaped = true;
+                continue;
+            }
+            if (c == '"' && !escaped) quoted = !quoted;
+            escaped = false;
+            if (c == ';' && !quoted) {
+                String parameter = contentType.substring(start, i).trim();
+                int equals = parameter.indexOf('=');
+                if (equals > 0 && "name".equalsIgnoreCase(parameter.substring(0, equals).trim())) {
+                    return decodeLegacyFilename(parameter.substring(equals + 1).trim());
+                }
+                start = i + 1;
+            }
         }
         return null;
     }
@@ -733,11 +866,17 @@ public final class DownloadSupport {
         }
         try {
             Uri uri = Uri.parse(url);
-            String[] keys = {"filename", "fileName", "name", "file", "download_name", "downloadName", "download", "attachment", "response-content-disposition"};
+            String[] keys = {"_fn", "fn", "filename", "fileName", "file_name", "name", "file",
+                    "download_name", "downloadName", "download", "attachment", "response-content-disposition",
+                    "response_content_disposition"};
             for (String key : keys) {
                 String value = uri.getQueryParameter(key);
                 if (!isBlank(value)) {
                     String candidate = value.trim();
+                    if ("_fn".equalsIgnoreCase(key) || "fn".equalsIgnoreCase(key)) {
+                        String decoded = decodeBase64FileName(candidate);
+                        if (!isBlank(decoded)) return decoded;
+                    }
                     if ("1".equalsIgnoreCase(candidate) || "0".equalsIgnoreCase(candidate)
                             || "true".equalsIgnoreCase(candidate) || "false".equalsIgnoreCase(candidate)
                             || "download".equalsIgnoreCase(candidate) || "file".equalsIgnoreCase(candidate)
@@ -750,7 +889,8 @@ public final class DownloadSupport {
                             return parsed;
                         }
                     }
-                    return candidate;
+                    String decodedWord = decodeEncodedWord(candidate);
+                    return isBlank(decodedWord) ? candidate : decodedWord;
                 }
             }
         } catch (Exception ignored) {
@@ -758,14 +898,41 @@ public final class DownloadSupport {
         return null;
     }
 
+    private static String decodeBase64FileName(String value) {
+        if (isBlank(value)) return null;
+        try {
+            String normalized = value.trim().replace('-', '+').replace('_', '/');
+            while ((normalized.length() & 3) != 0) normalized += "=";
+            byte[] decoded = android.util.Base64.decode(normalized, android.util.Base64.DEFAULT);
+            String result = new String(decoded, StandardCharsets.UTF_8);
+            if (!isBlank(result) && !looksLikeEncodedBlob(result)) return result;
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static boolean looksLikeEncodedBlob(String value) {
+        return value.indexOf('\u0000') >= 0 || value.length() > MAX_FILENAME_LENGTH * 2;
+    }
+
     private static boolean isWeakFileName(String fileName) {
         if (isBlank(fileName)) {
             return true;
         }
         String lower = sanitizeFileName(fileName).toLowerCase(Locale.ROOT);
-        return "download".equals(lower) || "download.file".equals(lower)
-                || "file".equals(lower) || "downloadfile".equals(lower)
-                || "untitled".equals(lower);
+        return "download".equals(lower) || "file".equals(lower) || "downloadfile".equals(lower)
+                || "untitled".equals(lower) || lower.startsWith("download.")
+                || lower.startsWith("file.") || lower.startsWith("untitled.");
+    }
+
+    private static boolean isOpaqueFileName(String fileName) {
+        if (isBlank(fileName)) return true;
+        String base = fileName;
+        String ext = extensionOf(base);
+        if (!ext.isEmpty()) base = base.substring(0, base.length() - ext.length());
+        return base.matches("(?i)[0-9a-f]{24,}")
+                || base.matches("[0-9a-f]{8,}[-_][0-9a-f-]{12,}")
+                || base.matches("[A-Za-z0-9_-]{32,}");
     }
 
     private static String extractHost(String url) {
@@ -849,30 +1016,31 @@ public final class DownloadSupport {
         }
         StringBuilder out = new StringBuilder(value.length());
         boolean lastWasSpace = false;
-        for (int i = 0; i < value.length(); i++) {
-            char c = value.charAt(i);
-            if (Character.isISOControl(c)) {
+        for (int i = 0; i < value.length(); ) {
+            int codePoint = value.codePointAt(i);
+            i += Character.charCount(codePoint);
+            if (Character.isISOControl(codePoint) || codePoint == 0) {
                 continue;
             }
-            if (c == '/' || c == '\\' || c == ':' || c == '*' || c == '?' || c == '"' || c == '<' || c == '>' || c == '|') {
-                c = '_';
+            if (codePoint == '/' || codePoint == '\\') {
+                codePoint = '_';
             }
-            if (Character.isWhitespace(c)) {
+            if (Character.isWhitespace(codePoint)) {
                 if (lastWasSpace) {
                     continue;
                 }
-                c = ' ';
+                codePoint = ' ';
                 lastWasSpace = true;
             } else {
                 lastWasSpace = false;
             }
-            out.append(c);
+            out.appendCodePoint(codePoint);
         }
         String result = out.toString().trim();
-        while (result.endsWith(".") || result.endsWith(" ")) {
+        while (!result.isEmpty() && (result.endsWith(".") || result.endsWith(" "))) {
             result = result.substring(0, result.length() - 1);
         }
-        if (result.equals(".") || result.equals("..")) {
+        if (result.equals(".") || result.equals("..") || result.isEmpty()) {
             result = "download";
         }
         String upper = result.toUpperCase(Locale.ROOT);
@@ -886,6 +1054,85 @@ public final class DownloadSupport {
                 break;
         }
         return result;
+    }
+
+    private static String truncateFileName(String value, int maxLength) {
+        if (isBlank(value) || value.length() <= maxLength) return value;
+        String ext = extensionOf(value);
+        int available = Math.max(1, maxLength - ext.length());
+        String base = ext.isEmpty() ? value : value.substring(0, value.length() - ext.length());
+        int end = 0;
+        int count = 0;
+        while (end < base.length() && count < available) {
+            int cp = base.codePointAt(end);
+            int chars = Character.charCount(cp);
+            if (count + chars > available) break;
+            end += chars;
+            count += chars;
+        }
+        return sanitizeFileName(base.substring(0, end)) + ext;
+    }
+
+    private static String decodeEncodedWord(String value) {
+        if (isBlank(value) || !value.startsWith("=?") || !value.endsWith("?=")) {
+            return value;
+        }
+        try {
+            int q1 = value.indexOf('?', 2);
+            int q2 = q1 < 0 ? -1 : value.indexOf('?', q1 + 1);
+            int end = value.lastIndexOf("?=");
+            if (q1 <= 2 || q2 <= q1 || end <= q2) return value;
+            String charset = value.substring(2, q1);
+            String encoding = value.substring(q1 + 1, q2);
+            String payload = value.substring(q2 + 1, end);
+            if ("B".equalsIgnoreCase(encoding)) {
+                byte[] data = android.util.Base64.decode(payload, android.util.Base64.DEFAULT);
+                return new String(data, isBlank(charset) ? StandardCharsets.UTF_8.name() : charset);
+            }
+            if ("Q".equalsIgnoreCase(encoding)) {
+                StringBuilder decoded = new StringBuilder(payload.length());
+                for (int i = 0; i < payload.length(); i++) {
+                    char c = payload.charAt(i);
+                    if (c == '_') {
+                        decoded.append(' ');
+                    } else if (c == '=' && i + 2 < payload.length()) {
+                        int hi = Character.digit(payload.charAt(i + 1), 16);
+                        int lo = Character.digit(payload.charAt(i + 2), 16);
+                        if (hi >= 0 && lo >= 0) {
+                            decoded.append((char) ((hi << 4) | lo));
+                            i += 2;
+                        } else {
+                            decoded.append(c);
+                        }
+                    } else {
+                        decoded.append(c);
+                    }
+                }
+                return new String(decoded.toString().getBytes(StandardCharsets.ISO_8859_1),
+                        isBlank(charset) ? StandardCharsets.UTF_8.name() : charset);
+            }
+        } catch (Exception ignored) {
+        }
+        return value;
+    }
+
+    private static String unescapeQuotedString(String value) {
+        if (isBlank(value)) return value;
+        StringBuilder out = new StringBuilder(value.length());
+        boolean escaped = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (escaped) {
+                out.append(c);
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else {
+                out.append(c);
+            }
+        }
+        if (escaped) out.append('\\');
+        return out.toString();
     }
 
     private static String decodeRfc5987(String value, String charset) throws Exception {
