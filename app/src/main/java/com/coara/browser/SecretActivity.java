@@ -81,6 +81,7 @@ import com.google.android.material.button.MaterialButton;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.coara.browser.util.BasicAuthManager;
+import com.coara.browser.util.ExternalDownloadTabTracker;
 import com.coara.browser.util.BrowserConstants;
 import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.WebViewOptimizationUtils;
@@ -535,7 +536,9 @@ public class SecretActivity extends AppCompatActivity {
                     cookieManager.flush();
                     createNewTab(url);
                     if (!webViews.isEmpty()) {
-                        getCurrentWebView().setTag("external");
+                        WebView current = getCurrentWebView();
+                        current.setTag("external");
+                        ExternalDownloadTabTracker.markExternal(current, url);
                     }
                 } else {
                     BrowserUrlRouter.handleUrlLoading(this, getCurrentWebView(), url);
@@ -1079,6 +1082,9 @@ public class SecretActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request != null) {
+                    ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture());
+                }
                 return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, request.getUrl().toString(), request.isForMainFrame());
             }
             @Override
@@ -1285,13 +1291,17 @@ public class SecretActivity extends AppCompatActivity {
         });
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            WebView current = getCurrentWebView();
+            boolean shouldClose = current != null
+                    && "external".equals(current.getTag())
+                    && ExternalDownloadTabTracker.shouldCloseAfterDownload(current, url);
             if (url.startsWith("blob:")) {
                 handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
             } else {
                 handleDownload(url, userAgent, contentDisposition, mimeType, contentLength);
             }
-            if ("external".equals(getCurrentWebView().getTag())) {
-                closeTab(getCurrentWebView());
+            if (shouldClose) {
+                closeTab(current);
             }
         });
         return webView;
@@ -1310,6 +1320,7 @@ public class SecretActivity extends AppCompatActivity {
                 if (currentTabIndex < 0) {
                     currentTabIndex = 0;
                 }
+                ExternalDownloadTabTracker.clear(webView);
                 try {
                     webView.stopLoading();
                     webView.destroy();
@@ -1325,6 +1336,7 @@ public class SecretActivity extends AppCompatActivity {
                 urlEditText.setText(newCurrent.getUrl());
                 updateTabCount();
             } else {
+                ExternalDownloadTabTracker.clear(webView);
                 webView.loadUrl(START_PAGE);
                 updateTabCount();
             }
@@ -1570,6 +1582,7 @@ public class SecretActivity extends AppCompatActivity {
         } else {
             WebView current = getCurrentWebView();
             if (current != null) {
+                ExternalDownloadTabTracker.clear(current);
                 try { current.stopLoading(); } catch (Exception ignored) {}
                 try { current.clearHistory(); } catch (Exception ignored) {}
                 current.loadUrl(START_PAGE);
@@ -1593,6 +1606,7 @@ public class SecretActivity extends AppCompatActivity {
         } else {
             WebView current = getCurrentWebView();
             if (current != null) {
+                ExternalDownloadTabTracker.clear(current);
                 try { current.stopLoading(); } catch (Exception ignored) {}
                 try { current.clearHistory(); } catch (Exception ignored) {}
                 current.loadUrl(url);
@@ -1666,6 +1680,7 @@ public class SecretActivity extends AppCompatActivity {
         if (current == null) {
             return;
         }
+        ExternalDownloadTabTracker.clear(current);
         if (BrowserUrlRouter.handleUrlLoading(this, current, url)) {
             return;
         }

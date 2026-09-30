@@ -94,6 +94,7 @@ import com.coara.browser.util.SpaStateManager;
 import com.coara.browser.util.CacheModePolicy;
 import com.coara.browser.util.BrowserConstants;
 import com.coara.browser.util.BasicAuthManager;
+import com.coara.browser.util.ExternalDownloadTabTracker;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -521,6 +522,7 @@ public class MainActivity extends AppCompatActivity {
                     WebView current = getCurrentWebView();
                     if (current != null) {
                         current.setTag("external");
+                        ExternalDownloadTabTracker.markExternal(current, url);
                     }
                 } else {
                     BrowserUrlRouter.handleUrlLoading(this, getCurrentWebView(), url);
@@ -537,6 +539,7 @@ public class MainActivity extends AppCompatActivity {
                     WebView current = getCurrentWebView();
                     if (current != null) {
                         current.setTag("external");
+                        ExternalDownloadTabTracker.markExternal(current, url);
                     }
                 }
             }
@@ -1251,6 +1254,9 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request != null) {
+                    ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture());
+                }
                 return BrowserUrlRouter.handleUrlLoading(MainActivity.this, view, request.getUrl().toString(), request.isForMainFrame());
             }
             @Override
@@ -1438,13 +1444,17 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
+            WebView current = getCurrentWebView();
+            boolean shouldClose = current != null
+                    && "external".equals(current.getTag())
+                    && ExternalDownloadTabTracker.shouldCloseAfterDownload(current, url);
             if (url.startsWith("blob:")) {
                 handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
             } else {
                 handleDownload(url, userAgent, contentDisposition, mimeType, contentLength);
             }
-            if ("external".equals(getCurrentWebView().getTag())) {
-                closeTab(getCurrentWebView());
+            if (shouldClose) {
+                closeTab(current);
             }
         });
         return webView;
@@ -1600,6 +1610,7 @@ public class MainActivity extends AppCompatActivity {
             int id = (tag instanceof Integer) ? (Integer) tag : -1;
 
             if (webViews.size() <= 1) {
+                ExternalDownloadTabTracker.clear(webView);
                 try {
                     webView.stopLoading();
                 } catch (Exception ignored) {
@@ -2084,6 +2095,7 @@ public class MainActivity extends AppCompatActivity {
         if (current == null) {
             return;
         }
+        ExternalDownloadTabTracker.clear(current);
         if (BrowserUrlRouter.handleUrlLoading(this, current, url)) {
             return;
         }
