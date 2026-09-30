@@ -77,10 +77,7 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
-import androidx.webkit.Navigation;
-import androidx.webkit.NavigationListener;
 import androidx.webkit.WebSettingsCompat;
-import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -96,7 +93,6 @@ import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.SpaStateManager;
 import com.coara.browser.util.CacheModePolicy;
 import com.coara.browser.util.BrowserConstants;
-import com.coara.browser.util.DownloadRequestSupport;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -121,11 +117,9 @@ import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
-import java.util.IdentityHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -184,8 +178,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(
-            Math.min(4, Math.max(2, Runtime.getRuntime().availableProcessors() / 2)));
+    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -214,9 +207,6 @@ public class MainActivity extends AppCompatActivity {
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
     private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
-    private final Map<WebView, NavigationListener> navigationListeners = new HashMap<>();
-    private final Set<Bitmap> pendingSnapshotWrites = Collections.synchronizedSet(
-            Collections.newSetFromMap(new IdentityHashMap<>()));
     
     
     
@@ -318,8 +308,11 @@ public class MainActivity extends AppCompatActivity {
                 return bitmap.getByteCount() / 1024;
             }
             @Override
-            protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
-            }
+           protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
+               if (evicted && oldValue != null && !oldValue.isRecycled()) {
+               oldValue.recycle();  
+             }
+           }
         };
         loadBookmarks();
         loadHistory();
@@ -337,6 +330,8 @@ public class MainActivity extends AppCompatActivity {
         btnGo = findViewById(R.id.btnGo);
         btnNewTab = findViewById(R.id.btnNewTab);
         swipeRefreshLayout = findViewById(R.id.swipeRefreshLayout);
+        swipeRefreshLayout.setColorSchemeResources(R.color.colorPrimary);
+        swipeRefreshLayout.setProgressBackgroundColorSchemeResource(R.color.white);
         webViewContainer = findViewById(R.id.webViewContainer);
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
@@ -400,6 +395,11 @@ public class MainActivity extends AppCompatActivity {
         swipeRefreshLayout.setOnRefreshListener(() -> {
             WebView current = getCurrentWebView();
             if (current != null) current.reload();
+            UiThread.postDelayed(() -> {
+                if (swipeRefreshLayout.isRefreshing()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
+            }, 15000);
         });
             
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -502,7 +502,11 @@ public class MainActivity extends AppCompatActivity {
 
 
     private void handleIntent(Intent intent) {
-        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+        if (intent == null) {
+            return;
+        }
+        String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action)) {
             Uri data = intent.getData();
             if (data != null) {
                 String url = data.toString();
@@ -517,7 +521,41 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             setIntent(new Intent());
+        } else if (Intent.ACTION_SEND.equals(action)) {
+            String sharedText = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (sharedText != null && !sharedText.trim().isEmpty()) {
+                String extracted = extractUrlFromSharedText(sharedText.trim());
+                String url = BrowserUrlRouter.normalizeUserInput(extracted);
+                if (!url.isEmpty()) {
+                    createNewTab(url);
+                    WebView current = getCurrentWebView();
+                    if (current != null) {
+                        current.setTag("external");
+                    }
+                }
+            }
+            setIntent(new Intent());
+        } else if (Intent.ACTION_WEB_SEARCH.equals(action)) {
+            String query = intent.getStringExtra(android.app.SearchManager.QUERY);
+            if (query != null && !query.trim().isEmpty()) {
+                String url = BrowserUrlRouter.normalizeUserInput(query.trim());
+                if (!url.isEmpty()) {
+                    createNewTab(url);
+                }
+            }
+            setIntent(new Intent());
         }
+    }
+
+    private String extractUrlFromSharedText(String text) {
+        try {
+            java.util.regex.Matcher matcher = android.util.Patterns.WEB_URL.matcher(text);
+            if (matcher.find()) {
+                return text.substring(matcher.start(), matcher.end());
+            }
+        } catch (Exception ignored) {
+        }
+        return text;
     }
 
     @Override
@@ -619,7 +657,6 @@ public class MainActivity extends AppCompatActivity {
             webViewContainer.removeAllViews();
             for (WebView tab : tabsToRelease) {
                 clearPendingSpaHistory(tab);
-                removeNavigationListener(tab);
                 pullToRefreshEligibleCache.remove(tab);
                 webViewFavicons.remove(tab);
                 originalUserAgents.remove(tab);
@@ -645,7 +682,6 @@ public class MainActivity extends AppCompatActivity {
                     preloadedWebView.onPause();
                 } catch (Exception ignored) {
                 }
-                removeNavigationListener(preloadedWebView);
                 try {
                     preloadedWebView.destroy();
                 } catch (Exception ignored) {
@@ -656,20 +692,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void releaseTabSnapshot(WebView webView) {
-        if (webView == null) return;
-        Bitmap bitmap = tabSnapshots.remove(webView);
-        if (bitmap != null && !pendingSnapshotWrites.contains(bitmap) && !bitmap.isRecycled()) {
-            try {
-                bitmap.recycle();
-            } catch (Exception ignored) {
-            }
-        }
-    }
-
     private void clearTabSnapshots() {
-        for (Bitmap bitmap : new ArrayList<>(tabSnapshots.values())) {
-            if (bitmap != null && !pendingSnapshotWrites.contains(bitmap) && !bitmap.isRecycled()) {
+        for (Bitmap bitmap : tabSnapshots.values()) {
+            if (bitmap != null && !bitmap.isRecycled()) {
                 try {
                     bitmap.recycle();
                 } catch (Exception ignored) {
@@ -677,39 +702,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         tabSnapshots.clear();
-    }
-
-    private void writeTabSnapshotAsync(int id, Bitmap bitmap) {
-        if (bitmap == null || bitmap.isRecycled()) return;
-        if (!pendingSnapshotWrites.add(bitmap)) return;
-        backgroundExecutor.execute(() -> {
-            try {
-                File outFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
-                try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                    bitmap.compress(Bitmap.CompressFormat.PNG, 90, fos);
-                    fos.flush();
-                }
-            } catch (Exception ignored) {
-            } finally {
-                pendingSnapshotWrites.remove(bitmap);
-                UiThread.post(() -> {
-                    if (tabSnapshots.get(findWebViewForSnapshot(bitmap)) != bitmap && !bitmap.isRecycled()) {
-                        try {
-                            bitmap.recycle();
-                        } catch (Exception ignored) {
-                        }
-                    }
-                });
-            }
-        });
-    }
-
-    private WebView findWebViewForSnapshot(Bitmap bitmap) {
-        if (bitmap == null) return null;
-        for (Map.Entry<WebView, Bitmap> entry : tabSnapshots.entrySet()) {
-            if (entry.getValue() == bitmap) return entry.getKey();
-        }
-        return null;
     }
 
     @SuppressWarnings("deprecation")
@@ -772,27 +764,25 @@ public class MainActivity extends AppCompatActivity {
             tabsArray.put(tabObj);
             
             Bundle state = new Bundle();
-            boolean savedState = false;
-            if (WebViewFeature.isFeatureSupported(WebViewFeature.SAVE_STATE)) {
-                try {
-                    WebViewCompat.saveState(webView, state, 128 * 1024, false);
-                    savedState = true;
-                } catch (Exception ignored) {
+            webView.saveState(state);
+            saveBundleToFile(state, "tab_state_" + id + ".dat");
+            if (tabSnapshots.containsKey(webView)) {
+                Bitmap snap = tabSnapshots.get(webView);
+                if (snap != null) {
+                    final int finalIdForSnap = id;
+                    final Bitmap finalSnap = snap;
+                    backgroundExecutor.execute(() -> {
+                        try {
+                            File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
+                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                                finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                fos.flush();
+                            }
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    });
                 }
-            }
-            if (!savedState) {
-                try {
-                    webView.saveState(state);
-                    savedState = true;
-                } catch (Exception ignored) {
-                }
-            }
-            if (savedState) {
-                saveBundleToFile(state, "tab_state_" + id + ".dat");
-            }
-            Bitmap snap = tabSnapshots.get(webView);
-            if (snap != null) {
-                writeTabSnapshotAsync(id, snap);
             }
         }
         Object currentTag = getCurrentWebView().getTag();
@@ -830,7 +820,6 @@ public class MainActivity extends AppCompatActivity {
                     }
                     pullToRefreshEligibleCache.remove(old);
                     webViewFavicons.remove(old);
-                    removeNavigationListener(old);
                     originalUserAgents.remove(old);
                     try {
                         old.stopLoading();
@@ -956,62 +945,16 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
+    private void applyCombinedOptimizations(WebView webView) {
+        WebViewOptimizationUtils.applyCombinedOptimizations(webView);
+    }
+
+    private void injectLazyLoading(WebView webView) {
+        WebViewOptimizationUtils.injectLazyLoading(webView);
+    }
+
     private void applyOptimizedSettings(WebSettings settings) {
-        WebViewOptimizationUtils.applyOptimizedSettings(settings, darkModeEnabled, jsEnabled);
-    }
-
-    private void installNavigationListener(final WebView target) {
-        if (target == null || !WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_LISTENER)) {
-            return;
-        }
-        removeNavigationListener(target);
-        NavigationListener listener = new NavigationListener() {
-            @Override
-            public void onNavigationStarted(Navigation navigation) {
-                try {
-                    if (navigation.isSameDocument()) {
-                        SpaStateManager.getInstance().recordSameDocumentNavigation(
-                                target, navigation.getUrl(), navigation.wasInitiatedByPage());
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-
-            @Override
-            public void onNavigationCompleted(Navigation navigation) {
-                try {
-                    if (navigation.isSameDocument() && navigation.didCommit()) {
-                        String url = navigation.getUrl();
-                        if (url != null && !url.isEmpty()) {
-                            onSpaUrlChanged(target, url);
-                        }
-                    }
-                } catch (Exception ignored) {
-                }
-            }
-        };
-        try {
-            WebViewCompat.addNavigationListener(target, listener);
-            navigationListeners.put(target, listener);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void removeNavigationListener(WebView target) {
-        if (target == null) return;
-        NavigationListener listener = navigationListeners.remove(target);
-        if (listener == null || !WebViewFeature.isFeatureSupported(WebViewFeature.NAVIGATION_LISTENER)) {
-            return;
-        }
-        try {
-            WebViewCompat.removeNavigationListener(target, listener);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void onSpaUrlChanged(final WebView owner, final String url) {
-        if (owner == null || url == null || url.isEmpty()) return;
-        UiThread.post(() -> scheduleSpaHistoryUpdate(owner, url));
+        WebViewOptimizationUtils.applyOptimizedSettings(settings, darkModeEnabled);
     }
 
     private void applyCookiePolicy(WebView webView) {
@@ -1022,14 +965,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void preInitializeWebView() {
         runOnUiThread(new Runnable() { @Override public void run() {
-            if (preloadedWebView != null) {
-                try {
-                    preloadedWebView.stopLoading();
-                    preloadedWebView.destroy();
-                } catch (Exception ignored) {
-                }
-                preloadedWebView = null;
-            }
             WebView webView = new WebView(MainActivity.this);
             WebSettings settings = webView.getSettings();
             applyOptimizedSettings(settings);
@@ -1057,7 +992,7 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         WebSettings settings = webView.getSettings();
-        String defaultUA = settings.getUserAgentString();
+        String defaultUA = WebViewOptimizationUtils.sanitizeUserAgent(settings.getUserAgentString());
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
         applyCookiePolicy(webView);
@@ -1107,16 +1042,7 @@ public class MainActivity extends AppCompatActivity {
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
         }
 
-        final WebView blobBridgeWebView = webView;
-        webView.addJavascriptInterface(new BlobDownloadBridge(this, () -> UiThread.post(() -> {
-            try {
-                if ("external".equals(blobBridgeWebView.getTag()) && webViews.contains(blobBridgeWebView)) {
-                    closeTab(blobBridgeWebView);
-                }
-            } catch (Exception ignored) {
-            }
-        })), "BlobDownloader");
-        installNavigationListener(webView);
+        webView.addJavascriptInterface(new BlobDownloadBridge(this), "BlobDownloader");
 
         webView.setOnLongClickListener(v -> {
             WebView.HitTestResult result = webView.getHitTestResult();
@@ -1157,7 +1083,7 @@ public class MainActivity extends AppCompatActivity {
                                         newWebView.loadUrl(extra);
                                     }
                                 } else {
-                                    handleDownload(getCurrentWebView(), extra, null, null, null, 0);
+                                    handleDownload(extra, null, null, null, 0);
                                 }
                             } else if (which == 2) {
                                 if (isDataUrl) {
@@ -1190,7 +1116,7 @@ public class MainActivity extends AppCompatActivity {
                             if (which == 0) {
                                 copyLink(extra);
                             } else if (which == 1) {
-                                handleDownload(getCurrentWebView(), extra, null, null, null, 0);
+                                handleDownload(extra, null, null, null, 0);
                             } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
                                     Toast.makeText(MainActivity.this, "最大タブ数に達しました", Toast.LENGTH_SHORT).show();
@@ -1229,7 +1155,7 @@ public class MainActivity extends AppCompatActivity {
                                 if (isDataUrlLocal) {
                                     saveImage(extra);
                                 } else {
-                                    handleDownload(getCurrentWebView(), extra, null, null, null, 0);
+                                    handleDownload(extra, null, null, null, 0);
                                 }
                             } else if (which == 2) {
                                 if (webViews.size() >= MAX_TABS) {
@@ -1319,6 +1245,7 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                
                 SpaStateManager.getInstance().clearState(view);
                 clearPendingSpaHistory(view);
                 view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
@@ -1330,17 +1257,22 @@ public class MainActivity extends AppCompatActivity {
             }
             @Override
             public void onPageFinished(WebView view, String url) {
-                super.onPageFinished(view, url);
-                view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
-                WebViewOptimizationUtils.injectSpaProbe(view);
-                UiThread.postDelayed(() -> {
-                    try {
-                        if (view.getUrl() != null && view.getUrl().equals(url)) {
-                            WebViewOptimizationUtils.injectSpaProbe(view);
-                        }
-                    } catch (Exception ignored) {
+            super.onPageFinished(view, url);
+                  applyCombinedOptimizations(view);
+            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
+             UiThread.postDelayed(() -> injectLazyLoading(view), 200);
+            }
+            view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
+            WebViewOptimizationUtils.injectSpaProbe(view);
+            final String capturedUrl = url;
+            UiThread.postDelayed(() -> {
+                try {
+                    String cur = view.getUrl();
+                    if (cur != null && cur.equals(capturedUrl)) {
+                        WebViewOptimizationUtils.injectSpaProbe(view);
                     }
-                }, 1200L);
+                } catch (Exception ignored) {}
+            }, 1500);
             if (url.equals(START_PAGE)) {
              faviconImageView.setVisibility(View.GONE);
              urlEditText.setText("");
@@ -1513,17 +1445,13 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
-            boolean blobUrl = url != null && (url.startsWith("blob:") || url.startsWith("data:"));
-            if (blobUrl) {
-                handleBlobDownload(webView, url, userAgent, contentDisposition, mimeType, contentLength);
+            if (url.startsWith("blob:")) {
+                handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
             } else {
-                handleDownload(webView, url, userAgent, contentDisposition, mimeType, contentLength);
-                try {
-                    if ("external".equals(webView.getTag()) && webViews.contains(webView)) {
-                        closeTab(webView);
-                    }
-                } catch (Exception ignored) {
-                }
+                handleDownload(url, userAgent, contentDisposition, mimeType, contentLength);
+            }
+            if ("external".equals(getCurrentWebView().getTag())) {
+                closeTab(getCurrentWebView());
             }
         });
         return webView;
@@ -1540,7 +1468,7 @@ public class MainActivity extends AppCompatActivity {
         synchronized (webViews) {
             int index = webViews.indexOf(crashed);
             if (index == -1) {
-                removeNavigationListener(crashed);
+                
                 try {
                     crashed.destroy();
                 } catch (Exception ignored) {
@@ -1551,8 +1479,13 @@ public class MainActivity extends AppCompatActivity {
             Object tag = crashed.getTag();
             boolean wasCurrent = (index == currentTabIndex);
 
-            removeNavigationListener(crashed);
-            releaseTabSnapshot(crashed);
+            Bitmap bm = tabSnapshots.remove(crashed);
+            if (bm != null && !bm.isRecycled()) {
+                try {
+                    bm.recycle();
+                } catch (Exception ignored) {
+                }
+            }
             pullToRefreshEligibleCache.remove(crashed);
             webViewFavicons.remove(crashed);
             originalUserAgents.remove(crashed);
@@ -1691,11 +1624,16 @@ public class MainActivity extends AppCompatActivity {
             }
 
             webViews.remove(index);
-            releaseTabSnapshot(webView);
+            Bitmap bm = tabSnapshots.remove(webView);
+            if (bm != null && !bm.isRecycled()) {
+                try {
+                    bm.recycle();
+                } catch (Exception ignored) {
+                }
+            }
             pullToRefreshEligibleCache.remove(webView);
             webViewFavicons.remove(webView);
             originalUserAgents.remove(webView);
-            removeNavigationListener(webView);
             if (id != -1) {
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                 if (snapFile.exists()) {
@@ -1737,7 +1675,7 @@ public class MainActivity extends AppCompatActivity {
 
 
 
-    private void handleDownload(WebView owner, String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+    private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
                 ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
                         != PackageManager.PERMISSION_GRANTED) {
@@ -1746,51 +1684,159 @@ public class MainActivity extends AppCompatActivity {
             }
             return;
         }
-        if (isBlank(url)) {
-            Toast.makeText(MainActivity.this, "ダウンロードURLが無効です", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        if (owner == null) {
-            Toast.makeText(MainActivity.this, "ダウンロード対象のタブがありません", Toast.LENGTH_SHORT).show();
-            return;
-        }
+
+        String effectiveMimeType = normalizeMimeType(mimeType, url);
+        String fileName = getAccurateFileName(url, contentDisposition, effectiveMimeType);
+        fileName = resolveUniqueDownloadFileName(fileName);
+        Uri uri = Uri.parse(url);
+        DownloadManager.Request request;
         try {
-            String effectiveMimeType = DownloadRequestSupport.normalizeMimeType(mimeType, url);
-            String fileName = DownloadRequestSupport.getAccurateFileName(url, contentDisposition, effectiveMimeType);
-            DownloadManager.Request request = DownloadRequestSupport.buildRequest(
-                    MainActivity.this, owner, url, userAgent, contentDisposition, effectiveMimeType,
-                    contentLength, "Downloading file...", Environment.DIRECTORY_DOWNLOADS);
-            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-            if (dm == null) {
-                throw new IllegalStateException("DownloadManager unavailable");
+            request = new DownloadManager.Request(uri);
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(MainActivity.this, "対応していないURLのためダウンロードできません", Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (!isBlank(effectiveMimeType) && !effectiveMimeType.endsWith("/*")) {
+            request.setMimeType(effectiveMimeType);
+        }
+
+        String cookies = CookieManager.getInstance().getCookie(url);
+        if (!isBlank(cookies)) {
+            request.addRequestHeader("Cookie", cookies);
+        }
+        if (!isBlank(userAgent)) {
+            request.addRequestHeader("User-Agent", userAgent);
+        }
+        WebView referrerWebView = getCurrentWebView();
+        String refererUrl = referrerWebView != null ? referrerWebView.getUrl() : null;
+        if (!isBlank(refererUrl) && BrowserUrlRouter.isWebUrl(refererUrl)) {
+            request.addRequestHeader("Referer", refererUrl);
+        }
+        request.addRequestHeader("Accept", "*/*");
+
+        if (contentLength > 0) {
+            File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+            long usableSpace = downloadsDir.getUsableSpace();
+            if (usableSpace > 0 && contentLength > usableSpace) {
+                Toast.makeText(MainActivity.this, "空き容量が不足しているためダウンロードできません", Toast.LENGTH_LONG).show();
+                return;
             }
+        }
+
+        request.setDescription("Downloading file...");
+        request.setTitle(fileName);
+        request.allowScanningByMediaScanner();
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setAllowedOverMetered(true);
+        request.setAllowedOverRoaming(true);
+        try {
+            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+        } catch (IllegalStateException e) {
+            Toast.makeText(MainActivity.this, "保存先を準備できませんでした", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        try {
             long downloadId = dm.enqueue(request);
             String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                     .getAbsolutePath() + "/" + fileName;
             DownloadHistoryManager.addDownloadHistory(MainActivity.this, downloadId, fileName, filePath);
             DownloadHistoryManager.monitorDownloadProgress(MainActivity.this, downloadId, dm);
             Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
+        } catch (SecurityException e) {
+            Toast.makeText(MainActivity.this, "ダウンロードの権限がありません", Toast.LENGTH_LONG).show();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(MainActivity.this, "無効なダウンロードURLです", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
-            Toast.makeText(MainActivity.this, "ダウンロードに失敗しました: " +
-                    (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), Toast.LENGTH_SHORT).show();
+            Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
         }
     }
 
-
-    private void handleBlobDownload(WebView owner, String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        String resolvedMimeType = DownloadRequestSupport.normalizeMimeType(mimeType, null);
-        if (isBlank(resolvedMimeType)) {
-            resolvedMimeType = "application/octet-stream";
+    private String resolveUniqueDownloadFileName(String fileName) {
+        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        File candidate = new File(downloadsDir, fileName);
+        if (!candidate.exists()) {
+            return fileName;
         }
-        String fileName = !isBlank(contentDisposition)
-                ? DownloadRequestSupport.getAccurateFileName(url, contentDisposition, resolvedMimeType)
-                : DownloadRequestSupport.generateTimestampFileName("blob_download_", resolvedMimeType);
-        String js = DownloadRequestSupport.buildBlobDownloadScript(url, fileName, resolvedMimeType);
-        if (owner != null) {
-            owner.evaluateJavascript(js, null);
+        String base = fileName;
+        String ext = "";
+        int dotIndex = fileName.lastIndexOf('.');
+        if (dotIndex > 0 && dotIndex < fileName.length() - 1) {
+            base = fileName.substring(0, dotIndex);
+            ext = fileName.substring(dotIndex);
         }
+        for (int i = 1; i < 1000; i++) {
+            String next = base + "(" + i + ")" + ext;
+            if (!new File(downloadsDir, next).exists()) {
+                return next;
+            }
+        }
+        return base + "_" + System.currentTimeMillis() + ext;
     }
 
+
+    private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        String resolvedMimeType = normalizeMimeType(mimeType, url);
+        String fileName = generateBlobFileName(resolvedMimeType);
+        String effectiveMimeType = resolvedMimeType != null ? resolvedMimeType : "application/octet-stream";
+        String token = "blob_" + System.currentTimeMillis() + "_" + Math.abs(new java.util.Random().nextInt());
+        String js = "javascript:(function(){" +
+                "var token=" + JSONObject.quote(token) + ";" +
+                "var fileName=" + JSONObject.quote(fileName) + ";" +
+                "var mimeType=" + JSONObject.quote(effectiveMimeType) + ";" +
+                "fetch(" + JSONObject.quote(url) + ",{credentials:'include'}).then(function(response){" +
+                "if(!response.ok){throw new Error('HTTP '+response.status);}" +
+                "var totalSize=response.headers.get('Content-Length')||'0';" +
+                "window.BlobDownloader.onBlobStart(token,fileName,mimeType,totalSize);" +
+                "if(response.body&&response.body.getReader){" +
+                "var reader=response.body.getReader();" +
+                "var buffer=[];var bufferLen=0;var FLUSH_SIZE=524288;" +
+                "function flush(){" +
+                "if(bufferLen===0){return;}" +
+                "var merged=new Uint8Array(bufferLen);var offset=0;" +
+                "for(var i=0;i<buffer.length;i++){merged.set(buffer[i],offset);offset+=buffer[i].length;}" +
+                "var binary='';var chunkSize=8192;" +
+                "for(var j=0;j<merged.length;j+=chunkSize){" +
+                "binary+=String.fromCharCode.apply(null,merged.subarray(j,Math.min(j+chunkSize,merged.length)));" +
+                "}" +
+                "window.BlobDownloader.onBlobChunk(token,btoa(binary));" +
+                "buffer=[];bufferLen=0;" +
+                "}" +
+                "function pump(){" +
+                "return reader.read().then(function(result){" +
+                "if(result.done){flush();window.BlobDownloader.onBlobComplete(token);return;}" +
+                "buffer.push(result.value);bufferLen+=result.value.length;" +
+                "if(bufferLen>=FLUSH_SIZE){flush();}" +
+                "return pump();" +
+                "});" +
+                "}" +
+                "return pump();" +
+                "}else{" +
+                "return response.blob().then(function(blob){" +
+                "return new Promise(function(resolve,reject){" +
+                "var fr=new FileReader();" +
+                "fr.onloadend=function(){" +
+                "var base64data=fr.result;var idx=base64data.indexOf(',');" +
+                "window.BlobDownloader.onBlobChunk(token,idx>=0?base64data.substring(idx+1):base64data);" +
+                "window.BlobDownloader.onBlobComplete(token);" +
+                "resolve();" +
+                "};" +
+                "fr.onerror=function(){reject(fr.error);};" +
+                "fr.readAsDataURL(blob);" +
+                "});" +
+                "});" +
+                "}" +
+                "}).catch(function(error){window.BlobDownloader.onBlobError(token,error.toString());});" +
+                "})();";
+        getCurrentWebView().evaluateJavascript(js, null);
+    }
+
+
+
+    private String generateBlobFileName(String mimeType) {
+        return buildTimestampFileName("blob_download_", mimeType);
+    }
 
 
     
@@ -1823,17 +1869,18 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 String fileName = buildTimestampFileName("saved_image_", mimeType);
-                File picturesDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
-                if (!picturesDir.exists()) {
-                    picturesDir.mkdirs();
-                }
-                File file = new File(picturesDir, fileName);
-                try (FileOutputStream fos = new FileOutputStream(file)) {
-                    fos.write(imageData);
-                    fos.flush();
+                com.coara.browser.util.PublicStorageWriter.Target target =
+                        com.coara.browser.util.PublicStorageWriter.openPicturesTarget(MainActivity.this, fileName, mimeType);
+                try {
+                    target.outputStream.write(imageData);
+                    target.outputStream.flush();
+                    com.coara.browser.util.PublicStorageWriter.finish(MainActivity.this, target);
+                } catch (Exception writeError) {
+                    com.coara.browser.util.PublicStorageWriter.abort(MainActivity.this, target);
+                    throw writeError;
                 }
                 Toast.makeText(MainActivity.this,
-                        "画像の保存が完了しました\n保存先: " + file.getAbsolutePath(),
+                        "画像の保存が完了しました\n保存先: " + target.displayPath,
                         Toast.LENGTH_LONG).show();
                 return;
             }
@@ -1874,25 +1921,22 @@ public class MainActivity extends AppCompatActivity {
 
     private void exportBookmarksToFile() {
         final String bookmarksJson = pref.getString(KEY_BOOKMARKS, "[]");
-        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        if (!downloadDir.exists()) {
-            downloadDir.mkdirs();
-        }
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
-        final File file;
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            file = new File(downloadDir, "JSON-bookmark" + timeStamp + ".txt");
-        } else {
-            file = new File(downloadDir, timeStamp + "-bookmark.json");
-        }
+        final String fileName = timeStamp + "-bookmark.json";
         backgroundExecutor.execute(() -> {
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(bookmarksJson.getBytes("UTF-8"));
-                fos.flush();
+            com.coara.browser.util.PublicStorageWriter.Target target = null;
+            try {
+                target = com.coara.browser.util.PublicStorageWriter.openDownloadsTarget(
+                        MainActivity.this, fileName, "application/json");
+                target.outputStream.write(bookmarksJson.getBytes("UTF-8"));
+                target.outputStream.flush();
+                com.coara.browser.util.PublicStorageWriter.finish(MainActivity.this, target);
+                final String displayPath = target.displayPath;
                 runOnUiThread(() ->
-                    Toast.makeText(MainActivity.this, "ブックマークをエクスポートしました: " + file.getAbsolutePath(), Toast.LENGTH_SHORT).show()
+                    Toast.makeText(MainActivity.this, "ブックマークをエクスポートしました: " + displayPath, Toast.LENGTH_SHORT).show()
                 );
             } catch (Exception e) {
+                com.coara.browser.util.PublicStorageWriter.abort(MainActivity.this, target);
                 runOnUiThread(() ->
                     Toast.makeText(MainActivity.this, "ブックマークのエクスポートに失敗しました: " + e.getMessage(), Toast.LENGTH_SHORT).show()
                 );
@@ -1904,7 +1948,13 @@ public class MainActivity extends AppCompatActivity {
     private void createNewTab() {
         if (webViews.size() >= MAX_TABS) {
             WebView removed = webViews.remove(0);
-            releaseTabSnapshot(removed);
+            Bitmap removedSnapshot = tabSnapshots.remove(removed);
+            if (removedSnapshot != null && !removedSnapshot.isRecycled()) {
+                try {
+                    removedSnapshot.recycle();
+                } catch (Exception ignored) {
+                }
+            }
             Object removedTag = removed.getTag();
             if (removedTag instanceof Integer) {
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedTag + ".png");
@@ -2052,36 +2102,21 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void onSpaDetected(final boolean isSpa) {
-            onSpaScore(isSpa ? 6 : 0);
-        }
-
-        @JavascriptInterface
-        public void onSpaScore(final int score) {
-            UiThread.post(() -> {
-                try {
-                    SpaStateManager.getInstance().setProbeScore(owner, score);
-                    if (owner == getCurrentWebView()) {
-                        updatePullToRefreshState(owner, owner.getUrl());
-                        String currentUrl = owner.getUrl();
-                        if (currentUrl != null) {
-                            owner.getSettings().setCacheMode(
-                                    CacheModePolicy.determinePostLoad(currentUrl, SpaStateManager.getInstance().isSpa(owner)));
+            UiThread.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        SpaStateManager.getInstance().setDetected(owner, isSpa);
+                        if (owner == getCurrentWebView()) {
+                            
+                            updatePullToRefreshState(owner, owner.getUrl());
+                            String currentUrl = owner.getUrl();
+                            if (currentUrl != null) {
+                                owner.getSettings().setCacheMode(
+                                        CacheModePolicy.determinePostLoad(currentUrl, isSpa));
+                            }
                         }
-                    }
-                } catch (Exception ignored) {
-                }
-            });
-        }
-
-        @JavascriptInterface
-        public void onSpaSignal(final int weight) {
-            UiThread.post(() -> {
-                try {
-                    SpaStateManager.getInstance().addSignal(owner, Math.max(-4, Math.min(4, weight)));
-                    if (owner == getCurrentWebView()) {
-                        updatePullToRefreshState(owner, owner.getUrl());
-                    }
-                } catch (Exception ignored) {
+                    } catch (Exception ignored) {}
                 }
             });
         }
@@ -2399,11 +2434,16 @@ public class MainActivity extends AppCompatActivity {
                 }
                 Object tag = w.getTag();
                 int id = (tag instanceof Integer) ? (Integer) tag : -1;
-                releaseTabSnapshot(w);
+                Bitmap bm = tabSnapshots.remove(w);
+                if (bm != null && !bm.isRecycled()) {
+                    try {
+                        bm.recycle();
+                    } catch (Exception ignored) {
+                    }
+                }
                 pullToRefreshEligibleCache.remove(w);
                 webViewFavicons.remove(w);
                 originalUserAgents.remove(w);
-                removeNavigationListener(w);
                 if (id != -1) {
                     File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                     if (snapFile.exists()) {
@@ -2797,7 +2837,13 @@ private void showHistoryDialog() {
         Object tag = webView.getTag();
         int id = (tag instanceof Integer) ? (Integer) tag : -1;
 
-        Bitmap previous = tabSnapshots.get(webView);
+        Bitmap previous = tabSnapshots.remove(webView);
+        if (previous != null && !previous.isRecycled()) {
+            try {
+                previous.recycle();
+            } catch (Exception ignored) {
+            }
+        }
 
         
         
@@ -2830,14 +2876,18 @@ private void showHistoryDialog() {
         }
 
         tabSnapshots.put(webView, snapshot);
-        if (previous != null && previous != snapshot && !pendingSnapshotWrites.contains(previous) && !previous.isRecycled()) {
-            try {
-                previous.recycle();
-            } catch (Exception ignored) {
-            }
-        }
         if (id != -1) {
-            writeTabSnapshotAsync(id, snapshot);
+            final int finalId = id;
+            final Bitmap finalBitmap = snapshot;
+            backgroundExecutor.execute(() -> {
+                File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
+                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
+                    fos.flush();
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
         }
     }
 
@@ -3465,6 +3515,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
         if (normalized.contains("pdf")) return ".pdf";
         if (normalized.contains("zip")) return ".zip";
         if (normalized.contains("apk")) return ".apk";
+        if (normalized.equals("application/octet-stream")) return ".bin";
         return "";
     }
 

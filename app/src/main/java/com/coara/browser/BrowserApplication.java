@@ -1,6 +1,8 @@
 package com.coara.browser;
 
 import android.app.Application;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.os.Build;
 
 import java.io.File;
@@ -11,25 +13,29 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
- 
- 
- 
- 
- 
- 
- 
- 
- 
- 
 public class BrowserApplication extends Application {
 
     private static final String CRASH_DIR_NAME = "crash_logs";
     private static final int MAX_CRASH_LOGS = 10;
+    public static final String DOWNLOAD_CHANNEL_ID = "coara_downloads";
 
     @Override
     public void onCreate() {
         super.onCreate();
         installCrashLogger();
+        createDownloadNotificationChannel();
+    }
+
+    private void createDownloadNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager manager = getSystemService(NotificationManager.class);
+            if (manager != null && manager.getNotificationChannel(DOWNLOAD_CHANNEL_ID) == null) {
+                NotificationChannel channel = new NotificationChannel(
+                        DOWNLOAD_CHANNEL_ID, "ダウンロード", NotificationManager.IMPORTANCE_LOW);
+                channel.setShowBadge(false);
+                manager.createNotificationChannel(channel);
+            }
+        }
     }
 
     private void installCrashLogger() {

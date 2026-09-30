@@ -195,11 +195,19 @@ public class DownloadHistoryActivity extends AppCompatActivity {
                     DownloadItem item = getDownloadItem(downloadId);
                     if (item == null) {
                         File file = new File(filePath);
-                        int status = file.exists() ? DownloadManager.STATUS_SUCCESSFUL : DownloadManager.STATUS_FAILED;
                         String fileName = !storedFileName.isEmpty() ? storedFileName : file.getName();
-                        item = new DownloadItem(downloadId, fileName, "", status, 0,
-                                file.exists() ? file.length() : 0,
-                                "file://" + filePath, "");
+                        if (obj.has("manualStatus")) {
+                            int status = obj.optInt("manualStatus", DownloadManager.STATUS_FAILED);
+                            long downloadedSize = obj.optLong("manualDownloaded", 0);
+                            long totalSize = obj.optLong("manualTotal", 0);
+                            item = new DownloadItem(downloadId, fileName, "", status, downloadedSize,
+                                    totalSize, "file://" + filePath, "");
+                        } else {
+                            int status = file.exists() ? DownloadManager.STATUS_SUCCESSFUL : DownloadManager.STATUS_FAILED;
+                            item = new DownloadItem(downloadId, fileName, "", status, 0,
+                                    file.exists() ? file.length() : 0,
+                                    "file://" + filePath, "");
+                        }
                     } else {
                         if (item.title == null || item.title.isEmpty()) {
                             if (!storedFileName.isEmpty()) {
