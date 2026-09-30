@@ -82,9 +82,12 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.coara.browser.util.BasicAuthManager;
 import com.coara.browser.util.ExternalDownloadTabTracker;
+import com.coara.browser.util.DownloadSupport;
+import com.coara.browser.util.DownloadFallbackManager;
 import com.coara.browser.util.BrowserConstants;
 import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.WebViewOptimizationUtils;
+import com.coara.browser.webview.BlobDownloadBridge;
 import com.coara.browser.util.UiThread;
 
 import org.json.JSONArray;
@@ -187,6 +190,7 @@ public class SecretActivity extends AppCompatActivity {
     private final Map<WebView, Bitmap> webViewFavicons = new HashMap<>();
     private LruCache<String, Bitmap> faviconCache;
     private final Map<WebView, String> originalUserAgents = new HashMap<>();
+    private final Map<WebView, BlobDownloadBridge> blobDownloadBridges = new HashMap<>();
     private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
     private boolean defaultLoadsImagesAutomatically;
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
@@ -537,7 +541,6 @@ public class SecretActivity extends AppCompatActivity {
                     createNewTab(url);
                     if (!webViews.isEmpty()) {
                         WebView current = getCurrentWebView();
-                        current.setTag("external");
                         ExternalDownloadTabTracker.markExternal(current, url);
                     }
                 } else {
@@ -928,7 +931,9 @@ public class SecretActivity extends AppCompatActivity {
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
         }
 
-        webView.addJavascriptInterface(new BlobDownloadInterface(), "BlobDownloader");
+        BlobDownloadBridge blobDownloadBridge = new BlobDownloadBridge(this);
+        blobDownloadBridges.put(webView, blobDownloadBridge);
+        webView.addJavascriptInterface(blobDownloadBridge, "BlobDownloader");
 
         webView.setOnLongClickListener(v -> {
             WebView.HitTestResult result = webView.getHitTestResult();
@@ -1083,12 +1088,13 @@ public class SecretActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request != null) {
-                    ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture());
+                    ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture(), request.isRedirect(), request.getUrl().toString());
                 }
                 return BrowserUrlRouter.handleUrlLoading(SecretActivity.this, view, request.getUrl().toString(), request.isForMainFrame());
             }
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                ExternalDownloadTabTracker.onPageStarted(view, url);
                 String lowerUrl = url.toLowerCase();
                 clearPendingSpaHistory(view);
                 boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
@@ -1102,6 +1108,8 @@ public class SecretActivity extends AppCompatActivity {
             }
             @Override
             public void onPageFinished(WebView view, String url) {
+                ExternalDownloadTabTracker.onPageFinished(view, url);
+                installDownloadHintScript(view);
                   super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
@@ -1159,9 +1167,6 @@ public class SecretActivity extends AppCompatActivity {
 
             @Override
             public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse errorResponse) {
-                if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
-                    BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
-                }
                 super.onReceivedHttpError(view, request, errorResponse);
             }
         });
@@ -1173,14 +1178,6 @@ public class SecretActivity extends AppCompatActivity {
                     @Override
                     public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) {
                         BasicAuthManager.handleHttpAuthRequest(SecretActivity.this, v, handler, basicAuthEnabled, host, realm);
-                    }
-
-                    @Override
-                    public void onReceivedHttpError(WebView v, WebResourceRequest request, WebResourceResponse errorResponse) {
-                        if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
-                            BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
-                        }
-                        super.onReceivedHttpError(v, request, errorResponse);
                     }
 
                     @Override
@@ -1292,19 +1289,33 @@ public class SecretActivity extends AppCompatActivity {
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimeType, contentLength) -> {
             WebView current = getCurrentWebView();
-            boolean shouldClose = current != null
-                    && "external".equals(current.getTag())
-                    && ExternalDownloadTabTracker.shouldCloseAfterDownload(current, url);
-            if (url.startsWith("blob:")) {
-                handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
-            } else {
-                handleDownload(url, userAgent, contentDisposition, mimeType, contentLength);
+            if (current == null || DownloadSupport.isBlank(url)) {
+                return;
             }
-            if (shouldClose) {
-                closeTab(current);
+            if (DownloadSupport.isBlobUrl(url)) {
+                handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
+                return;
+            }
+            long downloadId = handleDownload(url, userAgent, contentDisposition, mimeType, contentLength);
+            if (downloadId > 0 && ExternalDownloadTabTracker.isExternal(current)
+                    && ExternalDownloadTabTracker.shouldCloseAfterDownload(current, url)) {
+                DownloadSupport.scheduleExternalTabClose(SecretActivity.this, current, downloadId, url, () -> closeTab(current));
             }
         });
         return webView;
+    }
+
+    private void releaseBlobBridge(WebView webView) {
+        if (webView == null) {
+            return;
+        }
+        BlobDownloadBridge bridge = blobDownloadBridges.remove(webView);
+        if (bridge != null) {
+            try {
+                bridge.shutdown();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void closeTab(WebView webView) {
@@ -1323,7 +1334,8 @@ public class SecretActivity extends AppCompatActivity {
                 ExternalDownloadTabTracker.clear(webView);
                 try {
                     webView.stopLoading();
-                    webView.destroy();
+                    releaseBlobBridge(webView);
+                webView.destroy();
                 } catch (Exception ignored) {
                 }
                 webViewContainer.removeAllViews();
@@ -1343,69 +1355,147 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
 
-    private void handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
-           ContextCompat.checkSelfPermission(SecretActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
-           != PackageManager.PERMISSION_GRANTED) {
-            if (permissionLauncher != null) {
-                permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-            }
+    private void installDownloadHintScript(WebView view) {
+        if (view == null || !jsEnabled) {
             return;
         }
-        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-        if (mimeType != null) {
-            request.setMimeType(mimeType);
-        }
-        String cookies = CookieManager.getInstance().getCookie(url);
-        if (cookies != null && !cookies.isEmpty()) {
-            request.addRequestHeader("Cookie", cookies);
-        }
-        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(url);
-        if (authorization != null && !authorization.isEmpty()) {
-            request.addRequestHeader("Authorization", authorization);
-        }
-        WebView currentWebView = getCurrentWebView();
-        String refererUrl = currentWebView != null ? currentWebView.getUrl() : null;
-        if (refererUrl != null && !refererUrl.isEmpty() && BrowserUrlRouter.isWebUrl(refererUrl)) {
-            request.addRequestHeader("Referer", refererUrl);
-        }
-        if (userAgent != null) {
-            request.addRequestHeader("User-Agent", userAgent);
-        }
-        request.setDescription("Downloading file...");
-        String fileName = URLUtil.guessFileName(url, contentDisposition, mimeType);
-        request.setTitle(fileName);
-        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+        String js = "javascript:(function(){" +
+                "try{" +
+                "if(window.__coaraDownloadHintInstalled)return;" +
+                "window.__coaraDownloadHintInstalled=true;" +
+                "var remember=function(a){" +
+                "try{" +
+                "if(!a)return;" +
+                "var n=a.getAttribute('download')||a.getAttribute('data-filename')||a.getAttribute('data-file-name')||a.getAttribute('data-download-name')||a.getAttribute('data-name');" +
+                "var h=a.href||a.getAttribute('href')||a.getAttribute('data-url')||a.getAttribute('data-href')||a.getAttribute('data-download-url');" +
+                "if(n&&h&&window.BlobDownloader)window.BlobDownloader.rememberDownloadHint(h,n);" +
+                "}catch(e){}" +
+                "};" +
+                "var scan=function(){" +
+                "try{" +
+                "var list=document.querySelectorAll('a[download]');" +
+                "for(var i=0;i<list.length;i++)remember(list[i]);" +
+                "}catch(e){}" +
+                "};" +
+                "document.addEventListener('click',function(e){" +
+                "try{" +
+                "var a=e.target;" +
+                "var depth=0;" +
+                "while(a&&a.tagName!=='A'&&depth++<8)a=a.parentElement;" +
+                "remember(a);" +
+                "}catch(ex){}" +
+                "},true);" +
+                "scan();" +
+                "if(window.MutationObserver){" +
+                "new MutationObserver(function(){scan();}).observe(document.documentElement||document,{subtree:true,childList:true});" +
+                "}" +
+                "}catch(e){}" +
+                "})();";
         try {
-            long downloadId = dm.enqueue(request);
-            String filePath = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                    .getAbsolutePath() + "/" + fileName;
-            DownloadHistoryManager.addDownloadHistory(SecretActivity.this, downloadId, fileName, filePath);
-            DownloadHistoryManager.monitorDownloadProgress(SecretActivity.this, downloadId, dm);
-            Toast.makeText(SecretActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Toast.makeText(SecretActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
+            view.evaluateJavascript(js, null);
+        } catch (Exception ignored) {
         }
     }
+
+    private long handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+        if (DownloadSupport.isBlank(url)) {
+            Toast.makeText(SecretActivity.this, "ダウンロードURLが見つかりません", Toast.LENGTH_SHORT).show();
+            return -1;
+        }
+        if (DownloadSupport.isDataUrl(url)) {
+            if (!DownloadSupport.saveDataUrl(SecretActivity.this, url, null, mimeType)) {
+                Toast.makeText(SecretActivity.this, "データURLの保存に失敗しました", Toast.LENGTH_SHORT).show();
+            }
+            return -1;
+        }
+        if (DownloadSupport.isBlobUrl(url)) {
+            handleBlobDownload(url, userAgent, contentDisposition, mimeType, contentLength);
+            return -1;
+        }
+        if (!BrowserUrlRouter.isWebUrl(url)) {
+            Toast.makeText(SecretActivity.this, "対応していないURLのためダウンロードできません", Toast.LENGTH_LONG).show();
+            return -1;
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(SecretActivity.this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                        != PackageManager.PERMISSION_GRANTED) {
+            if (permissionLauncher != null) {
+                permissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+            } else {
+                Toast.makeText(SecretActivity.this, "ストレージ権限が必要です", Toast.LENGTH_SHORT).show();
+            }
+            return -1;
+        }
+        WebView current = getCurrentWebView();
+        try {
+            long downloadId = DownloadSupport.enqueue(SecretActivity.this, current, url, userAgent, contentDisposition, mimeType,
+                    contentLength, basicAuthEnabled, "Downloading file...");
+            Toast.makeText(SecretActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
+            return downloadId;
+        } catch (SecurityException e) {
+            Toast.makeText(SecretActivity.this, "ダウンロードの権限がありません", Toast.LENGTH_LONG).show();
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(SecretActivity.this, "無効なダウンロードURLです", Toast.LENGTH_LONG).show();
+        } catch (IllegalStateException e) {
+            if ("insufficient storage".equals(e.getMessage())) {
+                Toast.makeText(SecretActivity.this, "空き容量が不足しています", Toast.LENGTH_LONG).show();
+            } else {
+                long fallbackId = DownloadFallbackManager.startImmediateFallback(SecretActivity.this, current, url, userAgent,
+                        contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
+                        basicAuthEnabled, "Downloading file...");
+                if (fallbackId > 0) {
+                    Toast.makeText(SecretActivity.this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                    return fallbackId;
+                }
+                Toast.makeText(SecretActivity.this, "ダウンロード機能を利用できません", Toast.LENGTH_LONG).show();
+            }
+        } catch (Exception e) {
+            long fallbackId = DownloadFallbackManager.startImmediateFallback(SecretActivity.this, current, url, userAgent,
+                    contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
+                    basicAuthEnabled, "Downloading file...");
+            if (fallbackId > 0) {
+                Toast.makeText(SecretActivity.this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                return fallbackId;
+            }
+            Toast.makeText(SecretActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
+        }
+        return -1;
+    }
+
     private void handleBlobDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
-        String js = "javascript:(function() {" +
-                "fetch('" + url + "').then(function(response) {" +
-                "  return response.blob();" +
-                "}).then(function(blob) {" +
-                "  var reader = new FileReader();" +
-                "  reader.onloadend = function() {" +
-                "    var base64data = reader.result;" +
-                "    var fileName = '" + generateBlobFileName(mimeType) + "';" +
-                "    window.BlobDownloader.onBlobDownloaded(base64data, '" + (mimeType != null ? mimeType : "application/octet-stream") + "', fileName);" +
-                "  };" +
-                "  reader.readAsDataURL(blob);" +
-                "}).catch(function(error) {" +
-                "  window.BlobDownloader.onBlobDownloadError(error.toString());" +
-                "});" +
-                "})()";
-        getCurrentWebView().evaluateJavascript(js, null);
+        WebView current = getCurrentWebView();
+        if (current == null || DownloadSupport.isBlank(url)) {
+            Toast.makeText(SecretActivity.this, "blobダウンロードURLが見つかりません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String resolvedMimeType = DownloadSupport.normalizeMimeType(mimeType, null);
+        String fileName = DownloadSupport.buildTimestampFileName("blob_download_", resolvedMimeType);
+        String token = "blob_" + System.nanoTime() + "_" + Math.abs(new java.util.Random().nextInt());
+        String js = "javascript:(function(){" +
+                "var token=" + JSONObject.quote(token) + ";" +
+                "var fileName=" + JSONObject.quote(fileName) + ";" +
+                "var mimeType=" + JSONObject.quote(resolvedMimeType) + ";" +
+                "fetch(" + JSONObject.quote(url) + ",{credentials:'include',cache:'no-store'}).then(function(response){" +
+                "if(!response.ok){throw new Error('HTTP '+response.status);}" +
+                "var totalSize=response.headers.get('Content-Length')||'0';" +
+                "var contentDisposition=response.headers.get('Content-Disposition')||'';" +
+                "window.BlobDownloader.onBlobStart(token,fileName,mimeType,totalSize,contentDisposition);" +
+                "if(response.body&&response.body.getReader){" +
+                "var reader=response.body.getReader();var buffer=[];var bufferLen=0;var FLUSH_SIZE=262144;" +
+                "function flush(){if(bufferLen===0){return;}var merged=new Uint8Array(bufferLen);var offset=0;for(var i=0;i<buffer.length;i++){merged.set(buffer[i],offset);offset+=buffer[i].length;}var binary='';var chunkSize=8192;for(var j=0;j<merged.length;j+=chunkSize){binary+=String.fromCharCode.apply(null,merged.subarray(j,Math.min(j+chunkSize,merged.length)));}window.BlobDownloader.onBlobChunk(token,btoa(binary));buffer=[];bufferLen=0;}" +
+                "function pump(){return reader.read().then(function(result){if(result.done){flush();window.BlobDownloader.onBlobComplete(token);return;}buffer.push(result.value);bufferLen+=result.value.length;if(bufferLen>=FLUSH_SIZE){flush();}return pump();});}return pump();" +
+                "}return response.blob().then(function(blob){return new Promise(function(resolve,reject){var CHUNK_BYTES=262144;var offset=0;function sendNext(){if(offset>=blob.size){window.BlobDownloader.onBlobComplete(token);resolve();return;}var end=Math.min(offset+CHUNK_BYTES,blob.size);var part=blob.slice(offset,end);var fr=new FileReader();fr.onloadend=function(){try{var base64data=fr.result;var idx=base64data.indexOf(',');window.BlobDownloader.onBlobChunk(token,idx>=0?base64data.substring(idx+1):base64data);offset=end;sendNext();}catch(e){reject(e);}};fr.onerror=function(){reject(fr.error||new Error('FileReader error'));};fr.readAsDataURL(part);}sendNext();});});" +
+                "}).catch(function(error){window.BlobDownloader.onBlobError(token,String(error));});" +
+                "})();";
+        try {
+            BlobDownloadBridge bridge = blobDownloadBridges.get(current);
+            if (bridge != null && ExternalDownloadTabTracker.isExternal(current)) {
+                bridge.registerCloseAfterDownload(token, this, current, url, () -> closeTab(current));
+            }
+            current.evaluateJavascript(js, null);
+        } catch (Exception e) {
+            Toast.makeText(SecretActivity.this, "blobダウンロードを開始できません", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private String generateBlobFileName(String mimeType) {
@@ -1423,35 +1513,6 @@ public class SecretActivity extends AppCompatActivity {
         }
         String timeStamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
         return "blob_download_" + timeStamp + ext;
-    }
-
-    private class BlobDownloadInterface {
-        @JavascriptInterface
-        public void onBlobDownloaded(String base64Data, String mimeType, String fileName) {
-            runOnUiThread(() -> {
-                try {
-                    int commaIndex = base64Data.indexOf(",");
-                    String pureBase64 = base64Data.substring(commaIndex + 1);
-                    byte[] data = Base64.decode(pureBase64, Base64.DEFAULT);
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadDir.exists()) {
-                        downloadDir.mkdirs();
-                    }
-                    File file = new File(downloadDir, fileName);
-                    try (FileOutputStream fos = new FileOutputStream(file)) {
-                        fos.write(data);
-                        fos.flush();
-                    }
-                    Toast.makeText(SecretActivity.this, "blob ダウンロード完了: " + file.getAbsolutePath(), Toast.LENGTH_LONG).show();
-                } catch (Exception e) {
-                    Toast.makeText(SecretActivity.this, "blob ダウンロードエラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                }
-            });
-        }
-        @JavascriptInterface
-        public void onBlobDownloadError(String errorMessage) {
-            runOnUiThread(() -> Toast.makeText(SecretActivity.this, "blob ダウンロードエラー: " + errorMessage, Toast.LENGTH_LONG).show());
-        }
     }
 
     private void saveImage(String imageUrl) {
@@ -1516,7 +1577,7 @@ public class SecretActivity extends AppCompatActivity {
         if (cookies != null && !cookies.isEmpty()) {
             request.addRequestHeader("Cookie", cookies);
         }
-        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(imageUrl);
+        String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(imageUrl, basicAuthEnabled);
         if (authorization != null && !authorization.isEmpty()) {
             request.addRequestHeader("Authorization", authorization);
         }
@@ -1968,7 +2029,8 @@ private class AndroidBridge {
                     webView.clearSslPreferences();
                     webView.clearMatches();
                     webView.removeAllViews();
-                    webView.destroy();
+                    releaseBlobBridge(webView);
+                webView.destroy();
                 } catch (Exception ignored) {
                 }
             }
@@ -2050,6 +2112,7 @@ private class AndroidBridge {
         current.loadUrl(START_PAGE);
         for (int i = 0; i < webViews.size(); i++) {
             if (i != currentTabIndex) {
+                releaseBlobBridge(webViews.get(i));
                 webViews.get(i).destroy();
             }
         }

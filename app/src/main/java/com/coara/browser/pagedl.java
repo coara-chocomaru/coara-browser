@@ -117,9 +117,6 @@ public class pagedl extends AppCompatActivity {
 
             @Override
             public void onReceivedHttpError(WebView view, android.webkit.WebResourceRequest request, android.webkit.WebResourceResponse errorResponse) {
-                if (basicAuthEnabled && errorResponse != null && errorResponse.getStatusCode() == 401 && request != null) {
-                    BasicAuthManager.markAuthenticationFailure(request.getUrl().getHost());
-                }
                 super.onReceivedHttpError(view, request, errorResponse);
             }
 
@@ -211,7 +208,7 @@ public class pagedl extends AppCompatActivity {
             if (username != null && password != null) {
                 authorization = BasicAuthManager.buildAuthorizationHeader(username, password);
             } else {
-                authorization = BasicAuthManager.getAuthorizationHeaderForUrl(urlString);
+                authorization = BasicAuthManager.getAuthorizationHeaderForUrl(urlString, basicAuthEnabled);
             }
             if (authorization != null && !authorization.isEmpty()) {
                 conn.setRequestProperty("Authorization", authorization);
@@ -224,7 +221,7 @@ public class pagedl extends AppCompatActivity {
                     conn.disconnect();
                     conn = null;
                 }
-                BasicAuthManager.markAuthenticationFailure(url.getHost());
+                BasicAuthManager.markAuthenticationFailure(pagedl.this, webView, url.getHost(), realm);
                 waitingForAuth = true;
                 final String retryRealm = realm;
                 runOnUiThread(() -> BasicAuthManager.requestCredentials(
@@ -365,7 +362,7 @@ public class pagedl extends AppCompatActivity {
             if (cookies != null && !cookies.isEmpty()) {
                 conn.setRequestProperty("Cookie", cookies);
             }
-            String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(resourceUrl);
+            String authorization = BasicAuthManager.getAuthorizationHeaderForUrl(resourceUrl, basicAuthEnabled);
             if (authorization != null && !authorization.isEmpty()) {
                 conn.setRequestProperty("Authorization", authorization);
             }
