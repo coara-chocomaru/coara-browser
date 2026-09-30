@@ -814,12 +814,13 @@ public final class DownloadFallbackManager {
 
     public static void postCompleteNotification(Context context, long downloadId, String fileName) {
         try {
-            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+            NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_COMPLETE_CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
                     .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
                     .setContentText("ダウンロード完了")
-                    .setOngoing(false)
+                    .setOngoing(true)
                     .setAutoCancel(false)
+                    .setOnlyAlertOnce(true)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT);
             PendingIntent pendingIntent = fileOpenPendingIntent(context, downloadId);
             if (pendingIntent != null) builder.setContentIntent(pendingIntent);
