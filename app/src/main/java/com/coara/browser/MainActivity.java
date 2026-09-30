@@ -62,6 +62,7 @@ import android.widget.FrameLayout;
 import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -1584,13 +1585,21 @@ public class MainActivity extends AppCompatActivity {
         String transparency = BrowserVisualSettings.isTransparencyEnabled(pref) ? "ON" : "OFF";
         String path = BrowserVisualSettings.getBackgroundPath(pref);
         String imageState = path == null ? "未設定" : "設定済み";
-        String[] items = new String[]{"背景透過設定  [" + transparency + "]", "背景画像設定  [" + imageState + "]", "背景画像を削除"};
+        int percent = BrowserVisualSettings.getBackgroundTransparencyPercent(pref);
+        String[] items = new String[]{
+                "背景透過設定  [" + transparency + "]",
+                "背景透過率  [" + percent + "%]",
+                "背景画像設定  [" + imageState + "]",
+                "背景画像を削除"
+        };
         new MaterialAlertDialogBuilder(this)
                 .setTitle("背景画像設定")
                 .setItems(items, (dialog, which) -> {
                     if (which == 0) {
                         showBackgroundTransparencyDialog();
                     } else if (which == 1) {
+                        showBackgroundTransparencyPercentDialog();
+                    } else if (which == 2) {
                         if (backgroundImageLauncher != null) {
                             backgroundImageLauncher.launch("image/*");
                         }
@@ -1600,6 +1609,93 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton("閉じる", null)
                 .show();
+    }
+
+    private void showBackgroundTransparencyPercentDialog() {
+        final int initial = BrowserVisualSettings.getBackgroundTransparencyPercent(pref);
+        final LinearLayout container = new LinearLayout(this);
+        container.setOrientation(LinearLayout.VERTICAL);
+        int padding = (int) (20 * getResources().getDisplayMetrics().density);
+        container.setPadding(padding, padding / 2, padding, 0);
+
+        final TextView valueText = new TextView(this);
+        valueText.setText("" + initial + "%");
+        valueText.setGravity(Gravity.CENTER);
+        valueText.setTextSize(18);
+        container.addView(valueText, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final SeekBar seekBar = new SeekBar(this);
+        seekBar.setMax(100);
+        seekBar.setProgress(initial);
+        container.addView(seekBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final TextInputEditText input = new TextInputEditText(this);
+        input.setSingleLine(true);
+        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        input.setHint("0～100");
+        input.setText(String.valueOf(initial));
+        input.setSelectAllOnFocus(true);
+        container.addView(input, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        final int[] current = {initial};
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    current[0] = Math.max(0, Math.min(100, progress));
+                    valueText.setText(current[0] + "%");
+                    input.setText(String.valueOf(current[0]));
+                    input.setSelection(input.length());
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) {}
+            @Override public void onStopTrackingTouch(SeekBar bar) {}
+        });
+
+        input.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                int value = parsePercent(input.getText() == null ? null : input.getText().toString(), current[0]);
+                current[0] = value;
+                seekBar.setProgress(value);
+                valueText.setText(value + "%");
+                input.setText(String.valueOf(value));
+                input.setSelection(input.length());
+            }
+        });
+
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("背景透過率")
+                .setMessage("0%は現在の基本動作、100%はページ背景を最大限透過します。")
+                .setView(container)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    int value = parsePercent(input.getText() == null ? null : input.getText().toString(), current[0]);
+                    BrowserVisualSettings.setBackgroundTransparencyPercent(pref, value);
+                    if (value > 0 && !BrowserVisualSettings.isTransparencyEnabled(pref)) {
+                        BrowserVisualSettings.setTransparencyEnabled(pref, true);
+                    }
+                    applyBrowserVisualSettingsToAllWebViews();
+                    Toast.makeText(this, "背景透過率を保存しました: " + value + "%", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("キャンセル", null)
+                .show();
+    }
+
+    private int parsePercent(String text, int fallback) {
+        try {
+            if (text == null) return Math.max(0, Math.min(100, fallback));
+            String trimmed = text.trim();
+            if (trimmed.isEmpty()) return Math.max(0, Math.min(100, fallback));
+            return Math.max(0, Math.min(100, Integer.parseInt(trimmed)));
+        } catch (Exception ignored) {
+            return Math.max(0, Math.min(100, fallback));
+        }
     }
 
     private void showBackgroundTransparencyDialog() {
@@ -1772,6 +1868,7 @@ public class MainActivity extends AppCompatActivity {
         if (!file.exists() || !file.isFile()) {
             BrowserVisualSettings.setBackgroundPath(pref, null);
             BrowserVisualSettings.setTransparencyEnabled(pref, false);
+            BrowserVisualSettings.setBackgroundTransparencyPercent(pref, 0);
             clearBackgroundBitmap();
             applyBrowserVisualSettingsToAllWebViews();
             updateBackgroundImageVisibility();
@@ -1861,6 +1958,7 @@ public class MainActivity extends AppCompatActivity {
         ++backgroundLoadToken;
         BrowserVisualSettings.setBackgroundPath(pref, null);
         BrowserVisualSettings.setTransparencyEnabled(pref, false);
+        BrowserVisualSettings.setBackgroundTransparencyPercent(pref, 0);
         File target = new File(getFilesDir(), "background_image");
         File temporary = new File(getFilesDir(), "background_image.tmp");
         File backup = new File(getFilesDir(), "background_image.bak");
