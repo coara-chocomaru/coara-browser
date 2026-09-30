@@ -15,6 +15,7 @@ import androidx.core.app.NotificationManagerCompat;
 
 import com.coara.browser.BrowserApplication;
 import com.coara.browser.DownloadHistoryActivity;
+import com.coara.browser.DownloadOpenActivity;
 import com.coara.browser.DownloadHistoryManager;
 import com.coara.browser.util.DownloadSupport;
 import com.coara.browser.util.ExternalDownloadTabTracker;
@@ -203,7 +204,9 @@ public class BlobDownloadBridge {
                     return;
                 }
                 try {
-                    PublicStorageWriter.finish(context, session.target);
+                    if (!PublicStorageWriter.finish(context, session.target)) {
+                        throw new java.io.IOException("download finalize failed");
+                    }
                     session.completed = true;
                     sessions.remove(token);
                     session.writer.shutdown();
@@ -299,7 +302,12 @@ public class BlobDownloadBridge {
     }
 
     private void postCompleteNotification(Session session) {
-        Intent intent = new Intent(context, DownloadHistoryActivity.class);
+        Intent intent = new Intent(context, DownloadOpenActivity.class);
+        intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, session.notificationId);
+        intent.putExtra(DownloadOpenActivity.EXTRA_DOWNLOAD_ID, session.downloadId);
+        intent.putExtra(DownloadOpenActivity.EXTRA_LOCAL_URI, session.target == null ? null : session.target.localUri);
+        intent.putExtra(DownloadOpenActivity.EXTRA_FILE_PATH, session.target == null ? null : session.target.displayPath);
+        intent.putExtra(DownloadOpenActivity.EXTRA_FILE_NAME, session.fileName);
         PendingIntent pendingIntent = PendingIntent.getActivity(context, session.notificationId, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
@@ -307,7 +315,7 @@ public class BlobDownloadBridge {
                 .setContentTitle(session.fileName)
                 .setContentText("ダウンロード完了")
                 .setOngoing(false)
-                .setAutoCancel(true)
+                .setAutoCancel(false)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);
         showNotification(session.notificationId, builder);
