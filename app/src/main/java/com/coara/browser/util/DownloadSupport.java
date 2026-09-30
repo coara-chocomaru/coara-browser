@@ -529,7 +529,7 @@ public final class DownloadSupport {
         request.setTitle(fileName);
         request.setDescription(isBlank(description) ? "Downloading file..." : description);
         request.allowScanningByMediaScanner();
-        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
         request.setAllowedOverMetered(true);
         request.setAllowedOverRoaming(true);
         request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);

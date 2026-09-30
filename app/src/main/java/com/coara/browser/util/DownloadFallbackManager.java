@@ -812,7 +812,7 @@ public final class DownloadFallbackManager {
         }
     }
 
-    private static void postCompleteNotification(Context context, long downloadId, String fileName) {
+    public static void postCompleteNotification(Context context, long downloadId, String fileName) {
         try {
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
