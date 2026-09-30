@@ -10,6 +10,7 @@ public class DownloadItem {
     public String localUri;
     public String downloadUrl;
     public boolean isPaused;
+    public boolean manual;
     public String filePath;
 
     public DownloadItem(long downloadId, String title, String description, int status, long downloadedSize, long totalSize, String localUri, String downloadUrl) {
