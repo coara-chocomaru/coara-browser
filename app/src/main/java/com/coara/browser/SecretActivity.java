@@ -1427,6 +1427,15 @@ public class SecretActivity extends AppCompatActivity {
             return -1;
         }
         WebView current = getCurrentWebView();
+        if (DownloadSupport.shouldPreferDirectFallback(url, contentDisposition, mimeType)) {
+            long fallbackId = DownloadFallbackManager.startImmediateFallback(this, current, url, userAgent,
+                    contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
+                    basicAuthEnabled, "Downloading file...");
+            if (fallbackId > 0) {
+                Toast.makeText(this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                return fallbackId;
+            }
+        }
         try {
             long downloadId = DownloadSupport.enqueue(SecretActivity.this, current, url, userAgent, contentDisposition, mimeType,
                     contentLength, basicAuthEnabled, "Downloading file...");
