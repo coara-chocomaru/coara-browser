@@ -842,8 +842,8 @@ public class SecretActivity extends AppCompatActivity {
     }
     CookieManager cookieManager = CookieManager.getInstance();
     cookieManager.setAcceptCookie(false);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            settings.setOffscreenPreRaster(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            settings.setOffscreenPreRaster(false);
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(settings, darkModeEnabled ?

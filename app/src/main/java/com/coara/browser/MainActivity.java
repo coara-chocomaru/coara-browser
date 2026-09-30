@@ -2646,6 +2646,12 @@ public class MainActivity extends AppCompatActivity {
         if (imgItem != null) imgItem.setChecked(imgBlockEnabled);
         MenuItem basicAuthItem = menu.findItem(R.id.action_basic_auth);
         if (basicAuthItem != null) basicAuthItem.setChecked(basicAuthEnabled);
+        MenuItem offscreenPreRasterItem = menu.findItem(R.id.action_offscreen_pre_raster);
+        if (offscreenPreRasterItem != null) {
+            offscreenPreRasterItem.setChecked(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && BrowserVisualSettings.isOffscreenPreRasterEnabled(pref));
+            offscreenPreRasterItem.setEnabled(Build.VERSION.SDK_INT >= Build.VERSION_CODES.M);
+        }
         return super.onPrepareOptionsMenu(menu);
     }
     @Override
@@ -2662,6 +2668,17 @@ public class MainActivity extends AppCompatActivity {
             return true;
         } else if (id == R.id.action_background_settings) {
             showBackgroundSettingsDialog();
+            return true;
+        } else if (id == R.id.action_offscreen_pre_raster) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                boolean enabled = !BrowserVisualSettings.isOffscreenPreRasterEnabled(pref);
+                BrowserVisualSettings.setOffscreenPreRasterEnabled(pref, enabled);
+                applyBrowserVisualSettingsToAllWebViews();
+                item.setChecked(enabled);
+                Toast.makeText(this, "先読みレンダリング " + (enabled ? "ON" : "OFF"), Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Android 6.0以上で利用できます", Toast.LENGTH_SHORT).show();
+            }
             return true;
         } else if (id == R.id.action_dark_mode) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
