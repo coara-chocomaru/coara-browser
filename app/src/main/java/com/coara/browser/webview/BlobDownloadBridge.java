@@ -1,261 +1,230 @@
 package com.coara.browser.webview;
 
-import android.content.ContentResolver;
-import android.content.ContentValues;
+import android.app.DownloadManager;
+import android.app.PendingIntent;
 import android.content.Context;
-import android.net.Uri;
-import android.os.Build;
-import android.os.Environment;
-import android.provider.MediaStore;
+import android.content.Intent;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.widget.Toast;
 
-import com.coara.browser.util.DownloadRequestSupport;
+import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
+import com.coara.browser.BrowserApplication;
+import com.coara.browser.DownloadHistoryManager;
+import com.coara.browser.DownloadHistoryActivity;
+import com.coara.browser.util.PublicStorageWriter;
+import com.coara.browser.util.UiThread;
+
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class BlobDownloadBridge {
+
+    private static final AtomicInteger NOTIFICATION_ID_SEQ = new AtomicInteger(20000);
+    private static final long NOTIFY_INTERVAL_MS = 400;
+
     private final Context context;
-    private final Runnable completionCallback;
-    private final Object lock = new Object();
-    private OutputStream outputStream;
-    private File legacyFile;
-    private Uri mediaUri;
-    private String fileName;
-    private String mimeType;
-    private long bytesWritten;
-    private boolean failed;
+    private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
     public BlobDownloadBridge(Context context) {
-        this(context, null);
-    }
-
-    public BlobDownloadBridge(Context context, Runnable completionCallback) {
         this.context = context.getApplicationContext();
-        this.completionCallback = completionCallback;
+    }
+
+    private static final class Session {
+        volatile PublicStorageWriter.Target target;
+        volatile long downloadId;
+        volatile String fileName;
+        volatile long totalSize;
+        volatile long bytesWritten;
+        volatile int notificationId;
+        volatile long lastNotifyTime;
+        volatile boolean failed;
     }
 
     @JavascriptInterface
-    public void onBlobDownloadStarted(String requestedFileName, String requestedMimeType) {
-        synchronized (lock) {
-            closeAndDeleteCurrent();
-            failed = false;
+    public void onBlobStart(String token, String fileName, String mimeType, String totalSizeStr) {
+        UiThread.io().execute(() -> {
+            Session session = new Session();
             try {
-                fileName = DownloadRequestSupport.sanitizeFileName(
-                        requestedFileName == null || requestedFileName.trim().isEmpty()
-                                ? DownloadRequestSupport.generateTimestampFileName("blob_download_", requestedMimeType)
-                                : requestedFileName);
-                mimeType = DownloadRequestSupport.normalizeMimeType(requestedMimeType, fileName);
-                if (mimeType == null || mimeType.isEmpty()) {
-                    mimeType = "application/octet-stream";
+                long totalSize = 0;
+                try {
+                    totalSize = Long.parseLong(totalSizeStr);
+                } catch (NumberFormatException ignored) {
                 }
-                fileName = ensureUniqueExtension(fileName, mimeType);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    ContentResolver resolver = context.getContentResolver();
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.Downloads.DISPLAY_NAME, fileName);
-                    values.put(MediaStore.Downloads.MIME_TYPE, mimeType);
-                    values.put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
-                    values.put(MediaStore.Downloads.IS_PENDING, 1);
-                    mediaUri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
-                    if (mediaUri == null) {
-                        throw new IllegalStateException("Downloads storage unavailable");
-                    }
-                    outputStream = resolver.openOutputStream(mediaUri, "w");
-                } else {
-                    if (androidx.core.content.ContextCompat.checkSelfPermission(
-                            context, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                            != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                        throw new SecurityException("Storage permission is not granted");
-                    }
-                    File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!dir.exists() && !dir.mkdirs()) {
-                        throw new IllegalStateException("Downloads directory unavailable");
-                    }
-                    legacyFile = uniqueFile(dir, fileName);
-                    fileName = legacyFile.getName();
-                    outputStream = new FileOutputStream(legacyFile, false);
-                }
-                if (outputStream == null) {
-                    throw new IllegalStateException("Download output unavailable");
-                }
-                bytesWritten = 0L;
-                failed = false;
+                String effectiveMime = (mimeType != null && !mimeType.isEmpty())
+                        ? mimeType : "application/octet-stream";
+                session.target = PublicStorageWriter.openDownloadsTarget(context, fileName, effectiveMime);
+                session.downloadId = System.currentTimeMillis();
+                session.fileName = fileName;
+                session.totalSize = totalSize;
+                session.notificationId = NOTIFICATION_ID_SEQ.incrementAndGet();
+                sessions.put(token, session);
+                DownloadHistoryManager.updateManualDownload(context, session.downloadId, fileName,
+                        session.target.displayPath, DownloadManager.STATUS_RUNNING, 0, totalSize);
+                postProgressNotification(session);
             } catch (Exception e) {
-                failed = true;
-                closeAndDeleteCurrent();
-                showToast("blob ダウンロードエラー: " + safeMessage(e));
-                notifyCompletion();
+                postToast("ダウンロード開始に失敗しました");
             }
-        }
+        });
     }
 
     @JavascriptInterface
-    public void onBlobDownloadChunk(String base64Data) {
-        synchronized (lock) {
-            if (failed || outputStream == null || base64Data == null || base64Data.isEmpty()) {
-                return;
-            }
-            try {
-                byte[] data = Base64.decode(base64Data, Base64.DEFAULT);
-                outputStream.write(data);
-                bytesWritten += data.length;
-            } catch (Exception e) {
-                failed = true;
-                closeAndDeleteCurrent();
-                showToast("blob ダウンロードエラー: " + safeMessage(e));
-                notifyCompletion();
-            }
+    public void onBlobChunk(String token, String base64Chunk) {
+        Session session = sessions.get(token);
+        if (session == null || session.failed) {
+            return;
         }
+        UiThread.io().execute(() -> {
+            synchronized (session) {
+                if (session.failed || session.target == null) {
+                    return;
+                }
+                try {
+                    byte[] data = Base64.decode(base64Chunk, Base64.DEFAULT);
+                    session.target.outputStream.write(data);
+                    session.bytesWritten += data.length;
+                    long now = System.currentTimeMillis();
+                    if (now - session.lastNotifyTime > NOTIFY_INTERVAL_MS) {
+                        session.lastNotifyTime = now;
+                        postProgressNotification(session);
+                        DownloadHistoryManager.updateManualDownload(context, session.downloadId, session.fileName,
+                                session.target.displayPath, DownloadManager.STATUS_RUNNING,
+                                session.bytesWritten, session.totalSize);
+                    }
+                } catch (Exception e) {
+                    failSession(token, session);
+                }
+            }
+        });
     }
 
     @JavascriptInterface
-    public void onBlobDownloadFinished() {
-        synchronized (lock) {
-            if (failed) {
-                return;
-            }
-            try {
-                if (outputStream == null) {
-                    throw new IllegalStateException("Download was not started");
-                }
-                outputStream.flush();
-                outputStream.close();
-                outputStream = null;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaUri != null) {
-                    ContentValues values = new ContentValues();
-                    values.put(MediaStore.Downloads.IS_PENDING, 0);
-                    context.getContentResolver().update(mediaUri, values, null, null);
-                    showToast("blob ダウンロード完了: " + mediaUri);
-                } else if (legacyFile != null) {
-                    showToast("blob ダウンロード完了: " + legacyFile.getAbsolutePath());
-                } else {
-                    throw new IllegalStateException("Download output unavailable");
-                }
-                mediaUri = null;
-                legacyFile = null;
-                fileName = null;
-                mimeType = null;
-                bytesWritten = 0L;
-                notifyCompletion();
-            } catch (Exception e) {
-                failed = true;
-                closeAndDeleteCurrent();
-                showToast("blob ダウンロードエラー: " + safeMessage(e));
-                notifyCompletion();
-            }
+    public void onBlobComplete(String token) {
+        Session session = sessions.remove(token);
+        if (session == null) {
+            return;
         }
+        UiThread.io().execute(() -> {
+            synchronized (session) {
+                if (session.failed) {
+                    return;
+                }
+                try {
+                    PublicStorageWriter.finish(context, session.target);
+                    DownloadHistoryManager.updateManualDownload(context, session.downloadId, session.fileName,
+                            session.target.displayPath, DownloadManager.STATUS_SUCCESSFUL,
+                            session.bytesWritten, session.bytesWritten);
+                    postCompleteNotification(session);
+                } catch (Exception e) {
+                    postToast("ダウンロードの完了処理に失敗しました");
+                }
+            }
+        });
     }
 
     @JavascriptInterface
     public void onBlobDownloadError(String errorMessage) {
-        synchronized (lock) {
-            failed = true;
-            closeAndDeleteCurrent();
-            showToast("blob ダウンロードエラー: " + (errorMessage == null ? "unknown error" : errorMessage));
-            notifyCompletion();
-        }
+        postToast("blob ダウンロードエラー: " + errorMessage);
     }
 
-
-    private void notifyCompletion() {
-        if (completionCallback == null) {
+    @JavascriptInterface
+    public void onBlobError(String token, String message) {
+        Session session = sessions.remove(token);
+        if (session == null) {
+            postToast("ダウンロードに失敗しました");
             return;
         }
+        UiThread.io().execute(() -> failSession(token, session));
+    }
+
+    private void failSession(String token, Session session) {
+        synchronized (session) {
+            if (session.failed) {
+                return;
+            }
+            session.failed = true;
+            sessions.remove(token);
+            PublicStorageWriter.abort(context, session.target);
+            DownloadHistoryManager.updateManualDownload(context, session.downloadId, session.fileName,
+                    session.target != null ? session.target.displayPath : "", DownloadManager.STATUS_FAILED,
+                    session.bytesWritten, session.totalSize);
+            postFailedNotification(session);
+        }
+        postToast("ダウンロードに失敗しました");
+    }
+
+    private void postToast(String message) {
+        UiThread.post(() -> Toast.makeText(context, message, Toast.LENGTH_LONG).show());
+    }
+
+    private void postProgressNotification(Session session) {
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(session.fileName)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW);
+        if (session.totalSize > 0) {
+            int percent = (int) Math.min(100, (session.bytesWritten * 100) / session.totalSize);
+            builder.setProgress(100, percent, false);
+            builder.setContentText(percent + "%");
+        } else {
+            builder.setProgress(0, 0, true);
+            builder.setContentText(formatBytes(session.bytesWritten));
+        }
+        showNotification(session.notificationId, builder);
+    }
+
+    private void postCompleteNotification(Session session) {
+        Intent intent = new Intent(context, DownloadHistoryActivity.class);
+        PendingIntent pendingIntent = PendingIntent.getActivity(context, session.notificationId, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(session.fileName)
+                .setContentText("ダウンロード完了")
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+        showNotification(session.notificationId, builder);
+    }
+
+    private void postFailedNotification(Session session) {
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.stat_sys_warning)
+                .setContentTitle(session.fileName)
+                .setContentText("ダウンロード失敗")
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT);
+        showNotification(session.notificationId, builder);
+    }
+
+    private void showNotification(int id, NotificationCompat.Builder builder) {
         try {
-            completionCallback.run();
+            NotificationManagerCompat.from(context).notify(id, builder.build());
+        } catch (SecurityException ignored) {
         } catch (Exception ignored) {
         }
     }
 
-    private String ensureUniqueExtension(String value, String type) {
-        String extension = extensionForMime(type);
-        if (extension.isEmpty()) {
-            return value;
+    private String formatBytes(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
         }
-        int dot = value.lastIndexOf('.');
-        if (dot > 0 && dot < value.length() - 1) {
-            return value;
+        double kb = bytes / 1024.0;
+        if (kb < 1024) {
+            return String.format(java.util.Locale.getDefault(), "%.1f KB", kb);
         }
-        return value + extension;
-    }
-
-    private String extensionForMime(String type) {
-        if (type == null) return "";
-        String value = type.toLowerCase(java.util.Locale.ROOT);
-        if (value.contains("pdf")) return ".pdf";
-        if (value.contains("zip")) return ".zip";
-        if (value.contains("gzip") || value.contains("x-gzip")) return ".gz";
-        if (value.contains("rar")) return ".rar";
-        if (value.contains("7z")) return ".7z";
-        if (value.contains("jpeg")) return ".jpg";
-        if (value.contains("png")) return ".png";
-        if (value.contains("gif")) return ".gif";
-        if (value.contains("webp")) return ".webp";
-        if (value.contains("mp4")) return ".mp4";
-        if (value.contains("webm")) return ".webm";
-        if (value.contains("mpeg")) return ".mp3";
-        if (value.contains("plain")) return ".txt";
-        if (value.contains("json")) return ".json";
-        if (value.contains("html")) return ".html";
-        return "";
-    }
-
-    private File uniqueFile(File dir, String name) {
-        File target = new File(dir, name);
-        if (!target.exists()) {
-            return target;
+        double mb = kb / 1024.0;
+        if (mb < 1024) {
+            return String.format(java.util.Locale.getDefault(), "%.1f MB", mb);
         }
-        int dot = name.lastIndexOf('.');
-        String base = dot > 0 ? name.substring(0, dot) : name;
-        String ext = dot > 0 ? name.substring(dot) : "";
-        int index = 1;
-        while (true) {
-            File candidate = new File(dir, base + " (" + index + ")" + ext);
-            if (!candidate.exists()) {
-                return candidate;
-            }
-            index++;
-        }
-    }
-
-    private void closeAndDeleteCurrent() {
-        try {
-            if (outputStream != null) {
-                outputStream.close();
-            }
-        } catch (Exception ignored) {
-        }
-        outputStream = null;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && mediaUri != null) {
-            try {
-                context.getContentResolver().delete(mediaUri, null, null);
-            } catch (Exception ignored) {
-            }
-        }
-        mediaUri = null;
-        if (legacyFile != null) {
-            try {
-                legacyFile.delete();
-            } catch (Exception ignored) {
-            }
-        }
-        legacyFile = null;
-        fileName = null;
-        mimeType = null;
-        bytesWritten = 0L;
-    }
-
-    private void showToast(String message) {
-        new android.os.Handler(android.os.Looper.getMainLooper()).post(() ->
-                Toast.makeText(context, message, Toast.LENGTH_LONG).show());
-    }
-
-    private String safeMessage(Exception e) {
-        String message = e.getMessage();
-        return message == null || message.isEmpty() ? e.getClass().getSimpleName() : message;
+        double gb = mb / 1024.0;
+        return String.format(java.util.Locale.getDefault(), "%.2f GB", gb);
     }
 }
