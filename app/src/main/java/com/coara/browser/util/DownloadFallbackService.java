@@ -83,7 +83,7 @@ public class DownloadFallbackService extends Service {
             executor.shutdownNow();
         }
         activeGenerations.clear();
-        stopForeground(false);
+        stopForeground(true);
         super.onDestroy();
     }
 

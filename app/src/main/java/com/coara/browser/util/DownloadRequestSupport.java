@@ -79,7 +79,7 @@ public final class DownloadRequestSupport {
         if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) {
             request.allowScanningByMediaScanner();
         }
-        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE);
         request.setAllowedOverMetered(true);
         request.setAllowedOverRoaming(true);
         request.setDestinationInExternalPublicDir(

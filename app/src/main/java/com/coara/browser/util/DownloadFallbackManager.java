@@ -747,14 +747,19 @@ public final class DownloadFallbackManager {
         return 30000 + (hash % 1000000);
     }
 
+    public static int completionNotificationId(long downloadId) {
+        int hash = Long.valueOf(downloadId).hashCode() & 0x3fffffff;
+        return 1500000 + (hash % 800000);
+    }
+
     private static PendingIntent fileOpenPendingIntent(Context context, long downloadId) {
         try {
             Intent intent = new Intent(context, DownloadOpenActivity.class);
-            intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, notificationId(downloadId));
+            intent.putExtra(DownloadOpenActivity.EXTRA_NOTIFICATION_ID, completionNotificationId(downloadId));
             intent.putExtra(DownloadOpenActivity.EXTRA_DOWNLOAD_ID, downloadId);
             int flags = PendingIntent.FLAG_UPDATE_CURRENT;
             if (android.os.Build.VERSION.SDK_INT >= 23) flags |= PendingIntent.FLAG_IMMUTABLE;
-            return PendingIntent.getActivity(context, notificationId(downloadId), intent, flags);
+            return PendingIntent.getActivity(context, completionNotificationId(downloadId), intent, flags);
         } catch (Exception ignored) {
             return null;
         }
@@ -817,14 +822,15 @@ public final class DownloadFallbackManager {
             NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_COMPLETE_CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.stat_sys_download_done)
                     .setContentTitle(DownloadSupport.isBlank(fileName) ? "ダウンロード" : fileName)
-                    .setContentText("ダウンロード完了")
+                    .setContentText("ダウンロードを完了しました")
                     .setOngoing(true)
                     .setAutoCancel(false)
                     .setOnlyAlertOnce(true)
+                    .setCategory(NotificationCompat.CATEGORY_STATUS)
                     .setPriority(NotificationCompat.PRIORITY_DEFAULT);
             PendingIntent pendingIntent = fileOpenPendingIntent(context, downloadId);
             if (pendingIntent != null) builder.setContentIntent(pendingIntent);
-            NotificationManagerCompat.from(context).notify(notificationId(downloadId), builder.build());
+            NotificationManagerCompat.from(context).notify(completionNotificationId(downloadId), builder.build());
         } catch (Exception ignored) {
         }
     }
