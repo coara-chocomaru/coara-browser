@@ -310,12 +310,13 @@ public class BlobDownloadBridge {
         intent.putExtra(DownloadOpenActivity.EXTRA_FILE_NAME, session.fileName);
         PendingIntent pendingIntent = PendingIntent.getActivity(context, session.notificationId, intent,
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, BrowserApplication.DOWNLOAD_COMPLETE_CHANNEL_ID)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle(session.fileName)
                 .setContentText("ダウンロード完了")
-                .setOngoing(false)
+                .setOngoing(true)
                 .setAutoCancel(false)
+                .setOnlyAlertOnce(true)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT);
         showNotification(session.notificationId, builder);
