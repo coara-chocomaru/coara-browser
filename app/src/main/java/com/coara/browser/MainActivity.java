@@ -98,6 +98,7 @@ import com.coara.browser.util.ExternalDownloadTabTracker;
 import com.coara.browser.util.DownloadSupport;
 import com.coara.browser.util.DownloadFallbackManager;
 import com.coara.browser.util.UiThread;
+import com.coara.browser.util.BrowserVisualSettings;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -156,6 +157,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int MAX_HISTORY_SIZE = BrowserConstants.MAX_HISTORY_SIZE;
     private static final String SENTINEL_FILENAME = BrowserConstants.SENTINEL_FILENAME;
     public static final String EXTRA_CLEAR_HISTORY = BrowserConstants.EXTRA_CLEAR_HISTORY;
+    private static final long MAX_BACKGROUND_IMAGE_BYTES = 64L * 1024L * 1024L;
 
     private static Method sSetSaveFormDataMethod;
     private static Method sSetDatabaseEnabledMethod;
@@ -179,7 +181,11 @@ public class MainActivity extends AppCompatActivity {
     private FrameLayout webViewContainer;
     private TextView tabCountTextView;
     private ImageView copyButton;
+    private ImageView backgroundImageView;
+    private Bitmap backgroundBitmap;
+    private volatile int backgroundLoadToken = 0;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
+    private ActivityResultLauncher<String> backgroundImageLauncher;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
@@ -343,6 +349,7 @@ public class MainActivity extends AppCompatActivity {
         swipeRefreshLayout.setColorSchemeResources(R.color.colorPrimary);
         swipeRefreshLayout.setProgressBackgroundColorSchemeResource(R.color.white);
         webViewContainer = findViewById(R.id.webViewContainer);
+        backgroundImageView = findViewById(R.id.backgroundImageView);
         tabCountTextView = findViewById(R.id.tabCountTextView);
         tabCountTextView.setOnClickListener(v -> showTabsDialog());
 
@@ -462,6 +469,13 @@ public class MainActivity extends AppCompatActivity {
                     }
                     filePathCallback = null;
                 });
+        backgroundImageLauncher = registerForActivityResult(
+                new ActivityResultContracts.GetContent(),
+                uri -> {
+                    if (uri != null) {
+                        saveSelectedBackgroundImage(uri);
+                    }
+                });
 
         urlEditText.setOnEditorActionListener((textView, actionId, keyEvent) -> {
             if (actionId == EditorInfo.IME_ACTION_GO ||
@@ -475,6 +489,7 @@ public class MainActivity extends AppCompatActivity {
 
         btnNewTab.setOnClickListener(v -> createNewTab());
 
+        loadBackgroundImage();
         handleIntent(getIntent());
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
@@ -579,6 +594,9 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
         resumeAllWebViewTimers();
         resumeCurrentWebView();
+        if (backgroundImageView != null && backgroundBitmap == null && BrowserVisualSettings.getBackgroundPath(pref) != null) {
+            loadBackgroundImage();
+        }
     }
 
     @Override
@@ -601,6 +619,7 @@ public class MainActivity extends AppCompatActivity {
         super.onDestroy();
         pendingSpaHistoryTasks.clear();
         releaseAllWebViews();
+        clearBackgroundBitmap();
         backgroundExecutor.shutdown();
     }
 
@@ -727,6 +746,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
             clearTabSnapshots();
+            clearBackgroundBitmap();
         }
     }
 
@@ -1056,6 +1076,8 @@ public class MainActivity extends AppCompatActivity {
                 "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/83.0.4103.106 Safari/537.36");
         }
 
+        applyBrowserVisualSettings(webView);
+
         BlobDownloadBridge blobDownloadBridge = new BlobDownloadBridge(this);
         blobDownloadBridges.put(webView, blobDownloadBridge);
         webView.addJavascriptInterface(blobDownloadBridge, "BlobDownloader");
@@ -1281,6 +1303,7 @@ public class MainActivity extends AppCompatActivity {
                 installDownloadHintScript(view);
             super.onPageFinished(view, url);
                   applyCombinedOptimizations(view);
+                  applyBrowserVisualSettings(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
              UiThread.postDelayed(() -> injectLazyLoading(view), 200);
             }
@@ -1522,6 +1545,346 @@ public class MainActivity extends AppCompatActivity {
                 replacement.onPause();
             }
         }
+    }
+
+
+    private void showTextColorDialog() {
+        final String[] labels = BrowserVisualSettings.getTextColorLabels();
+        final String[] values = BrowserVisualSettings.getTextColorValues();
+        final int[] selected = {BrowserVisualSettings.getTextColorIndex(pref)};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("テキストカラー選択")
+                .setSingleChoiceItems(labels, selected[0], (dialog, which) -> selected[0] = which)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    BrowserVisualSettings.setTextColor(pref, values[selected[0]]);
+                    applyBrowserVisualSettingsToAllWebViews();
+                    Toast.makeText(this, "テキストカラーを保存しました", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("キャンセル", null)
+                .show();
+    }
+
+    private void showFontFamilyDialog() {
+        final String[] labels = BrowserVisualSettings.getFontLabels();
+        final String[] values = BrowserVisualSettings.getFontValues();
+        final int[] selected = {BrowserVisualSettings.getFontIndex(pref)};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("フォント切り替え")
+                .setSingleChoiceItems(labels, selected[0], (dialog, which) -> selected[0] = which)
+                .setPositiveButton("保存", (dialog, which) -> {
+                    BrowserVisualSettings.setFontFamily(pref, values[selected[0]]);
+                    applyBrowserVisualSettingsToAllWebViews();
+                    Toast.makeText(this, "フォント設定を保存しました", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("キャンセル", null)
+                .show();
+    }
+
+    private void showBackgroundSettingsDialog() {
+        String transparency = BrowserVisualSettings.isTransparencyEnabled(pref) ? "ON" : "OFF";
+        String path = BrowserVisualSettings.getBackgroundPath(pref);
+        String imageState = path == null ? "未設定" : "設定済み";
+        String[] items = new String[]{"背景透過設定  [" + transparency + "]", "背景画像設定  [" + imageState + "]", "背景画像を削除"};
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("背景画像設定")
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        showBackgroundTransparencyDialog();
+                    } else if (which == 1) {
+                        if (backgroundImageLauncher != null) {
+                            backgroundImageLauncher.launch("image/*");
+                        }
+                    } else {
+                        clearBackgroundImage();
+                    }
+                })
+                .setNegativeButton("閉じる", null)
+                .show();
+    }
+
+    private void showBackgroundTransparencyDialog() {
+        boolean enabled = BrowserVisualSettings.isTransparencyEnabled(pref);
+        new MaterialAlertDialogBuilder(this)
+                .setTitle("背景透過設定")
+                .setSingleChoiceItems(new String[]{"OFF", "ON"}, enabled ? 1 : 0, (dialog, which) -> {
+                    boolean next = which == 1;
+                    BrowserVisualSettings.setTransparencyEnabled(pref, next);
+                    applyBrowserVisualSettingsToAllWebViews();
+                    updateBackgroundImageVisibility();
+                    dialog.dismiss();
+                })
+                .setNegativeButton("キャンセル", null)
+                .show();
+    }
+
+    private void applyBrowserVisualSettings(WebView target) {
+        if (target == null || pref == null) {
+            return;
+        }
+        BrowserVisualSettings.applyToWebView(target, pref);
+    }
+
+    private void applyBrowserVisualSettingsToAllWebViews() {
+        boolean hasCustomCss = BrowserVisualSettings.hasCustomVisualCss(pref);
+        synchronized (webViews) {
+            for (WebView target : new ArrayList<>(webViews)) {
+                applyBrowserVisualSettings(target);
+                if (!hasCustomCss) {
+                    BrowserVisualSettings.clearInjectedStyle(target);
+                }
+            }
+        }
+        updateBackgroundImageVisibility();
+    }
+
+    private void updateBackgroundImageVisibility() {
+        if (backgroundImageView == null || pref == null) {
+            return;
+        }
+        String path = BrowserVisualSettings.getBackgroundPath(pref);
+        boolean visible = BrowserVisualSettings.isTransparencyEnabled(pref)
+                && path != null
+                && new File(path).exists()
+                && backgroundBitmap != null
+                && !backgroundBitmap.isRecycled();
+        backgroundImageView.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    private void saveSelectedBackgroundImage(Uri uri) {
+        if (uri == null || backgroundImageView == null) {
+            return;
+        }
+        final File target = new File(getFilesDir(), "background_image");
+        final File temporary = new File(getFilesDir(), "background_image.tmp");
+        final File backup = new File(getFilesDir(), "background_image.bak");
+        final int operationToken = ++backgroundLoadToken;
+
+        backgroundExecutor.execute(() -> {
+            boolean hadOld = target.exists();
+            try {
+                InputStream input = getContentResolver().openInputStream(uri);
+                if (input == null) {
+                    throw new IOException("background stream unavailable");
+                }
+                try (InputStream in = input;
+                     FileOutputStream out = new FileOutputStream(temporary, false)) {
+                    byte[] buffer = new byte[32768];
+                    long total = 0L;
+                    int read;
+                    while ((read = in.read(buffer)) != -1) {
+                        if (read <= 0) {
+                            continue;
+                        }
+                        total += read;
+                        if (total > MAX_BACKGROUND_IMAGE_BYTES) {
+                            throw new IOException("background image too large");
+                        }
+                        out.write(buffer, 0, read);
+                    }
+                    out.flush();
+                    try {
+                        out.getFD().sync();
+                    } catch (Exception ignored) {
+                    }
+                }
+
+                if (backup.exists()) {
+                    backup.delete();
+                }
+                if (hadOld && !target.renameTo(backup)) {
+                    temporary.delete();
+                    throw new IOException("background backup failed");
+                }
+                if (!temporary.renameTo(target)) {
+                    temporary.delete();
+                    if (hadOld && backup.exists()) {
+                        backup.renameTo(target);
+                    }
+                    throw new IOException("background replace failed");
+                }
+
+                int targetWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+                int targetHeight = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+                Bitmap decoded = decodeBackgroundBitmap(target, targetWidth, targetHeight);
+                if (decoded == null) {
+                    target.delete();
+                    if (hadOld && backup.exists()) {
+                        backup.renameTo(target);
+                    }
+                    throw new IOException("background decode failed");
+                }
+
+                runOnUiThread(() -> {
+                    if (operationToken != backgroundLoadToken || isFinishing() || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) {
+                        if (!decoded.isRecycled()) {
+                            decoded.recycle();
+                        }
+                        return;
+                    }
+                    BrowserVisualSettings.setBackgroundPath(pref, target.getAbsolutePath());
+                    clearBackgroundBitmap();
+                    backgroundBitmap = decoded;
+                    backgroundImageView.setImageBitmap(decoded);
+                    backgroundImageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    updateBackgroundImageVisibility();
+                    if (backup.exists()) {
+                        backup.delete();
+                    }
+                    Toast.makeText(this, "背景画像を保存しました", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                temporary.delete();
+                if (target.exists() && !hadOld) {
+                    target.delete();
+                }
+                if (hadOld && backup.exists() && !target.exists()) {
+                    backup.renameTo(target);
+                }
+                runOnUiThread(() -> {
+                    if (operationToken == backgroundLoadToken && !isFinishing()
+                            && (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || !isDestroyed())) {
+                        Toast.makeText(this, "背景画像の保存に失敗しました", Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
+    }
+
+    private void loadBackgroundImage() {
+        if (backgroundImageView == null || pref == null) {
+            return;
+        }
+        final String path = BrowserVisualSettings.getBackgroundPath(pref);
+        final int operationToken = ++backgroundLoadToken;
+        if (path == null) {
+            clearBackgroundBitmap();
+            updateBackgroundImageVisibility();
+            return;
+        }
+
+        File file = new File(path);
+        if (!file.exists() || !file.isFile()) {
+            File backup = new File(getFilesDir(), "background_image.bak");
+            if (backup.exists() && backup.isFile() && backup.renameTo(file)) {
+                file = new File(path);
+            }
+        }
+        if (!file.exists() || !file.isFile()) {
+            BrowserVisualSettings.setBackgroundPath(pref, null);
+            BrowserVisualSettings.setTransparencyEnabled(pref, false);
+            clearBackgroundBitmap();
+            applyBrowserVisualSettingsToAllWebViews();
+            updateBackgroundImageVisibility();
+            return;
+        }
+
+        int targetWidth = Math.max(1, backgroundImageView.getWidth());
+        int targetHeight = Math.max(1, backgroundImageView.getHeight());
+        if (targetWidth <= 1) {
+            targetWidth = Math.max(1, getResources().getDisplayMetrics().widthPixels);
+        }
+        if (targetHeight <= 1) {
+            targetHeight = Math.max(1, getResources().getDisplayMetrics().heightPixels);
+        }
+
+        final File resolvedFile = file;
+        final int finalTargetWidth = targetWidth;
+        final int finalTargetHeight = targetHeight;
+        backgroundExecutor.execute(() -> {
+            Bitmap decoded = null;
+            try {
+                decoded = decodeBackgroundBitmap(resolvedFile, finalTargetWidth, finalTargetHeight);
+                if (decoded == null) {
+                    throw new IOException("background decode failed");
+                }
+                Bitmap result = decoded;
+                runOnUiThread(() -> {
+                    if (operationToken != backgroundLoadToken || isFinishing()
+                            || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1 && isDestroyed())) {
+                        if (!result.isRecycled()) {
+                            result.recycle();
+                        }
+                        return;
+                    }
+                    clearBackgroundBitmap();
+                    backgroundBitmap = result;
+                    backgroundImageView.setImageBitmap(result);
+                    backgroundImageView.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    updateBackgroundImageVisibility();
+                });
+            } catch (Exception e) {
+                if (decoded != null && !decoded.isRecycled()) {
+                    decoded.recycle();
+                }
+                runOnUiThread(() -> {
+                    if (operationToken == backgroundLoadToken && !isFinishing()
+                            && (Build.VERSION.SDK_INT < Build.VERSION_CODES.JELLY_BEAN_MR1 || !isDestroyed())) {
+                        updateBackgroundImageVisibility();
+                    }
+                });
+            }
+        });
+    }
+
+    private Bitmap decodeBackgroundBitmap(File file, int targetWidth, int targetHeight) {
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+                return null;
+            }
+
+            int sample = 1;
+            while ((bounds.outWidth / sample) > targetWidth * 2
+                    || (bounds.outHeight / sample) > targetHeight * 2) {
+                sample <<= 1;
+                if (sample >= 512) {
+                    break;
+                }
+            }
+
+            BitmapFactory.Options options = new BitmapFactory.Options();
+            options.inSampleSize = Math.max(1, sample);
+            options.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
+                options.inPurgeable = true;
+                options.inInputShareable = true;
+            }
+            return BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void clearBackgroundImage() {
+        ++backgroundLoadToken;
+        BrowserVisualSettings.setBackgroundPath(pref, null);
+        BrowserVisualSettings.setTransparencyEnabled(pref, false);
+        File target = new File(getFilesDir(), "background_image");
+        File temporary = new File(getFilesDir(), "background_image.tmp");
+        File backup = new File(getFilesDir(), "background_image.bak");
+        target.delete();
+        temporary.delete();
+        backup.delete();
+        clearBackgroundBitmap();
+        applyBrowserVisualSettingsToAllWebViews();
+        updateBackgroundImageVisibility();
+        Toast.makeText(this, "背景画像を削除しました", Toast.LENGTH_SHORT).show();
+    }
+
+    private void clearBackgroundBitmap() {
+        ++backgroundLoadToken;
+        if (backgroundImageView != null) {
+            backgroundImageView.setImageDrawable(null);
+        }
+        if (backgroundBitmap != null && !backgroundBitmap.isRecycled()) {
+            try {
+                backgroundBitmap.recycle();
+            } catch (Exception ignored) {
+            }
+        }
+        backgroundBitmap = null;
     }
 
     private void showLaunchProtectionDialog() {
@@ -2048,6 +2411,7 @@ public class MainActivity extends AppCompatActivity {
             next.onResume();
         } catch (Exception ignored) {
         }
+        applyBrowserVisualSettings(next);
         urlEditText.setText(next.getUrl());
         updatePullToRefreshState(next, next.getUrl());
     }
@@ -2189,6 +2553,15 @@ public class MainActivity extends AppCompatActivity {
         int id = item.getItemId();
         if (id == R.id.action_tabs) {
             showTabsDialog();
+        } else if (id == R.id.action_text_color) {
+            showTextColorDialog();
+            return true;
+        } else if (id == R.id.action_font_family) {
+            showFontFamilyDialog();
+            return true;
+        } else if (id == R.id.action_background_settings) {
+            showBackgroundSettingsDialog();
+            return true;
         } else if (id == R.id.action_dark_mode) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 darkModeEnabled = !darkModeEnabled;
