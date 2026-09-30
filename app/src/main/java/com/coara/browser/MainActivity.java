@@ -1771,7 +1771,7 @@ public class MainActivity extends AppCompatActivity {
                     contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
                     basicAuthEnabled, "Downloading file...");
             if (fallbackId > 0) {
-                Toast.makeText(this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                Toast.makeText(this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
                 return fallbackId;
             }
         }
@@ -1792,7 +1792,7 @@ public class MainActivity extends AppCompatActivity {
                         contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
                         basicAuthEnabled, "Downloading file...");
                 if (fallbackId > 0) {
-                    Toast.makeText(MainActivity.this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
                     return fallbackId;
                 }
                 Toast.makeText(MainActivity.this, "ダウンロード機能を利用できません", Toast.LENGTH_LONG).show();
@@ -1802,7 +1802,7 @@ public class MainActivity extends AppCompatActivity {
                     contentDisposition, mimeType, contentLength, current != null ? current.getUrl() : null,
                     basicAuthEnabled, "Downloading file...");
             if (fallbackId > 0) {
-                Toast.makeText(MainActivity.this, "代替経路でダウンロードを開始しました", Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "ダウンロードを開始しました", Toast.LENGTH_LONG).show();
                 return fallbackId;
             }
             Toast.makeText(MainActivity.this, "ダウンロードに失敗しました", Toast.LENGTH_SHORT).show();
