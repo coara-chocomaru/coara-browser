@@ -1627,8 +1627,8 @@ public class MainActivity extends AppCompatActivity {
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         final SeekBar seekBar = new SeekBar(this);
-        seekBar.setMax(100);
-        seekBar.setProgress(initial);
+        seekBar.setMax(120);
+        seekBar.setProgress(Math.max(1, Math.min(120, initial <= 0 ? 1 : initial)));
         container.addView(seekBar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -1637,7 +1637,7 @@ public class MainActivity extends AppCompatActivity {
         input.setSingleLine(true);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
         input.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        input.setHint("0～100");
+        input.setHint("1～120（0=デフォルト）");
         input.setText(String.valueOf(initial));
         input.setSelectAllOnFocus(true);
         container.addView(input, new LinearLayout.LayoutParams(
@@ -1649,7 +1649,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (fromUser) {
-                    current[0] = Math.max(0, Math.min(100, progress));
+                    current[0] = Math.max(1, Math.min(120, progress));
                     valueText.setText(current[0] + "%");
                     input.setText(String.valueOf(current[0]));
                     input.setSelection(input.length());
@@ -1672,7 +1672,7 @@ public class MainActivity extends AppCompatActivity {
 
         new MaterialAlertDialogBuilder(this)
                 .setTitle("背景透過率")
-                .setMessage("0%は現在の基本動作、100%はページ背景を最大限透過します。")
+                .setMessage("1～120%で適用範囲を細かく調整できます。100%を超える値ではページ内の背景要素まで段階的に広げます。0を入力するとデフォルトに戻します。")
                 .setView(container)
                 .setPositiveButton("保存", (dialog, which) -> {
                     int value = parsePercent(input.getText() == null ? null : input.getText().toString(), current[0]);
@@ -1689,12 +1689,14 @@ public class MainActivity extends AppCompatActivity {
 
     private int parsePercent(String text, int fallback) {
         try {
-            if (text == null) return Math.max(0, Math.min(100, fallback));
+            if (text == null) return Math.max(0, Math.min(120, fallback));
             String trimmed = text.trim();
-            if (trimmed.isEmpty()) return Math.max(0, Math.min(100, fallback));
-            return Math.max(0, Math.min(100, Integer.parseInt(trimmed)));
+            if (trimmed.isEmpty()) return Math.max(0, Math.min(120, fallback));
+            int value = Integer.parseInt(trimmed);
+            if (value <= 0) return 0;
+            return Math.max(1, Math.min(120, value));
         } catch (Exception ignored) {
-            return Math.max(0, Math.min(100, fallback));
+            return Math.max(0, Math.min(120, fallback));
         }
     }
 
