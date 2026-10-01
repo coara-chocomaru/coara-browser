@@ -58,33 +58,55 @@ public final class WebViewOptimizationUtils {
         }
     }
 
-    public static void applyCombinedOptimizations(WebView webView) {
-        String js = "javascript:(function(){"
-                + "try{if(window.__coaraCombinedOptimized)return;window.__coaraCombinedOptimized=true;}catch(e){}"
-                + "var run=function(){"
-                + "try{"
-                + "var fxd=document.querySelectorAll('[style*=\"position:fixed\"],[style*=\"position: fixed\"]');"
-                + "for(var j=0;j<fxd.length&&j<50;j++){"
-                + "var fs=fxd[j].style;"
-                + "if(!fs.transform)fs.transform='translateZ(0)';"
-                + "if(!fs.willChange)fs.willChange='transform';"
-                + "}"
-                + "var nodes=document.querySelectorAll('header,nav,footer,[class*=\"sticky\"],[class*=\"navbar\"],[class*=\"toolbar\"]');"
-                + "for(var k=0;k<nodes.length&&k<50;k++){"
-                + "try{"
-                + "var pos=window.getComputedStyle(nodes[k]).position;"
-                + "if(pos==='fixed'||pos==='sticky'){"
-                + "var ks=nodes[k].style;"
-                + "if(!ks.transform)ks.transform='translateZ(0)';"
-                + "if(!ks.willChange)ks.willChange='transform';"
-                + "}"
-                + "}catch(e){}"
-                + "}"
-                + "}catch(err){}"
-                + "};"
-                + "if(window.requestIdleCallback){requestIdleCallback(run,{timeout:250});}else{requestAnimationFrame(run);}"
-                + "})();";
-        webView.evaluateJavascript(js, null);
+    public static void installDownloadHints(WebView webView) {
+        if (webView == null) {
+            return;
+        }
+        String js = "javascript:(function(){" +
+                "try{" +
+                "if(window.__coaraDownloadHintInstalled)return;" +
+                "window.__coaraDownloadHintInstalled=true;" +
+                "var seen={};" +
+                "var remember=function(a,once){" +
+                "try{" +
+                "if(!a)return;" +
+                "var n=a.getAttribute('download')||a.getAttribute('data-filename')||a.getAttribute('data-file-name')||a.getAttribute('data-download-name')||a.getAttribute('data-name');" +
+                "var h=a.href||a.getAttribute('href')||a.getAttribute('data-url')||a.getAttribute('data-href')||a.getAttribute('data-download-url');" +
+                "if(n&&h&&window.BlobDownloader){" +
+                "if(once){var k=h+'|'+n;if(seen[k])return;seen[k]=1;}" +
+                "window.BlobDownloader.rememberDownloadHint(h,n);" +
+                "}" +
+                "}catch(e){}" +
+                "};" +
+                "var scan=function(){" +
+                "try{" +
+                "var list=document.querySelectorAll('a[download]');" +
+                "for(var i=0;i<list.length;i++)remember(list[i],true);" +
+                "}catch(e){}" +
+                "};" +
+                "var timer=0;" +
+                "var schedule=function(){" +
+                "if(timer)return;" +
+                "timer=setTimeout(function(){timer=0;scan();},300);" +
+                "};" +
+                "document.addEventListener('click',function(e){" +
+                "try{" +
+                "var a=e.target;" +
+                "var depth=0;" +
+                "while(a&&a.tagName!=='A'&&depth++<8)a=a.parentElement;" +
+                "remember(a,false);" +
+                "}catch(ex){}" +
+                "},true);" +
+                "scan();" +
+                "if(window.MutationObserver){" +
+                "new MutationObserver(schedule).observe(document.documentElement||document,{subtree:true,childList:true});" +
+                "}" +
+                "}catch(e){}" +
+                "})();";
+        try {
+            webView.evaluateJavascript(js, null);
+        } catch (Exception ignored) {
+        }
     }
 
     public static void injectSpaProbe(WebView webView) {

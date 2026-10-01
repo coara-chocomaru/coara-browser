@@ -41,6 +41,10 @@ public final class TabOverviewDialog {
         void createNewTab();
         void refreshTabCount();
         void dismissCurrentKeyboard();
+
+        default String getTabFallbackTitle(WebView webView) {
+            return null;
+        }
     }
 
     public static void show(@NonNull Activity activity, @NonNull Host host) {
@@ -305,6 +309,9 @@ public final class TabOverviewDialog {
             String title = webView.getTitle();
             if (title == null || title.trim().isEmpty()) {
                 title = webView.getUrl();
+            }
+            if (title == null || title.trim().isEmpty()) {
+                title = host.getTabFallbackTitle(webView);
             }
             if (title == null || title.trim().isEmpty()) {
                 return "新しいタブ";
