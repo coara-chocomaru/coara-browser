@@ -9,6 +9,7 @@ import android.webkit.WebView;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -32,6 +33,18 @@ public class exec extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new JSInterface(), "Android");
         webView.loadUrl("file:///android_asset/exec.html");
+    }
+
+    @Override
+    protected void onDestroy() {
+        Process process = currentProcess;
+        if (process != null && process.isAlive()) {
+            process.destroy();
+        }
+        if (timeoutExecutor != null) {
+            timeoutExecutor.shutdownNow();
+        }
+        super.onDestroy();
     }
 
     public class JSInterface {
@@ -64,20 +77,23 @@ public class exec extends Activity {
             currentProcess = Runtime.getRuntime().exec(command);
             StringBuilder outputBuilder = new StringBuilder();
 
+            final Process process = currentProcess;
             timeoutExecutor = Executors.newSingleThreadScheduledExecutor();
             timeoutExecutor.schedule(() -> {
-                if (currentProcess.isAlive()) {
-                    currentProcess.destroy();
+                if (process.isAlive()) {
+                    process.destroy();
                     runOnUiThread(() -> webView.evaluateJavascript(
                             "javascript:appendOutput('INFO: タイムアウトにより強制終了されました\\n')", null));
                 }
             }, 30, TimeUnit.SECONDS);
+            timeoutExecutor.shutdown();
 
-            Executors.newSingleThreadExecutor().submit(() -> {
+            ExecutorService outputExecutor = Executors.newSingleThreadExecutor();
+            outputExecutor.submit(() -> {
                 try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(currentProcess.getInputStream()));
+                        new InputStreamReader(process.getInputStream()));
                      BufferedReader errorReader = new BufferedReader(
-                        new InputStreamReader(currentProcess.getErrorStream()))) {
+                        new InputStreamReader(process.getErrorStream()))) {
 
                     String line;
                     while ((line = reader.readLine()) != null) {
@@ -97,6 +113,7 @@ public class exec extends Activity {
                             "javascript:appendOutput('ERROR: " + escapeForJS(e.getMessage()) + "\\n')", null));
                 }
             });
+            outputExecutor.shutdown();
         } catch (IOException e) {
             runOnUiThread(() -> webView.evaluateJavascript(
                     "javascript:appendOutput('ERROR: " + escapeForJS(e.getMessage()) + "')", null));

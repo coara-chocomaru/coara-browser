@@ -494,6 +494,12 @@ public class htmlview extends AppCompatActivity {
     }
 
     @Override
+    protected void onDestroy() {
+        executor.shutdown();
+        super.onDestroy();
+    }
+
+    @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (requestCode == REQUEST_PERMISSION_WRITE && grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
             saveHtmlToFile();

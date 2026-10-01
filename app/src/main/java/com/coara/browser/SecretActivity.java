@@ -167,7 +167,7 @@ public class SecretActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(4); 
+    private final ExecutorService backgroundExecutor = UiThread.newPool(4);
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -195,6 +195,7 @@ public class SecretActivity extends AppCompatActivity {
     private boolean defaultLoadsImagesAutomatically;
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
     private WebView preloadedWebView = null;
+    private boolean preloadScheduled = false;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     static {
@@ -568,6 +569,23 @@ public class SecretActivity extends AppCompatActivity {
         BasicAuthManager.cancelPendingForActivity(SecretActivity.this);
         super.onDestroy();
         pendingSpaHistoryTasks.clear();
+        webViewContainer.removeAllViews();
+        for (WebView tab : new ArrayList<>(webViews)) {
+            releaseBlobBridge(tab);
+            try {
+                tab.stopLoading();
+                tab.destroy();
+            } catch (Exception ignored) {
+            }
+        }
+        webViews.clear();
+        if (preloadedWebView != null) {
+            try {
+                preloadedWebView.destroy();
+            } catch (Exception ignored) {
+            }
+            preloadedWebView = null;
+        }
         backgroundExecutor.shutdown();
     }
 
@@ -720,30 +738,6 @@ public class SecretActivity extends AppCompatActivity {
           }
        }
     }
-    private void applyCombinedOptimizations(WebView webView) {
-    String js = "javascript:(function() {" +
-                "  try {" +
-                "    var animatedElements = document.querySelectorAll('.animated, .transition');" +
-                "    animatedElements.forEach(function(el) {" +
-                "      if (!el.style.transform) {" + 
-                "        el.style.transform = 'translateZ(0)';" + 
-                "      }" +
-                "      if (!el.style.willChange) {" +
-                "        el.style.willChange = 'transform, opacity';" +
-                "      }" +
-                "    });" +
-                "    var fixedElements = document.querySelectorAll('.fixed');" +
-                "    fixedElements.forEach(function(el) {" +
-                "      if (el.style.position !== 'fixed') {" +
-                "        el.style.position = 'fixed';" +
-                "      }" +
-                "    });" +
-                "  } catch (e) {" +
-                "    console.error('Optimization failed: ' + e.message);" +
-                "  }" +
-                "})();";
-    webView.evaluateJavascript(js, null);
-    }
     private void injectLazyLoading(WebView webView) {
     String js = "javascript:(function() {" +
                 "  try {" +
@@ -854,11 +848,26 @@ public class SecretActivity extends AppCompatActivity {
         }
     }
     private void preInitializeWebView() {
-        runOnUiThread(() -> {
-            WebView webView = new WebView(SecretActivity.this);
-            WebSettings settings = webView.getSettings();
-            applyOptimizedSettings(settings);
-            preloadedWebView = webView;
+        if (preloadedWebView != null || preloadScheduled) {
+            return;
+        }
+        preloadScheduled = true;
+        Looper.getMainLooper().getQueue().addIdleHandler(new android.os.MessageQueue.IdleHandler() {
+            @Override
+            public boolean queueIdle() {
+                preloadScheduled = false;
+                if (preloadedWebView != null || isFinishing() || isDestroyed()) {
+                    return false;
+                }
+                try {
+                    WebView webView = new WebView(SecretActivity.this);
+                    WebSettings settings = webView.getSettings();
+                    applyOptimizedSettings(settings);
+                    preloadedWebView = webView;
+                } catch (Exception ignored) {
+                }
+                return false;
+            }
         });
     }
 
@@ -871,7 +880,6 @@ public class SecretActivity extends AppCompatActivity {
         } else {
             webView = new WebView(this);
         }
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
@@ -1082,10 +1090,6 @@ public class SecretActivity extends AppCompatActivity {
 
         webView.setWebViewClient(new WebViewClient() {
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return super.shouldInterceptRequest(view, request);
-            }
-            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request != null) {
                     ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture(), request.isRedirect(), request.getUrl().toString());
@@ -1111,7 +1115,6 @@ public class SecretActivity extends AppCompatActivity {
                 ExternalDownloadTabTracker.onPageFinished(view, url);
                 installDownloadHintScript(view);
                   super.onPageFinished(view, url);
-                  applyCombinedOptimizations(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
              view.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);  
              UiThread.postDelayed(() -> injectLazyLoading(view), 200);  
@@ -1359,42 +1362,7 @@ public class SecretActivity extends AppCompatActivity {
         if (view == null || !jsEnabled) {
             return;
         }
-        String js = "javascript:(function(){" +
-                "try{" +
-                "if(window.__coaraDownloadHintInstalled)return;" +
-                "window.__coaraDownloadHintInstalled=true;" +
-                "var remember=function(a){" +
-                "try{" +
-                "if(!a)return;" +
-                "var n=a.getAttribute('download')||a.getAttribute('data-filename')||a.getAttribute('data-file-name')||a.getAttribute('data-download-name')||a.getAttribute('data-name');" +
-                "var h=a.href||a.getAttribute('href')||a.getAttribute('data-url')||a.getAttribute('data-href')||a.getAttribute('data-download-url');" +
-                "if(n&&h&&window.BlobDownloader)window.BlobDownloader.rememberDownloadHint(h,n);" +
-                "}catch(e){}" +
-                "};" +
-                "var scan=function(){" +
-                "try{" +
-                "var list=document.querySelectorAll('a[download]');" +
-                "for(var i=0;i<list.length;i++)remember(list[i]);" +
-                "}catch(e){}" +
-                "};" +
-                "document.addEventListener('click',function(e){" +
-                "try{" +
-                "var a=e.target;" +
-                "var depth=0;" +
-                "while(a&&a.tagName!=='A'&&depth++<8)a=a.parentElement;" +
-                "remember(a);" +
-                "}catch(ex){}" +
-                "},true);" +
-                "scan();" +
-                "if(window.MutationObserver){" +
-                "new MutationObserver(function(){scan();}).observe(document.documentElement||document,{subtree:true,childList:true});" +
-                "}" +
-                "}catch(e){}" +
-                "})();";
-        try {
-            view.evaluateJavascript(js, null);
-        } catch (Exception ignored) {
-        }
+        WebViewOptimizationUtils.installDownloadHints(view);
     }
 
     private long handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {

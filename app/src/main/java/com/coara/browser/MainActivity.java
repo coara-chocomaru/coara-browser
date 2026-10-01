@@ -126,6 +126,8 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.WeakHashMap;
 import java.util.Collections;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -190,7 +192,7 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = Executors.newFixedThreadPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2)); 
+    private final ExecutorService backgroundExecutor = UiThread.newPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -209,7 +211,6 @@ public class MainActivity extends AppCompatActivity {
     private boolean deskuaEnabled = false;
     private boolean ct3uaEnabled = false;
 
-    private final Map<WebView, Bitmap> webViewFavicons = new HashMap<>();
     private LruCache<String, Bitmap> faviconCache;
     private final Map<WebView, String> originalUserAgents = new HashMap<>();
     private final Map<WebView, BlobDownloadBridge> blobDownloadBridges = new HashMap<>();
@@ -224,6 +225,31 @@ public class MainActivity extends AppCompatActivity {
     
     
     private final Map<WebView, Boolean> pullToRefreshEligibleCache = new HashMap<>();
+    private final Map<WebView, PendingTab> pendingTabs = new HashMap<>();
+    private final Set<WebView> dirtyStateTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
+    private final Set<WebView> dirtySnapshotTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
+    private boolean historyDirty = false;
+    private boolean preloadScheduled = false;
+    private final Runnable historySaveRunnable = new Runnable() {
+        @Override
+        public void run() {
+            flushHistory();
+        }
+    };
+
+    private static final class PendingTab {
+        final int id;
+        final String url;
+        final String title;
+        final boolean useSavedState;
+
+        PendingTab(int id, String url, String title, boolean useSavedState) {
+            this.id = id;
+            this.url = url;
+            this.title = title;
+            this.useSavedState = useSavedState;
+        }
+    }
 
     private final ActivityResultLauncher<Intent> launchProtectionLauncher = registerForActivityResult(
             new ActivityResultContracts.StartActivityForResult(),
@@ -318,18 +344,12 @@ public class MainActivity extends AppCompatActivity {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 16;
+        final int cacheSize = Math.max(1024, Math.min(maxMemory / 16, 8 * 1024));
         faviconCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
             protected int sizeOf(String key, Bitmap bitmap) {
-                return bitmap.getByteCount() / 1024;
+                return Math.max(1, bitmap.getByteCount() / 1024);
             }
-            @Override
-           protected void entryRemoved(boolean evicted, String key, Bitmap oldValue, Bitmap newValue) {
-               if (evicted && oldValue != null && !oldValue.isRecycled()) {
-               oldValue.recycle();  
-             }
-           }
         };
         loadBookmarks();
         loadHistory();
@@ -339,8 +359,6 @@ public class MainActivity extends AppCompatActivity {
          else {
             currentHistoryIndex = -1;
          }
-        initializePersistentFavicons();
-
         urlEditText = findViewById(R.id.urlEditText);
         urlEditText.setImeOptions(EditorInfo.IME_ACTION_GO);
         faviconImageView = findViewById(R.id.favicon);
@@ -602,9 +620,11 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        captureSnapshotIfDirty();
         pauseCurrentWebView();
         pauseAllWebViewTimers();
         super.onPause();
+        flushHistory();
         saveTabsState();
     }
 
@@ -618,10 +638,79 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         BasicAuthManager.cancelPendingForActivity(MainActivity.this);
         super.onDestroy();
+        UiThread.mainHandler().removeCallbacks(historySaveRunnable);
+        flushHistory();
         pendingSpaHistoryTasks.clear();
         releaseAllWebViews();
         clearBackgroundBitmap();
         backgroundExecutor.shutdown();
+    }
+
+    private void captureSnapshotIfDirty() {
+        if (webViews.isEmpty() || currentTabIndex < 0 || currentTabIndex >= webViews.size()) {
+            return;
+        }
+        WebView current = webViews.get(currentTabIndex);
+        if (dirtyStateTabs.contains(current)) {
+            captureTabSnapshot(current);
+        }
+    }
+
+    private void ensureTabLoaded(WebView webView) {
+        if (webView == null) {
+            return;
+        }
+        PendingTab pending = pendingTabs.remove(webView);
+        if (pending == null) {
+            return;
+        }
+        try {
+            restoreCookiesForTab(pending.id, pending.url);
+        } catch (Exception ignored) {
+        }
+        Bundle state = pending.useSavedState ? loadBundleFromFile("tab_state_" + pending.id + ".dat") : null;
+        restoreWebViewState(webView, state, pending.url);
+    }
+
+    private Bitmap loadSnapshotIfNeeded(WebView webView) {
+        if (webView == null) {
+            return null;
+        }
+        Bitmap existing = tabSnapshots.get(webView);
+        if (existing != null && !existing.isRecycled()) {
+            return existing;
+        }
+        Object tag = webView.getTag();
+        if (!(tag instanceof Integer)) {
+            return null;
+        }
+        File snapFile = new File(getFilesDir(), "tab_snapshot_" + tag + ".png");
+        if (!snapFile.exists()) {
+            return null;
+        }
+        try {
+            Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
+            if (bm != null) {
+                tabSnapshots.put(webView, bm);
+            }
+            return bm;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void scheduleHistorySave() {
+        historyDirty = true;
+        UiThread.mainHandler().removeCallbacks(historySaveRunnable);
+        UiThread.mainHandler().postDelayed(historySaveRunnable, 2000L);
+    }
+
+    private void flushHistory() {
+        UiThread.mainHandler().removeCallbacks(historySaveRunnable);
+        if (historyDirty) {
+            historyDirty = false;
+            saveHistory();
+        }
     }
 
     private void pauseCurrentWebView() {
@@ -689,7 +778,7 @@ public class MainActivity extends AppCompatActivity {
             for (WebView tab : tabsToRelease) {
                 clearPendingSpaHistory(tab);
                 pullToRefreshEligibleCache.remove(tab);
-                webViewFavicons.remove(tab);
+                pendingTabs.remove(tab);
                 originalUserAgents.remove(tab);
                 try {
                     tab.stopLoading();
@@ -774,66 +863,86 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveTabsState() {
         synchronized (webViews) {
-        JSONArray tabsArray = new JSONArray();
-        for (WebView webView : webViews) {
-            Object tag = webView.getTag();
-            int id;
-            if (tag instanceof Integer) {
-                id = (Integer) tag;
-            } else {
-                id = nextTabId++;
-                webView.setTag(id);
-            }
-            String url = webView.getUrl();
-            if (url == null) {
-                url = "";
-            }
-            JSONObject tabObj = new JSONObject();
-            try {
-                tabObj.put("id", id);
-                tabObj.put("url", url);
-            } catch (JSONException e) {
-                e.printStackTrace();
-            }
-            tabsArray.put(tabObj);
-            
-            Bundle state = new Bundle();
-            webView.saveState(state);
-            saveBundleToFile(state, "tab_state_" + id + ".dat");
-            if (tabSnapshots.containsKey(webView)) {
-                Bitmap snap = tabSnapshots.get(webView);
-                if (snap != null) {
-                    final int finalIdForSnap = id;
-                    final Bitmap finalSnap = snap;
-                    backgroundExecutor.execute(() -> {
-                        try {
-                            File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
-                            try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                                finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
-                                fos.flush();
+            JSONArray tabsArray = new JSONArray();
+            WebView currentTab = (currentTabIndex >= 0 && currentTabIndex < webViews.size())
+                    ? webViews.get(currentTabIndex) : null;
+            for (WebView webView : webViews) {
+                Object tag = webView.getTag();
+                int id;
+                if (tag instanceof Integer) {
+                    id = (Integer) tag;
+                } else {
+                    id = nextTabId++;
+                    webView.setTag(id);
+                }
+                PendingTab pending = pendingTabs.get(webView);
+                String url;
+                String title;
+                if (pending != null) {
+                    url = pending.url;
+                    title = pending.title;
+                } else {
+                    url = webView.getUrl();
+                    title = webView.getTitle();
+                }
+                if (url == null) {
+                    url = "";
+                }
+                if (title == null) {
+                    title = "";
+                }
+                JSONObject tabObj = new JSONObject();
+                try {
+                    tabObj.put("id", id);
+                    tabObj.put("url", url);
+                    tabObj.put("title", title);
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+                tabsArray.put(tabObj);
+
+                if (pending == null && (webView == currentTab || dirtyStateTabs.remove(webView))) {
+                    Bundle state = new Bundle();
+                    webView.saveState(state);
+                    saveBundleToFile(state, "tab_state_" + id + ".dat");
+                    dirtyStateTabs.remove(webView);
+                }
+                if (dirtySnapshotTabs.remove(webView)) {
+                    final Bitmap finalSnap = tabSnapshots.get(webView);
+                    if (finalSnap != null) {
+                        final int finalIdForSnap = id;
+                        backgroundExecutor.execute(() -> {
+                            try {
+                                if (finalSnap.isRecycled()) {
+                                    return;
+                                }
+                                File outFile = new File(getFilesDir(), "tab_snapshot_" + finalIdForSnap + ".png");
+                                try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                                    finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
+                                    fos.flush();
+                                }
+                            } catch (Exception e) {
+                                e.printStackTrace();
                             }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    });
+                        });
+                    }
                 }
             }
-        }
-        Object currentTag = getCurrentWebView().getTag();
-        int currentTabId;
-        if (currentTag instanceof Integer) {
-            currentTabId = (Integer) currentTag;
-        } else {
-            currentTabId = nextTabId++;
-            getCurrentWebView().setTag(currentTabId);
-        }
+            Object currentTag = getCurrentWebView().getTag();
+            int currentTabId;
+            if (currentTag instanceof Integer) {
+                currentTabId = (Integer) currentTag;
+            } else {
+                currentTabId = nextTabId++;
+                getCurrentWebView().setTag(currentTabId);
+            }
 
-        pref.edit()
-                .putString(KEY_TABS, tabsArray.toString())
-                .putInt(KEY_CURRENT_TAB_ID, currentTabId)
-                .apply();
-    }
+            pref.edit()
+                    .putString(KEY_TABS, tabsArray.toString())
+                    .putInt(KEY_CURRENT_TAB_ID, currentTabId)
+                    .apply();
         }
+    }
 
 
     private void loadTabsState() {
@@ -853,7 +962,7 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                     pullToRefreshEligibleCache.remove(old);
-                    webViewFavicons.remove(old);
+                    pendingTabs.remove(old);
                     originalUserAgents.remove(old);
                     try {
                         old.stopLoading();
@@ -869,27 +978,21 @@ public class MainActivity extends AppCompatActivity {
                     JSONObject tabObj = tabsArray.getJSONObject(i);
                     int id = tabObj.getInt("id");
                     String url = tabObj.optString("url", START_PAGE);
+                    String title = tabObj.optString("title", "");
                     WebView webView = createNewWebView();
                     webView.setTag(id);
                     webViews.add(webView);
-                    File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
-                    if (snapFile.exists()) {
-                        try {
-                            Bitmap bm = BitmapFactory.decodeFile(snapFile.getAbsolutePath());
-                            if (bm != null) {
-                                tabSnapshots.put(webView, bm);
-                            }
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    }
-                    try {
-                        restoreCookiesForTab(id, url);
-                    } catch (Exception ignored) {
-                    }
                     if (id > maxId) maxId = id;
-                    Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                    restoreWebViewState(webView, state, url);
+                    if (tabsArray.length() == 1 || id == currentTabId) {
+                        try {
+                            restoreCookiesForTab(id, url);
+                        } catch (Exception ignored) {
+                        }
+                        Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
+                        restoreWebViewState(webView, state, url);
+                    } else {
+                        pendingTabs.put(webView, new PendingTab(id, url, title, true));
+                    }
                     webView.onPause();
                 }
                 nextTabId = maxId + 1;
@@ -915,6 +1018,7 @@ public class MainActivity extends AppCompatActivity {
                     if (!found) {
                         currentTabIndex = 0;
                     }
+                    ensureTabLoaded(getCurrentWebView());
                     webViewContainer.addView(getCurrentWebView());
                     try {
                         getCurrentWebView().onResume();
@@ -980,10 +1084,6 @@ public class MainActivity extends AppCompatActivity {
             }
         }
     }
-    private void applyCombinedOptimizations(WebView webView) {
-        WebViewOptimizationUtils.applyCombinedOptimizations(webView);
-    }
-
     private void injectLazyLoading(WebView webView) {
         WebViewOptimizationUtils.injectLazyLoading(webView);
     }
@@ -999,14 +1099,28 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void preInitializeWebView() {
-        runOnUiThread(new Runnable() { @Override public void run() {
-            WebView webView = new WebView(MainActivity.this);
-            WebSettings settings = webView.getSettings();
-            applyOptimizedSettings(settings);
-            applyCookiePolicy(webView);
-            webView.onPause();
-            preloadedWebView = webView;
+        if (preloadedWebView != null || preloadScheduled) {
+            return;
         }
+        preloadScheduled = true;
+        Looper.getMainLooper().getQueue().addIdleHandler(new android.os.MessageQueue.IdleHandler() {
+            @Override
+            public boolean queueIdle() {
+                preloadScheduled = false;
+                if (preloadedWebView != null || isFinishing() || isDestroyed()) {
+                    return false;
+                }
+                try {
+                    WebView webView = new WebView(MainActivity.this);
+                    WebSettings settings = webView.getSettings();
+                    applyOptimizedSettings(settings);
+                    applyCookiePolicy(webView);
+                    webView.onPause();
+                    preloadedWebView = webView;
+                } catch (Exception ignored) {
+                }
+                return false;
+            }
         });
     }
 
@@ -1019,7 +1133,6 @@ public class MainActivity extends AppCompatActivity {
         } else {
             webView = new WebView(this);
         }
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
@@ -1275,10 +1388,6 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                return super.shouldInterceptRequest(view, request);
-            }
-            @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request != null) {
                     ExternalDownloadTabTracker.onMainFrameNavigation(view, request.isForMainFrame(), request.hasGesture(), request.isRedirect(), request.getUrl().toString());
@@ -1303,8 +1412,8 @@ public class MainActivity extends AppCompatActivity {
                 ExternalDownloadTabTracker.onPageFinished(view, url);
                 installDownloadHintScript(view);
             super.onPageFinished(view, url);
-                  applyCombinedOptimizations(view);
                   applyBrowserVisualSettings(view);
+                  dirtyStateTabs.add(view);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
              UiThread.postDelayed(() -> injectLazyLoading(view), 200);
             }
@@ -1338,9 +1447,6 @@ public class MainActivity extends AppCompatActivity {
            }
             if (swipeRefreshLayout.isRefreshing()) {
               swipeRefreshLayout.setRefreshing(false);
-            }
-            if (view == getCurrentWebView()) {
-                captureTabSnapshot(view);
             }
             }
             @Override
@@ -1427,11 +1533,14 @@ public class MainActivity extends AppCompatActivity {
                 if (view == getCurrentWebView()) {
                     faviconImageView.setImageBitmap(icon);
                 }
-                webViewFavicons.put(view, icon);
                 String currentUrl = view.getUrl();
-                if (currentUrl != null) {
+                if (currentUrl != null && icon != null) {
+                    Bitmap previousIcon = faviconCache.get(currentUrl);
+                    boolean unchanged = previousIcon != null && (previousIcon == icon || previousIcon.sameAs(icon));
                     faviconCache.put(currentUrl, icon);
-                    backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
+                    if (!unchanged) {
+                        backgroundExecutor.execute(() -> saveFaviconToFile(currentUrl, icon));
+                    }
                 }
             }
             @Override
@@ -1514,7 +1623,7 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             pullToRefreshEligibleCache.remove(crashed);
-            webViewFavicons.remove(crashed);
+            pendingTabs.remove(crashed);
             originalUserAgents.remove(crashed);
 
             if (wasCurrent) {
@@ -2113,10 +2222,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             pullToRefreshEligibleCache.remove(webView);
-            webViewFavicons.remove(webView);
+            pendingTabs.remove(webView);
             originalUserAgents.remove(webView);
             if (id != -1) {
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                safeDeleteFile(new File(getFilesDir(), "tab_state_" + id + ".dat"));
                 if (snapFile.exists()) {
                     snapFile.delete();
                 }
@@ -2141,6 +2251,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     webViewContainer.removeAllViews();
                     WebView newCurrent = getCurrentWebView();
+                    ensureTabLoaded(newCurrent);
                     webViewContainer.addView(newCurrent);
                     try {
                         newCurrent.onResume();
@@ -2161,42 +2272,7 @@ public class MainActivity extends AppCompatActivity {
         if (view == null || !jsEnabled) {
             return;
         }
-        String js = "javascript:(function(){" +
-                "try{" +
-                "if(window.__coaraDownloadHintInstalled)return;" +
-                "window.__coaraDownloadHintInstalled=true;" +
-                "var remember=function(a){" +
-                "try{" +
-                "if(!a)return;" +
-                "var n=a.getAttribute('download')||a.getAttribute('data-filename')||a.getAttribute('data-file-name')||a.getAttribute('data-download-name')||a.getAttribute('data-name');" +
-                "var h=a.href||a.getAttribute('href')||a.getAttribute('data-url')||a.getAttribute('data-href')||a.getAttribute('data-download-url');" +
-                "if(n&&h&&window.BlobDownloader)window.BlobDownloader.rememberDownloadHint(h,n);" +
-                "}catch(e){}" +
-                "};" +
-                "var scan=function(){" +
-                "try{" +
-                "var list=document.querySelectorAll('a[download]');" +
-                "for(var i=0;i<list.length;i++)remember(list[i]);" +
-                "}catch(e){}" +
-                "};" +
-                "document.addEventListener('click',function(e){" +
-                "try{" +
-                "var a=e.target;" +
-                "var depth=0;" +
-                "while(a&&a.tagName!=='A'&&depth++<8)a=a.parentElement;" +
-                "remember(a);" +
-                "}catch(ex){}" +
-                "},true);" +
-                "scan();" +
-                "if(window.MutationObserver){" +
-                "new MutationObserver(function(){scan();}).observe(document.documentElement||document,{subtree:true,childList:true});" +
-                "}" +
-                "}catch(e){}" +
-                "})();";
-        try {
-            view.evaluateJavascript(js, null);
-        } catch (Exception ignored) {
-        }
+        WebViewOptimizationUtils.installDownloadHints(view);
     }
 
     private long handleDownload(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
@@ -2454,6 +2530,7 @@ public class MainActivity extends AppCompatActivity {
             }
             Object removedTag = removed.getTag();
             if (removedTag instanceof Integer) {
+                safeDeleteFile(new File(getFilesDir(), "tab_state_" + removedTag + ".dat"));
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedTag + ".png");
                 if (snapFile.exists()) {
                     snapFile.delete();
@@ -2507,6 +2584,7 @@ public class MainActivity extends AppCompatActivity {
         webViewContainer.removeAllViews();
         currentTabIndex = index;
         WebView next = getCurrentWebView();
+        ensureTabLoaded(next);
         webViewContainer.addView(next);
         try {
             next.onResume();
@@ -2551,6 +2629,7 @@ public class MainActivity extends AppCompatActivity {
                     updatePullToRefreshState(owner, url);
                     urlEditText.setText(url);
                     addHistory(url, owner.getTitle());
+                    dirtyStateTabs.add(owner);
                 } finally {
                     pendingSpaHistoryTasks.remove(owner);
                 }
@@ -2879,10 +2958,15 @@ public class MainActivity extends AppCompatActivity {
             takeScreenshot();
         } else if (id == R.id.action_export_all_cookies_zip) {
             ArrayList<WebView> tabList;
+            ArrayList<String> urlList = new ArrayList<>();
             synchronized (webViews) {
                 tabList = new ArrayList<>(webViews);
+                for (WebView tab : tabList) {
+                    PendingTab pending = pendingTabs.get(tab);
+                    urlList.add(pending != null ? pending.url : tab.getUrl());
+                }
             }
-            AllTabsCookiesZipExporter.export(this, tabList);
+            AllTabsCookiesZipExporter.export(this, tabList, urlList);
             return true;
         }
         return super.onOptionsItemSelected(item);
@@ -2979,10 +3063,11 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
                 pullToRefreshEligibleCache.remove(w);
-                webViewFavicons.remove(w);
+                pendingTabs.remove(w);
                 originalUserAgents.remove(w);
                 if (id != -1) {
                     File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
+                    safeDeleteFile(new File(getFilesDir(), "tab_state_" + id + ".dat"));
                     if (snapFile.exists()) {
                         snapFile.delete();
                     }
@@ -3303,6 +3388,10 @@ private void showHistoryDialog() {
 
     
     private void showTabsDialog() {
+        WebView currentForSnapshot = getCurrentWebView();
+        if (currentForSnapshot != null) {
+            captureTabSnapshot(currentForSnapshot);
+        }
         TabOverviewDialog.show(
                 this,
                 new TabOverviewDialog.Host() {
@@ -3323,7 +3412,16 @@ private void showHistoryDialog() {
 
                     @Override
                     public Bitmap getTabSnapshot(WebView webView) {
-                        return tabSnapshots.get(webView);
+                        return loadSnapshotIfNeeded(webView);
+                    }
+
+                    @Override
+                    public String getTabFallbackTitle(WebView webView) {
+                        PendingTab pending = pendingTabs.get(webView);
+                        if (pending == null) {
+                            return null;
+                        }
+                        return pending.title.isEmpty() ? pending.url : pending.title;
                     }
 
                     @Override
@@ -3414,19 +3512,7 @@ private void showHistoryDialog() {
         }
 
         tabSnapshots.put(webView, snapshot);
-        if (id != -1) {
-            final int finalId = id;
-            final Bitmap finalBitmap = snapshot;
-            backgroundExecutor.execute(() -> {
-                File outFile = new File(getFilesDir(), "tab_snapshot_" + finalId + ".png");
-                try (FileOutputStream fos = new FileOutputStream(outFile)) {
-                    finalBitmap.compress(Bitmap.CompressFormat.PNG, 100, fos);
-                    fos.flush();
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
-            });
-        }
+        dirtySnapshotTabs.add(webView);
     }
 
 
@@ -3640,7 +3726,7 @@ private void addHistory(String url, String title) {
     if (historyItems.size() > MAX_HISTORY_SIZE) {
         historyItems.remove(0);
     }
-    saveHistory();
+    scheduleHistorySave();
 }
     public void exitFullScreen() {
         if (customView != null) {
@@ -3689,9 +3775,10 @@ private void addHistory(String url, String title) {
         try {
             MessageDigest digest = MessageDigest.getInstance("MD5");
             byte[] hash = digest.digest(url.getBytes("UTF-8"));
-            StringBuilder sb = new StringBuilder();
+            final char[] hex = "0123456789abcdef".toCharArray();
+            StringBuilder sb = new StringBuilder(36);
             for (byte b : hash) {
-                sb.append(String.format("%02x", b));
+                sb.append(hex[(b >> 4) & 0x0f]).append(hex[b & 0x0f]);
             }
             return sb.toString() + ".png";
         } catch (Exception e) {
@@ -3720,15 +3807,12 @@ private void addHistory(String url, String title) {
             }
         }
     }
-    private void initializePersistentFavicons() {
-        for (Bookmark bm : bookmarks) {
-            final String url = bm.getUrl();
-            backgroundExecutor.execute(() -> loadFaviconFromDisk(url));
-        }
-        for (HistoryItem hi : historyItems) {
-            final String url = hi.getUrl();
-            backgroundExecutor.execute(() -> loadFaviconFromDisk(url));
-        }
+    private Bitmap getFaviconBitmap(String url) {
+        if (url == null) return null;
+        Bitmap cached = faviconCache.get(url);
+        if (cached != null) return cached;
+        loadFaviconFromDisk(url);
+        return faviconCache.get(url);
     }
 
     private static final class HistoryRow {
@@ -3807,7 +3891,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
         HistoryViewHolder historyHolder = (HistoryViewHolder) holder;
         historyHolder.title.setText((item.getTitle() != null && !item.getTitle().isEmpty()) ? item.getTitle() : item.getUrl());
         historyHolder.url.setText(item.getUrl());
-        Bitmap icon = faviconCache.get(item.getUrl());
+        Bitmap icon = getFaviconBitmap(item.getUrl());
         if (icon != null) {
             historyHolder.favicon.setImageBitmap(icon);
         } else {
@@ -3887,7 +3971,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             Bookmark bm = items.get(position);
             holder.title.setText(bm.getTitle());
             holder.url.setText(bm.getUrl());
-            Bitmap icon = faviconCache.get(bm.getUrl());
+            Bitmap icon = getFaviconBitmap(bm.getUrl());
             if (icon != null) {
                 holder.favicon.setImageBitmap(icon);
             } else {
@@ -4159,7 +4243,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
     }
 
     private static class AllTabsCookiesZipExporter {
-        public static void export(Context context, ArrayList<WebView> webViews) {
+        public static void export(Context context, ArrayList<WebView> webViews, ArrayList<String> urls) {
             if (webViews.isEmpty()) {
                 Toast.makeText(context, "タブがありません", Toast.LENGTH_SHORT).show();
                 return;
@@ -4175,8 +4259,7 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
             try (FileOutputStream fos = new FileOutputStream(zipFile);
                  ZipOutputStream zos = new ZipOutputStream(fos)) {
                 for (int i = 0; i < webViews.size(); i++) {
-                    WebView wv = webViews.get(i);
-                    String url = wv.getUrl();
+                    String url = urls.get(i);
                     if (url == null || url.isEmpty() || url.startsWith("about:") || url.startsWith("data:")) {
                         continue;
                     }
