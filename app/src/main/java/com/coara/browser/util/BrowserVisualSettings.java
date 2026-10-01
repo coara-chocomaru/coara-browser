@@ -114,16 +114,16 @@ public final class BrowserVisualSettings {
 
     public static void setTextColor(SharedPreferences preferences, String value) {
         if (DEFAULT.equals(value)) {
-            preferences.edit().remove(KEY_TEXT_COLOR).commit();
+            preferences.edit().remove(KEY_TEXT_COLOR).apply();
             return;
         }
         for (String allowed : TEXT_COLOR_VALUES) {
             if (allowed.equals(value)) {
-                preferences.edit().putString(KEY_TEXT_COLOR, value).commit();
+                preferences.edit().putString(KEY_TEXT_COLOR, value).apply();
                 return;
             }
         }
-        preferences.edit().remove(KEY_TEXT_COLOR).commit();
+        preferences.edit().remove(KEY_TEXT_COLOR).apply();
     }
 
     public static String getFontFamily(SharedPreferences preferences) {
@@ -141,16 +141,16 @@ public final class BrowserVisualSettings {
 
     public static void setFontFamily(SharedPreferences preferences, String value) {
         if (DEFAULT.equals(value)) {
-            preferences.edit().remove(KEY_FONT_FAMILY).commit();
+            preferences.edit().remove(KEY_FONT_FAMILY).apply();
             return;
         }
         for (String allowed : FONT_VALUES) {
             if (allowed.equals(value)) {
-                preferences.edit().putString(KEY_FONT_FAMILY, value).commit();
+                preferences.edit().putString(KEY_FONT_FAMILY, value).apply();
                 return;
             }
         }
-        preferences.edit().remove(KEY_FONT_FAMILY).commit();
+        preferences.edit().remove(KEY_FONT_FAMILY).apply();
     }
 
     public static boolean isTransparencyEnabled(SharedPreferences preferences) {
@@ -159,9 +159,9 @@ public final class BrowserVisualSettings {
 
     public static void setTransparencyEnabled(SharedPreferences preferences, boolean enabled) {
         if (enabled) {
-            preferences.edit().putBoolean(KEY_BACKGROUND_TRANSPARENT, true).commit();
+            preferences.edit().putBoolean(KEY_BACKGROUND_TRANSPARENT, true).apply();
         } else {
-            preferences.edit().remove(KEY_BACKGROUND_TRANSPARENT).commit();
+            preferences.edit().remove(KEY_BACKGROUND_TRANSPARENT).apply();
         }
     }
 
@@ -172,9 +172,9 @@ public final class BrowserVisualSettings {
 
     public static void setBackgroundPath(SharedPreferences preferences, String path) {
         if (path == null || path.trim().isEmpty()) {
-            preferences.edit().remove(KEY_BACKGROUND_PATH).commit();
+            preferences.edit().remove(KEY_BACKGROUND_PATH).apply();
         } else {
-            preferences.edit().putString(KEY_BACKGROUND_PATH, path).commit();
+            preferences.edit().putString(KEY_BACKGROUND_PATH, path).apply();
         }
     }
 
@@ -192,9 +192,9 @@ public final class BrowserVisualSettings {
     public static void setBackgroundTransparencyPercent(SharedPreferences preferences, int value) {
         int clamped = clampPercent(value);
         if (clamped == 0) {
-            preferences.edit().remove(KEY_BACKGROUND_TRANSPARENCY_PERCENT).commit();
+            preferences.edit().remove(KEY_BACKGROUND_TRANSPARENCY_PERCENT).apply();
         } else {
-            preferences.edit().putInt(KEY_BACKGROUND_TRANSPARENCY_PERCENT, clamped).commit();
+            preferences.edit().putInt(KEY_BACKGROUND_TRANSPARENCY_PERCENT, clamped).apply();
         }
     }
 
@@ -204,9 +204,9 @@ public final class BrowserVisualSettings {
 
     public static void setOffscreenPreRasterEnabled(SharedPreferences preferences, boolean enabled) {
         if (enabled) {
-            preferences.edit().putBoolean(KEY_OFFSCREEN_PRE_RASTER, true).commit();
+            preferences.edit().putBoolean(KEY_OFFSCREEN_PRE_RASTER, true).apply();
         } else {
-            preferences.edit().remove(KEY_OFFSCREEN_PRE_RASTER).commit();
+            preferences.edit().remove(KEY_OFFSCREEN_PRE_RASTER).apply();
         }
     }
 

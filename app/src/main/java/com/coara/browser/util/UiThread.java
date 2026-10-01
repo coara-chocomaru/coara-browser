@@ -4,11 +4,13 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 public final class UiThread {
     private static final Handler MAIN = new Handler(Looper.getMainLooper());
-    private static final ExecutorService IO = Executors.newFixedThreadPool(
+    private static final ExecutorService IO = newPool(
             Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors()))
     );
 
@@ -29,5 +31,13 @@ public final class UiThread {
 
     public static ExecutorService io() {
         return IO;
+    }
+
+    public static ExecutorService newPool(int threads) {
+        int size = Math.max(1, threads);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                size, size, 20L, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
+        executor.allowCoreThreadTimeOut(true);
+        return executor;
     }
 }
