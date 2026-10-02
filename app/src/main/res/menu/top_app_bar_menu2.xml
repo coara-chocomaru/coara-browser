@@ -29,6 +29,7 @@
             <item android:id="@+id/action_asciiart" android:title="画像→TXT" />
             <item android:id="@+id/action_pgdl" android:title="ページ保存" />
             <item android:id="@+id/action_num" android:title="電卓" />
+            <item android:id="@+id/action_plugins" android:title="拡張機能" />
             <item android:id="@+id/action_exec" android:title="exec" />
             <item android:id="@+id/action_grep" android:title="grep-i/md5" />
             <item android:id="@+id/action_qr" android:title="QRコード" />
