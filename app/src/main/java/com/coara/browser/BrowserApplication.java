@@ -24,7 +24,30 @@ public class BrowserApplication extends Application {
     public void onCreate() {
         super.onCreate();
         installCrashLogger();
+        initializePlugins();
         createDownloadNotificationChannel();
+    }
+
+    private void initializePlugins() {
+        try {
+            String tag = detectProcessName().endsWith(":Secret_webview") ? "S" : "M";
+            com.coara.browser.plugin.PluginManager.initialize(this, tag);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static String detectProcessName() {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream("/proc/self/cmdline"), "UTF-8"))) {
+            String line = reader.readLine();
+            if (line == null) {
+                return "";
+            }
+            int nul = line.indexOf('\0');
+            return (nul >= 0 ? line.substring(0, nul) : line).trim();
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     private void createDownloadNotificationChannel() {
@@ -54,6 +77,10 @@ public class BrowserApplication extends Application {
                 writeCrashLog(thread, throwable);
             } catch (Throwable ignored) {
                 
+            }
+            try {
+                com.coara.browser.plugin.PluginManager.onAppCrash(thread, throwable);
+            } catch (Throwable ignored) {
             }
             if (previous != null) {
                 previous.uncaughtException(thread, throwable);

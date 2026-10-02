@@ -89,6 +89,8 @@ import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.WebViewOptimizationUtils;
 import com.coara.browser.webview.BlobDownloadBridge;
 import com.coara.browser.util.UiThread;
+import com.coara.browser.plugin.PluginManagerActivity;
+import com.coara.browser.plugin.PluginRuntime;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -560,6 +562,7 @@ public class SecretActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        PluginRuntime.onHostPause(this);
         super.onPause();
         saveTabsState();
     }
@@ -942,6 +945,7 @@ public class SecretActivity extends AppCompatActivity {
         BlobDownloadBridge blobDownloadBridge = new BlobDownloadBridge(this);
         blobDownloadBridges.put(webView, blobDownloadBridge);
         webView.addJavascriptInterface(blobDownloadBridge, "BlobDownloader");
+        PluginRuntime.attach(this, webView);
 
         webView.setOnLongClickListener(v -> {
             WebView.HitTestResult result = webView.getHitTestResult();
@@ -1099,6 +1103,7 @@ public class SecretActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 ExternalDownloadTabTracker.onPageStarted(view, url);
+                PluginRuntime.onPageStarted(view, url);
                 String lowerUrl = url.toLowerCase();
                 clearPendingSpaHistory(view);
                 boolean isMatched = CACHE_MODE_PATTERN.matcher(lowerUrl).find();
@@ -1111,8 +1116,14 @@ public class SecretActivity extends AppCompatActivity {
                 super.onPageStarted(view, url, favicon);
             }
             @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                PluginRuntime.onPageCommitVisible(view, url);
+            }
+            @Override
             public void onPageFinished(WebView view, String url) {
                 ExternalDownloadTabTracker.onPageFinished(view, url);
+                PluginRuntime.onPageFinished(view, url);
                 installDownloadHintScript(view);
                   super.onPageFinished(view, url);
             if (url.startsWith("https://m.youtube.com") || url.startsWith("https://chatgpt.com/")) {  
@@ -1785,6 +1796,8 @@ private class AndroidBridge {
         } else if (id == R.id.action_Secret) {
             clearSecretDataAndReturnToMain();
             return true;
+        } else if (id == R.id.action_plugins) {
+            startActivity(new Intent(SecretActivity.this, PluginManagerActivity.class));
         } else if (id == R.id.action_exec) {
             startActivity(new Intent(SecretActivity.this, exec.class));
         } else if (id == R.id.action_downloads) {

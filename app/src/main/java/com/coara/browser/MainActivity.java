@@ -99,6 +99,8 @@ import com.coara.browser.util.ExternalDownloadTabTracker;
 import com.coara.browser.util.DownloadSupport;
 import com.coara.browser.util.DownloadFallbackManager;
 import com.coara.browser.util.UiThread;
+import com.coara.browser.plugin.PluginManagerActivity;
+import com.coara.browser.plugin.PluginRuntime;
 import com.coara.browser.util.BrowserVisualSettings;
 
 import org.json.JSONArray;
@@ -620,6 +622,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onPause() {
+        PluginRuntime.onHostPause(this);
         captureSnapshotIfDirty();
         pauseCurrentWebView();
         pauseAllWebViewTimers();
@@ -1195,6 +1198,7 @@ public class MainActivity extends AppCompatActivity {
         BlobDownloadBridge blobDownloadBridge = new BlobDownloadBridge(this);
         blobDownloadBridges.put(webView, blobDownloadBridge);
         webView.addJavascriptInterface(blobDownloadBridge, "BlobDownloader");
+        PluginRuntime.attach(this, webView);
 
         webView.setOnLongClickListener(v -> {
             WebView.HitTestResult result = webView.getHitTestResult();
@@ -1338,6 +1342,7 @@ public class MainActivity extends AppCompatActivity {
                 
                 try {
                     boolean crashed = detail != null && detail.didCrash();
+                    PluginRuntime.onRenderProcessGone(view, crashed);
                     String lastUrl = null;
                     try {
                         lastUrl = view.getUrl();
@@ -1397,7 +1402,7 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onPageStarted(WebView view, String url, Bitmap favicon) {
                 ExternalDownloadTabTracker.onPageStarted(view, url);
-                
+                PluginRuntime.onPageStarted(view, url);
                 SpaStateManager.getInstance().clearState(view);
                 clearPendingSpaHistory(view);
                 view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
@@ -1408,8 +1413,14 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageStarted(view, url, favicon);
             }
             @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                PluginRuntime.onPageCommitVisible(view, url);
+            }
+            @Override
             public void onPageFinished(WebView view, String url) {
                 ExternalDownloadTabTracker.onPageFinished(view, url);
+                PluginRuntime.onPageFinished(view, url);
                 installDownloadHintScript(view);
             super.onPageFinished(view, url);
                   applyBrowserVisualSettings(view);
@@ -2778,6 +2789,8 @@ public class MainActivity extends AppCompatActivity {
             intent.putExtra(EXTRA_CLEAR_HISTORY, true);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
+        } else if (id == R.id.action_plugins) {
+            startActivity(new Intent(MainActivity.this, PluginManagerActivity.class));
         } else if (id == R.id.action_exec) {
             startActivity(new Intent(MainActivity.this, exec.class));
         } else if (id == R.id.action_downloads) {
