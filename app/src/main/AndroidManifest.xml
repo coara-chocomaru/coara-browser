@@ -214,6 +214,11 @@
             android:exported="true" />
        
         <activity
+            android:name=".plugin.PluginManagerActivity"
+            android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
+            android:exported="false" />
+
+        <activity
             android:name=".SettingsActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:noHistory="true"
