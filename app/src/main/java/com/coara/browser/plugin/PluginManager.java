@@ -58,6 +58,9 @@ public final class PluginManager {
         void onPluginsChanged();
 
         void onPluginAutoDisabled(PluginInfo info, String reason);
+
+        default void onPluginRuntimeChanged() {
+        }
     }
 
     public static final class InstallOutcome {
@@ -102,6 +105,7 @@ public final class PluginManager {
     private boolean loaded = false;
     private long indexStamp = -1L;
     private int version = 0;
+    private int runtimeVersion = 0;
     private long lastInjectionAt = 0L;
     private long lastMarkerWrite = 0L;
 
@@ -214,6 +218,11 @@ public final class PluginManager {
         return version;
     }
 
+    public synchronized int runtimeVersion() {
+        ensureLoadedLocked();
+        return runtimeVersion;
+    }
+
     public synchronized boolean reloadIfChanged() {
         if (!loaded) {
             ensureLoadedLocked();
@@ -222,9 +231,11 @@ public final class PluginManager {
         if (stamp() != indexStamp) {
             loadLocked();
             version++;
+            runtimeVersion++;
             sourceCache.clear();
             i18nCache.clear();
             notifyChanged();
+            notifyRuntimeChanged();
             return true;
         }
         return false;
@@ -339,6 +350,7 @@ public final class PluginManager {
             logger.log("W", info.id, w);
         }
         notifyChanged();
+        notifyRuntimeChanged();
         return new InstallOutcome(info.copy(), updated);
     }
 
@@ -366,6 +378,7 @@ public final class PluginManager {
         }
         saveLocked();
         notifyChanged();
+        notifyRuntimeChanged();
         return true;
     }
 
@@ -387,6 +400,7 @@ public final class PluginManager {
         logger.removeFor(id);
         saveLocked();
         notifyChanged();
+        notifyRuntimeChanged();
         return true;
     }
 
@@ -506,14 +520,19 @@ public final class PluginManager {
         }
         if (disableReason != null) {
             disableLocked(p, disableReason);
+            runtimeVersion++;
         }
         saveLocked();
         notifyChanged();
+        if (disableReason != null) {
+            notifyRuntimeChanged();
+        }
     }
 
     public synchronized void recordCrash(Collection<String> ids, String reason) {
         ensureLoadedLocked();
         boolean changed = false;
+        boolean runtimeChanged = false;
         for (String id : ids) {
             PluginInfo p = find(id);
             if (p == null) {
@@ -525,12 +544,17 @@ public final class PluginManager {
             logger.log("E", id, "クラッシュ検知: " + reason);
             if (p.enabled) {
                 disableLocked(p, "クラッシュ検知: " + reason);
+                runtimeChanged = true;
             }
             changed = true;
         }
         if (changed) {
             saveLocked();
             notifyChanged();
+            if (runtimeChanged) {
+                runtimeVersion++;
+                notifyRuntimeChanged();
+            }
         }
     }
 
@@ -1202,6 +1226,20 @@ public final class PluginManager {
                 for (Listener l : listeners) {
                     try {
                         l.onPluginAutoDisabled(copy, shown);
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        });
+    }
+
+    private void notifyRuntimeChanged() {
+        main.post(new Runnable() {
+            @Override
+            public void run() {
+                for (Listener l : listeners) {
+                    try {
+                        l.onPluginRuntimeChanged();
                     } catch (Exception ignored) {
                     }
                 }
