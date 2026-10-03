@@ -40,6 +40,7 @@
             <item android:id="@+id/action_pgdl" android:icon="@drawable/ic_page_download" android:title="ページ保存" app:showAsAction="never" />
             <item android:id="@+id/action_num" android:icon="@drawable/ic_num" android:title="電卓" app:showAsAction="never" />
             <item android:id="@+id/action_plugins" android:title="拡張機能" app:showAsAction="never" />
+            <item android:id="@+id/action_plugin_commands" android:title="拡張機能コマンド" app:showAsAction="never" />
             <item android:id="@+id/action_exec" android:icon="@drawable/ic_terminal" android:title="exec" app:showAsAction="never" />
             <item android:id="@+id/action_grep" android:icon="@drawable/ic_copy" android:title="grep-i/md5" app:showAsAction="never" />
             <item android:id="@+id/action_qr" android:icon="@drawable/ic_qrcode" android:title="QRコード" app:showAsAction="never" />
