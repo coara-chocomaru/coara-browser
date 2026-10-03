@@ -222,6 +222,32 @@ public final class PluginRuntime {
         }
     }
 
+    public static void prepareForFullReload(WebView view) {
+        if (view == null) {
+            return;
+        }
+        try {
+            ViewState state = stateOf(view);
+            if (state == null) {
+                return;
+            }
+            PluginManager manager = PluginManager.get(view.getContext());
+            manager.reloadIfChanged();
+            int currentVersion = manager.version();
+            if (state.appliedVersion != currentVersion) {
+                syncStartScripts(view, state, manager);
+            }
+            state.injectedForNavigation = false;
+            state.navigationStartedAt = System.currentTimeMillis();
+            state.activeIds.clear();
+            synchronized (state.commands) {
+                state.commands.clear();
+            }
+        } catch (Throwable t) {
+            logFailure(view.getContext(), "prepareForFullReload", t);
+        }
+    }
+
     public static void onPageStarted(WebView view, String url) {
         if (view == null) {
             return;
