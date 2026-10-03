@@ -9,8 +9,8 @@ android {
     defaultConfig {
         minSdk = 24
         targetSdk = 31
-        versionCode = 279
-        versionName = "4.4.3-3"
+        versionCode = 298
+        versionName = "4.4.3-4"
         multiDexEnabled = true
         vectorDrawables.useSupportLibrary = true
         proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -19,7 +19,7 @@ android {
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
         targetCompatibility JavaVersion.VERSION_21
-        coreLibraryDesugaringEnabled true
+        coreLibraryDesugaringEnabled = true
     }
     
     signingConfigs {
