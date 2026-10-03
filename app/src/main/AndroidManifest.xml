@@ -107,7 +107,7 @@
             android:name=".MainActivity"
             android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:importantForAutofill="yes"
             android:networkSecurityConfig="@xml/network_security_config"
             android:windowSoftInputMode="adjustResize">
