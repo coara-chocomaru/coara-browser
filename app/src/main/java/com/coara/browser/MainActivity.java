@@ -23,7 +23,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
-import android.os.Looper;
 import android.os.Message;
 import android.os.Parcel;
 import android.text.InputType;
@@ -43,6 +42,7 @@ import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.webkit.WebViewDatabase;
 import android.webkit.WebBackForwardList;
+import android.webkit.WebHistoryItem;
 import android.webkit.HttpAuthHandler;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
@@ -90,6 +90,7 @@ import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.BlobDownloadBridge;
 import com.coara.browser.webview.TabOverviewDialog;
 import com.coara.browser.util.TabStateStore;
+import com.coara.browser.util.TabHistoryStore;
 import com.coara.browser.util.SwipeRefreshPolicy;
 import com.coara.browser.util.SpaStateManager;
 import com.coara.browser.util.CacheModePolicy;
@@ -101,6 +102,7 @@ import com.coara.browser.util.DownloadFallbackManager;
 import com.coara.browser.util.UiThread;
 import com.coara.browser.plugin.PluginHost;
 import com.coara.browser.plugin.PluginManagerActivity;
+import com.coara.browser.plugin.PluginManager;
 import com.coara.browser.plugin.PluginRuntime;
 import com.coara.browser.util.BrowserVisualSettings;
 
@@ -141,7 +143,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-public class MainActivity extends AppCompatActivity implements PluginHost {
+public class MainActivity extends AppCompatActivity implements PluginHost, PluginManager.Listener {
 
     private static final String PREF_NAME = BrowserConstants.PREF_NAME;
     private static final String KEY_CURRENT_TAB_ID = BrowserConstants.KEY_CURRENT_TAB_ID;
@@ -161,6 +163,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     private static final int FILE_SELECT_CODE = BrowserConstants.FILE_SELECT_CODE;
     private static final int MAX_TABS = BrowserConstants.MAX_TABS;
     private static final int MAX_HISTORY_SIZE = BrowserConstants.MAX_HISTORY_SIZE;
+    private static final int MAX_TAB_HISTORY_SIZE = BrowserConstants.MAX_HISTORY_SIZE;
     private static final String SENTINEL_FILENAME = BrowserConstants.SENTINEL_FILENAME;
     public static final String EXTRA_CLEAR_HISTORY = BrowserConstants.EXTRA_CLEAR_HISTORY;
     private static final long MAX_BACKGROUND_IMAGE_BYTES = 64L * 1024L * 1024L;
@@ -202,7 +205,6 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     private int currentMatchIndex = 0;
     private int totalMatches = 0;
     private final Set<WebView> externalTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
-    private final Set<WebView> stateSaveSuppressed = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
     private final List<Bookmark> bookmarks = new ArrayList<>();
     private final List<HistoryItem> historyItems = Collections.synchronizedList(new ArrayList<>());
     private boolean darkModeEnabled = false;
@@ -219,7 +221,6 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     private final Map<WebView, BlobDownloadBridge> blobDownloadBridges = new HashMap<>();
     private boolean defaultLoadsImagesAutomatically;
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
-    private WebView preloadedWebView = null;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
     private final Map<WebView, Bitmap> tabSnapshots = new HashMap<>();
@@ -229,10 +230,24 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     
     private final Map<WebView, Boolean> pullToRefreshEligibleCache = new HashMap<>();
     private final Map<WebView, PendingTab> pendingTabs = new HashMap<>();
+    private final Map<WebView, TabHistoryStore.State> tabHistoryStates = new HashMap<>();
+    private final Set<WebView> backNavigationTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
+    private final Set<WebView> customBackTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
+    private final Set<WebView> customBackNavigationTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
     private final Set<WebView> dirtyStateTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
     private final Set<WebView> dirtySnapshotTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
     private boolean historyDirty = false;
-    private boolean preloadScheduled = false;
+    private boolean pluginReloadPending = false;
+    private boolean pluginReloadRunning = false;
+    private int lastPluginRuntimeVersion = -1;
+    private TabHistoryStore tabHistoryStore;
+    private PluginManager pluginManager;
+    private final Runnable pluginReloadRunnable = new Runnable() {
+        @Override
+        public void run() {
+            reloadOpenTabsForPlugins();
+        }
+    };
     private final Runnable historySaveRunnable = new Runnable() {
         @Override
         public void run() {
@@ -335,6 +350,10 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         }
 
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        tabHistoryStore = new TabHistoryStore(getFilesDir(), MAX_TAB_HISTORY_SIZE);
+        pluginManager = PluginManager.get(this);
+        pluginManager.addListener(this);
+        lastPluginRuntimeVersion = pluginManager.runtimeVersion();
         checkSentinelAndClearTabsIfNecessary();
         ensureCacheSentinelExists();
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
@@ -383,7 +402,6 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         }
         updateTabCount();
 
-        preInitializeWebView();
         if (!defaultLoadsImagesAutomaticallyInitialized && !webViews.isEmpty()) {
             defaultLoadsImagesAutomatically = webViews.get(0).getSettings().getLoadsImagesAutomatically();
             defaultLoadsImagesAutomaticallyInitialized = true;
@@ -516,8 +534,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             return;
         }
         WebView current = getCurrentWebView();
-        if (current != null && current.canGoBack()) {
-            current.goBack();
+        if (current != null && goBackInCurrentTab(current)) {
             return;
         }
         if (current != null && externalTabs.remove(current)) {
@@ -549,6 +566,214 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         return TabStateStore.loadBundleFromFile(getFilesDir(), fileName);
     }
 
+    private int getTabId(WebView view) {
+        if (view == null) {
+            return -1;
+        }
+        Object tag = view.getTag();
+        return tag instanceof Integer ? (Integer) tag : -1;
+    }
+
+    private TabHistoryStore.State getTabHistoryState(WebView view) {
+        if (view == null || tabHistoryStore == null) {
+            return null;
+        }
+        TabHistoryStore.State state = tabHistoryStates.get(view);
+        if (state == null) {
+            int id = getTabId(view);
+            if (id < 0) {
+                return null;
+            }
+            state = tabHistoryStore.load(id);
+            tabHistoryStates.put(view, state);
+        }
+        return state;
+    }
+
+    private void syncTabHistoryFromWebView(WebView view) {
+        if (view == null || tabHistoryStore == null) {
+            return;
+        }
+        int id = getTabId(view);
+        if (id < 0) {
+            return;
+        }
+        WebBackForwardList list;
+        try {
+            list = view.copyBackForwardList();
+        } catch (Exception ignored) {
+            return;
+        }
+        ArrayList<TabHistoryStore.Entry> entries = new ArrayList<>();
+        for (int i = 0; i < list.getSize(); i++) {
+            WebHistoryItem item = list.getItemAtIndex(i);
+            if (item == null) {
+                continue;
+            }
+            String url = item.getUrl();
+            if (url == null || url.isEmpty()) {
+                continue;
+            }
+            entries.add(new TabHistoryStore.Entry(url, item.getTitle()));
+        }
+        TabHistoryStore.State state = new TabHistoryStore.State();
+        state.replace(entries, list.getCurrentIndex(), MAX_TAB_HISTORY_SIZE);
+        if (state.isEmpty()) {
+            String currentUrl = null;
+            try {
+                currentUrl = view.getUrl();
+            } catch (Exception ignored) {
+            }
+            if (currentUrl != null && !currentUrl.isEmpty()) {
+                state.record(currentUrl, view.getTitle(), MAX_TAB_HISTORY_SIZE);
+            }
+        }
+        TabHistoryStore.State previous = getTabHistoryState(view);
+        tabHistoryStates.put(view, state);
+        if (previous == null || !previous.contentEquals(state)) {
+            tabHistoryStore.save(id, state);
+        }
+    }
+
+    private void recordTabHistoryNavigation(WebView view, String url, String title) {
+        if (view == null || tabHistoryStore == null || url == null || url.isEmpty()) {
+            return;
+        }
+        int id = getTabId(view);
+        if (id < 0) {
+            return;
+        }
+        TabHistoryStore.State state = getTabHistoryState(view);
+        if (state == null) {
+            state = new TabHistoryStore.State();
+            tabHistoryStates.put(view, state);
+        }
+        if (state.record(url, title, MAX_TAB_HISTORY_SIZE)) {
+            tabHistoryStore.save(id, state);
+        }
+    }
+
+    private void saveTabHistoryState(WebView view) {
+        if (view == null || tabHistoryStore == null) {
+            return;
+        }
+        if (customBackTabs.contains(view)) {
+            int id = getTabId(view);
+            TabHistoryStore.State state = getTabHistoryState(view);
+            if (id >= 0 && state != null) {
+                tabHistoryStore.save(id, state);
+            }
+            return;
+        }
+        syncTabHistoryFromWebView(view);
+    }
+
+    private boolean goBackInCurrentTab(WebView view) {
+        if (view == null) {
+            return false;
+        }
+        TabHistoryStore.State state = getTabHistoryState(view);
+        if (state == null || state.isEmpty()) {
+            syncTabHistoryFromWebView(view);
+            state = getTabHistoryState(view);
+        }
+        if (state == null || !state.canGoBack()) {
+            return false;
+        }
+        TabHistoryStore.Entry previous = state.getPrevious();
+        if (previous == null || previous.getUrl().isEmpty()) {
+            return false;
+        }
+        backNavigationTabs.add(view);
+        if (!customBackTabs.contains(view) && view.canGoBack()) {
+            view.goBack();
+            return true;
+        }
+        state.moveBack();
+        customBackNavigationTabs.add(view);
+        int id = getTabId(view);
+        if (id >= 0) {
+            tabHistoryStore.save(id, state);
+        }
+        try {
+            view.clearHistory();
+        } catch (Exception ignored) {
+        }
+        try {
+            view.loadUrl(previous.getUrl());
+            return true;
+        } catch (Exception ignored) {
+            backNavigationTabs.remove(view);
+            customBackNavigationTabs.remove(view);
+            return false;
+        }
+    }
+
+    private void schedulePluginReload() {
+        pluginReloadPending = true;
+        UiThread.mainHandler().removeCallbacks(pluginReloadRunnable);
+        UiThread.mainHandler().postDelayed(pluginReloadRunnable, 180L);
+    }
+
+    private void reloadOpenTabsForPlugins() {
+        if (!pluginReloadPending || pluginReloadRunning || isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (pluginManager == null) {
+            return;
+        }
+        pluginReloadRunning = true;
+        try {
+            pluginManager.reloadIfChanged();
+            ArrayList<WebView> tabs;
+            synchronized (webViews) {
+                tabs = new ArrayList<>(webViews);
+            }
+            for (WebView tab : tabs) {
+                if (tab == null) {
+                    continue;
+                }
+                if (pendingTabs.containsKey(tab)) {
+                    continue;
+                }
+                String url;
+                try {
+                    url = tab.getUrl();
+                } catch (Exception ignored) {
+                    url = null;
+                }
+                if (url == null || url.isEmpty() || url.equals(START_PAGE)) {
+                    continue;
+                }
+                try {
+                    saveTabHistoryState(tab);
+                    tab.reload();
+                } catch (Exception ignored) {
+                }
+            }
+            lastPluginRuntimeVersion = pluginManager.runtimeVersion();
+            pluginReloadPending = false;
+        } finally {
+            pluginReloadRunning = false;
+        }
+    }
+
+    @Override
+    public void onPluginsChanged() {
+    }
+
+    @Override
+    public void onPluginAutoDisabled(com.coara.browser.plugin.PluginInfo info, String reason) {
+    }
+
+    @Override
+    public void onPluginRuntimeChanged() {
+        pluginReloadPending = true;
+        if (!hasWindowFocus()) {
+            return;
+        }
+        schedulePluginReload();
+    }
 
     private void handleIntent(Intent intent) {
         if (intent == null) {
@@ -623,8 +848,19 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pluginManager != null) {
+            pluginManager.reloadIfChanged();
+            int runtimeVersion = pluginManager.runtimeVersion();
+            if (runtimeVersion != lastPluginRuntimeVersion) {
+                lastPluginRuntimeVersion = runtimeVersion;
+                pluginReloadPending = true;
+            }
+        }
         resumeAllWebViewTimers();
         resumeCurrentWebView();
+        if (pluginReloadPending) {
+            schedulePluginReload();
+        }
         if (backgroundImageView != null && backgroundBitmap == null && BrowserVisualSettings.getBackgroundPath(pref) != null) {
             loadBackgroundImage();
         }
@@ -636,9 +872,9 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         captureSnapshotIfDirty();
         pauseCurrentWebView();
         pauseAllWebViewTimers();
-        super.onPause();
         flushHistory();
         saveTabsState();
+        super.onPause();
     }
 
     @Override
@@ -650,13 +886,18 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
     @Override
     protected void onDestroy() {
         BasicAuthManager.cancelPendingForActivity(MainActivity.this);
-        super.onDestroy();
         UiThread.mainHandler().removeCallbacks(historySaveRunnable);
+        UiThread.mainHandler().removeCallbacks(pluginReloadRunnable);
         flushHistory();
+        saveTabsState();
+        if (pluginManager != null) {
+            pluginManager.removeListener(this);
+        }
         pendingSpaHistoryTasks.clear();
         releaseAllWebViews();
         clearBackgroundBitmap();
         backgroundExecutor.shutdown();
+        super.onDestroy();
     }
 
     private void captureSnapshotIfDirty() {
@@ -681,8 +922,43 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             restoreCookiesForTab(pending.id, pending.url);
         } catch (Exception ignored) {
         }
+        TabHistoryStore.State historyState = tabHistoryStates.get(webView);
+        if (historyState == null) {
+            historyState = tabHistoryStore != null ? tabHistoryStore.load(pending.id) : new TabHistoryStore.State();
+            tabHistoryStates.put(webView, historyState);
+        }
         Bundle state = pending.useSavedState ? loadBundleFromFile("tab_state_" + pending.id + ".dat") : null;
-        restoreWebViewState(webView, state, pending.url);
+        boolean restored = restoreWebViewState(webView, state, pending.url);
+        boolean needsCustomBack = !restored;
+        if (restored && historyState != null && !historyState.isEmpty()) {
+            try {
+                WebBackForwardList nativeHistory = webView.copyBackForwardList();
+                String nativeUrl = webView.getUrl();
+                TabHistoryStore.Entry expected = historyState.getCurrent();
+                if (expected != null && nativeUrl != null && !nativeUrl.isEmpty()
+                        && !expected.getUrl().equals(nativeUrl)) {
+                    needsCustomBack = true;
+                }
+                if (nativeHistory.getSize() < historyState.size()) {
+                    needsCustomBack = true;
+                }
+            } catch (Exception ignored) {
+                needsCustomBack = true;
+            }
+        } else if (restored) {
+            syncTabHistoryFromWebView(webView);
+        }
+        if (needsCustomBack) {
+            customBackTabs.add(webView);
+            if (historyState == null || historyState.isEmpty()) {
+                recordTabHistoryNavigation(webView, pending.url, pending.title);
+            } else {
+                tabHistoryStore.save(pending.id, historyState);
+            }
+        } else {
+            customBackTabs.remove(webView);
+            syncTabHistoryFromWebView(webView);
+        }
     }
 
     private Bitmap loadSnapshotIfNeeded(WebView webView) {
@@ -792,6 +1068,10 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                 clearPendingSpaHistory(tab);
                 pullToRefreshEligibleCache.remove(tab);
                 pendingTabs.remove(tab);
+                tabHistoryStates.remove(tab);
+                backNavigationTabs.remove(tab);
+                customBackTabs.remove(tab);
+                customBackNavigationTabs.remove(tab);
                 originalUserAgents.remove(tab);
                 try {
                     tab.stopLoading();
@@ -806,22 +1086,6 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     tab.destroy();
                 } catch (Exception ignored) {
                 }
-            }
-            if (preloadedWebView != null) {
-                try {
-                    preloadedWebView.stopLoading();
-                } catch (Exception ignored) {
-                }
-                try {
-                    preloadedWebView.onPause();
-                } catch (Exception ignored) {
-                }
-                releaseBlobBridge(preloadedWebView);
-                try {
-                    preloadedWebView.destroy();
-                } catch (Exception ignored) {
-                }
-                preloadedWebView = null;
             }
             clearTabSnapshots();
         }
@@ -853,33 +1117,52 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         }
     }
 
-    private void restoreWebViewState(WebView webView, Bundle state, String url) {
+    private boolean restoreWebViewState(WebView webView, Bundle state, String url) {
         if (webView == null) {
+            return false;
+        }
+        if (state != null) {
+            try {
+                WebBackForwardList restored = webView.restoreState(state);
+                if (restored != null) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        try {
+            webView.loadUrl(url);
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private void saveTabStateBundle(WebView webView, int id) {
+        if (webView == null || id < 0) {
             return;
         }
         try {
-            if (state != null) {
-                WebBackForwardList restored = webView.restoreState(state);
-                if (restored == null) {
-                    webView.loadUrl(url);
-                }
-            } else {
-                webView.loadUrl(url);
-            }
-        } catch (Exception e) {
-            try {
-                webView.loadUrl(url);
-            } catch (Exception ignored) {
-            }
+            Bundle state = new Bundle();
+            webView.saveState(state);
+            saveBundleToFile(state, "tab_state_" + id + ".dat");
+            dirtyStateTabs.remove(webView);
+        } catch (Exception ignored) {
         }
     }
 
     private void saveTabsState() {
         synchronized (webViews) {
+            if (webViews.isEmpty() || tabHistoryStore == null) {
+                return;
+            }
             JSONArray tabsArray = new JSONArray();
             WebView currentTab = (currentTabIndex >= 0 && currentTabIndex < webViews.size())
                     ? webViews.get(currentTabIndex) : null;
+            int currentTabId = -1;
             for (WebView webView : webViews) {
+                if (webView == null) {
+                    continue;
+                }
                 Object tag = webView.getTag();
                 int id;
                 if (tag instanceof Integer) {
@@ -888,20 +1171,26 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     id = nextTabId++;
                     webView.setTag(id);
                 }
+                if (webView == currentTab) {
+                    currentTabId = id;
+                }
                 PendingTab pending = pendingTabs.get(webView);
                 String url;
                 String title;
                 if (pending != null) {
                     url = pending.url;
                     title = pending.title;
+                    TabHistoryStore.State historyState = tabHistoryStates.get(webView);
+                    if (historyState != null) {
+                        tabHistoryStore.save(id, historyState);
+                    }
                 } else {
                     url = webView.getUrl();
                     title = webView.getTitle();
-                }
-                boolean suppressed = stateSaveSuppressed.contains(webView);
-                if (suppressed) {
-                    url = START_PAGE;
-                    title = "";
+                    saveTabHistoryState(webView);
+                    if (webView == currentTab || dirtyStateTabs.remove(webView)) {
+                        saveTabStateBundle(webView, id);
+                    }
                 }
                 if (url == null) {
                     url = "";
@@ -914,20 +1203,13 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     tabObj.put("id", id);
                     tabObj.put("url", url);
                     tabObj.put("title", title);
-                } catch (JSONException e) {
-                    e.printStackTrace();
+                } catch (JSONException ignored) {
                 }
                 tabsArray.put(tabObj);
 
-                if (pending == null && !suppressed && (webView == currentTab || dirtyStateTabs.remove(webView))) {
-                    Bundle state = new Bundle();
-                    webView.saveState(state);
-                    saveBundleToFile(state, "tab_state_" + id + ".dat");
-                    dirtyStateTabs.remove(webView);
-                }
                 if (dirtySnapshotTabs.remove(webView)) {
                     final Bitmap finalSnap = tabSnapshots.get(webView);
-                    if (finalSnap != null) {
+                    if (finalSnap != null && !finalSnap.isRecycled()) {
                         final int finalIdForSnap = id;
                         backgroundExecutor.execute(() -> {
                             try {
@@ -939,26 +1221,24 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                                     finalSnap.compress(Bitmap.CompressFormat.PNG, 80, fos);
                                     fos.flush();
                                 }
-                            } catch (Exception e) {
-                                e.printStackTrace();
+                            } catch (Exception ignored) {
                             }
                         });
                     }
                 }
             }
-            Object currentTag = getCurrentWebView().getTag();
-            int currentTabId;
-            if (currentTag instanceof Integer) {
-                currentTabId = (Integer) currentTag;
-            } else {
-                currentTabId = nextTabId++;
-                getCurrentWebView().setTag(currentTabId);
+            if (currentTabId < 0 && !webViews.isEmpty()) {
+                WebView current = getCurrentWebView();
+                currentTabId = getTabId(current);
+                if (currentTabId < 0) {
+                    currentTabId = nextTabId++;
+                    current.setTag(currentTabId);
+                }
             }
-
             pref.edit()
                     .putString(KEY_TABS, tabsArray.toString())
                     .putInt(KEY_CURRENT_TAB_ID, currentTabId)
-                    .apply();
+                    .commit();
         }
     }
 
@@ -981,6 +1261,10 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     }
                     pullToRefreshEligibleCache.remove(old);
                     pendingTabs.remove(old);
+                    tabHistoryStates.remove(old);
+                    backNavigationTabs.remove(old);
+                    customBackTabs.remove(old);
+                    customBackNavigationTabs.remove(old);
                     originalUserAgents.remove(old);
                     try {
                         old.stopLoading();
@@ -991,7 +1275,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                 }
 
                 JSONArray tabsArray = new JSONArray(tabsJsonStr);
-                int maxId = 0;
+                int maxId = -1;
                 for (int i = 0; i < tabsArray.length(); i++) {
                     JSONObject tabObj = tabsArray.getJSONObject(i);
                     int id = tabObj.getInt("id");
@@ -1000,20 +1284,19 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     WebView webView = createNewWebView();
                     webView.setTag(id);
                     webViews.add(webView);
-                    if (id > maxId) maxId = id;
-                    if (tabsArray.length() == 1 || id == currentTabId) {
-                        try {
-                            restoreCookiesForTab(id, url);
-                        } catch (Exception ignored) {
-                        }
-                        Bundle state = loadBundleFromFile("tab_state_" + id + ".dat");
-                        restoreWebViewState(webView, state, url);
-                    } else {
-                        pendingTabs.put(webView, new PendingTab(id, url, title, true));
+                    if (id > maxId) {
+                        maxId = id;
                     }
+                    TabHistoryStore.State historyState = tabHistoryStore != null
+                            ? tabHistoryStore.load(id) : new TabHistoryStore.State();
+                    tabHistoryStates.put(webView, historyState);
+                    pendingTabs.put(webView, new PendingTab(id, url, title, true));
                     webView.onPause();
                 }
                 nextTabId = maxId + 1;
+                if (nextTabId < 0) {
+                    nextTabId = 0;
+                }
                 if (webViews.isEmpty()) {
                     WebView initialWebView = createNewWebView();
                     initialWebView.setTag(nextTabId);
@@ -1024,10 +1307,10 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     initialWebView.loadUrl(START_PAGE);
                     updatePullToRefreshState(initialWebView, START_PAGE);
                 } else {
+                    currentTabIndex = 0;
                     boolean found = false;
                     for (int i = 0; i < webViews.size(); i++) {
-                        Object tag = webViews.get(i).getTag();
-                        if (tag instanceof Integer && ((Integer) tag) == currentTabId) {
+                        if (getTabId(webViews.get(i)) == currentTabId) {
                             currentTabIndex = i;
                             found = true;
                             break;
@@ -1036,16 +1319,19 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     if (!found) {
                         currentTabIndex = 0;
                     }
-                    ensureTabLoaded(getCurrentWebView());
-                    webViewContainer.addView(getCurrentWebView());
+                    WebView current = getCurrentWebView();
+                    ensureTabLoaded(current);
+                    webViewContainer.addView(current);
                     try {
-                        getCurrentWebView().onResume();
+                        current.onResume();
                     } catch (Exception ignored) {
                     }
-                    updatePullToRefreshState(getCurrentWebView(), getCurrentWebView().getUrl());
+                    updatePullToRefreshState(current, current.getUrl());
                 }
             } catch (JSONException e) {
                 e.printStackTrace();
+                tabHistoryStates.clear();
+                pendingTabs.clear();
                 WebView initialWebView = createNewWebView();
                 initialWebView.setTag(nextTabId);
                 nextTabId++;
@@ -1079,6 +1365,9 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             editor.remove(KEY_TABS);
             editor.remove(KEY_CURRENT_TAB_ID);
             editor.apply();
+            if (tabHistoryStore != null) {
+                tabHistoryStore.deleteAll();
+            }
             webViews.clear();
         }
     }
@@ -1116,41 +1405,8 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         cookieManager.setAcceptThirdPartyCookies(webView, true);
     }
 
-    private void preInitializeWebView() {
-        if (preloadedWebView != null || preloadScheduled) {
-            return;
-        }
-        preloadScheduled = true;
-        Looper.getMainLooper().getQueue().addIdleHandler(new android.os.MessageQueue.IdleHandler() {
-            @Override
-            public boolean queueIdle() {
-                preloadScheduled = false;
-                if (preloadedWebView != null || isFinishing() || isDestroyed()) {
-                    return false;
-                }
-                try {
-                    WebView webView = new WebView(MainActivity.this);
-                    WebSettings settings = webView.getSettings();
-                    applyOptimizedSettings(settings);
-                    applyCookiePolicy(webView);
-                    webView.onPause();
-                    preloadedWebView = webView;
-                } catch (Exception ignored) {
-                }
-                return false;
-            }
-        });
-    }
-
     private WebView createNewWebView() {
-        WebView webView;
-        if (preloadedWebView != null) {
-            webView = preloadedWebView;
-            preloadedWebView = null;
-            preInitializeWebView();
-        } else {
-            webView = new WebView(this);
-        }
+        WebView webView = new WebView(this);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
@@ -1437,39 +1693,52 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                 ExternalDownloadTabTracker.onPageFinished(view, url);
                 PluginRuntime.onPageFinished(view, url);
                 installDownloadHintScript(view);
-            super.onPageFinished(view, url);
-                  applyBrowserVisualSettings(view);
-                  dirtyStateTabs.add(view);
-            if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
-             UiThread.postDelayed(() -> injectLazyLoading(view), 200);
-            }
-            view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
-            WebViewOptimizationUtils.injectSpaProbe(view);
-            final String capturedUrl = url;
-            UiThread.postDelayed(() -> {
-                try {
-                    String cur = view.getUrl();
-                    if (cur != null && cur.equals(capturedUrl)) {
-                        WebViewOptimizationUtils.injectSpaProbe(view);
+                super.onPageFinished(view, url);
+                applyBrowserVisualSettings(view);
+                dirtyStateTabs.add(view);
+                if (url.startsWith("https://m.youtube.com") || url.startsWith("https://www.youtube.com")) {
+                    UiThread.postDelayed(() -> injectLazyLoading(view), 200);
+                }
+                view.getSettings().setCacheMode(CacheModePolicy.determineForUrl(url));
+                WebViewOptimizationUtils.injectSpaProbe(view);
+                final String capturedUrl = url;
+                UiThread.postDelayed(() -> {
+                    try {
+                        String cur = view.getUrl();
+                        if (cur != null && cur.equals(capturedUrl)) {
+                            WebViewOptimizationUtils.injectSpaProbe(view);
+                        }
+                    } catch (Exception ignored) {
                     }
-                } catch (Exception ignored) {}
-            }, 1500);
-            if (url.equals(START_PAGE)) {
-             faviconImageView.setVisibility(View.GONE);
-             urlEditText.setText("");
-            } else {
-            faviconImageView.setVisibility(View.VISIBLE);
-            if (view == getCurrentWebView()) {
-            urlEditText.setText(url);
-            updatePullToRefreshState(view, url);
-            }
-           }
-            clearPendingSpaHistory(view);
-            stateSaveSuppressed.remove(view);
-            addHistory(url, view.getTitle());
-            if (swipeRefreshLayout.isRefreshing()) {
-              swipeRefreshLayout.setRefreshing(false);
-            }
+                }, 1500);
+                if (url.equals(START_PAGE)) {
+                    faviconImageView.setVisibility(View.GONE);
+                    if (view == getCurrentWebView()) {
+                        urlEditText.setText("");
+                    }
+                } else {
+                    faviconImageView.setVisibility(View.VISIBLE);
+                    if (view == getCurrentWebView()) {
+                        urlEditText.setText(url);
+                        updatePullToRefreshState(view, url);
+                    }
+                }
+                clearPendingSpaHistory(view);
+                boolean customBackNavigation = customBackNavigationTabs.remove(view);
+                boolean backNavigation = backNavigationTabs.remove(view);
+                if (customBackNavigation) {
+                    saveTabHistoryState(view);
+                } else if (customBackTabs.contains(view)) {
+                    recordTabHistoryNavigation(view, url, view.getTitle());
+                } else {
+                    syncTabHistoryFromWebView(view);
+                }
+                if (!backNavigation) {
+                    addHistory(url, view.getTitle());
+                }
+                if (swipeRefreshLayout.isRefreshing() && view == getCurrentWebView()) {
+                    swipeRefreshLayout.setRefreshing(false);
+                }
             }
             @Override
             public void onReceivedHttpAuthRequest(WebView view, HttpAuthHandler handler, String host, String realm) {
@@ -2221,10 +2490,18 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                 ExternalDownloadTabTracker.clear(webView);
                 try {
                     webView.stopLoading();
+                    webView.clearHistory();
                 } catch (Exception ignored) {
                 }
+                int tabId = getTabId(webView);
+                if (tabId >= 0 && tabHistoryStore != null) {
+                    tabHistoryStore.delete(tabId);
+                }
+                tabHistoryStates.remove(webView);
+                backNavigationTabs.remove(webView);
+                customBackTabs.remove(webView);
+                customBackNavigationTabs.remove(webView);
                 currentTabIndex = 0;
-                stateSaveSuppressed.add(webView);
                 webView.loadUrl(START_PAGE);
                 runOnUiThread(() -> {
                     try {
@@ -2246,8 +2523,15 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             }
             pullToRefreshEligibleCache.remove(webView);
             pendingTabs.remove(webView);
+            tabHistoryStates.remove(webView);
+            backNavigationTabs.remove(webView);
+            customBackTabs.remove(webView);
+            customBackNavigationTabs.remove(webView);
             originalUserAgents.remove(webView);
             if (id != -1) {
+                if (tabHistoryStore != null) {
+                    tabHistoryStore.delete(id);
+                }
                 File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                 safeDeleteFile(new File(getFilesDir(), "tab_state_" + id + ".dat"));
                 if (snapFile.exists()) {
@@ -2578,8 +2862,16 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             }
             Object removedTag = removed.getTag();
             if (removedTag instanceof Integer) {
-                safeDeleteFile(new File(getFilesDir(), "tab_state_" + removedTag + ".dat"));
-                File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedTag + ".png");
+                int removedId = (Integer) removedTag;
+                if (tabHistoryStore != null) {
+                    tabHistoryStore.delete(removedId);
+                }
+                tabHistoryStates.remove(removed);
+                backNavigationTabs.remove(removed);
+                customBackTabs.remove(removed);
+                customBackNavigationTabs.remove(removed);
+                safeDeleteFile(new File(getFilesDir(), "tab_state_" + removedId + ".dat"));
+                File snapFile = new File(getFilesDir(), "tab_snapshot_" + removedId + ".png");
                 if (snapFile.exists()) {
                     snapFile.delete();
                 }
@@ -2600,6 +2892,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         newWebView.setTag(nextTabId);
         nextTabId++;
         webViews.add(newWebView);
+        tabHistoryStates.put(newWebView, new TabHistoryStore.State());
         updateTabCount();
         switchToTab(webViews.size() - 1);
         getCurrentWebView().loadUrl(START_PAGE);
@@ -2612,7 +2905,10 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             return;
         }
         WebView newWebView = createNewWebView();
+        newWebView.setTag(nextTabId);
+        nextTabId++;
         webViews.add(newWebView);
+        tabHistoryStates.put(newWebView, new TabHistoryStore.State());
         updateTabCount();
         switchToTab(webViews.size() - 1);
         newWebView.loadUrl(url);
@@ -2623,6 +2919,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
         if (index < 0 || index >= webViews.size() || index == currentTabIndex) return;
         WebView current = getCurrentWebView();
         if (current != null) {
+            saveTabHistoryState(current);
             captureTabSnapshot(current);
             try {
                 current.onPause();
@@ -2676,6 +2973,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                     if (current == null || !current.equals(url)) return;
                     updatePullToRefreshState(owner, url);
                     urlEditText.setText(url);
+                    recordTabHistoryNavigation(owner, url, owner.getTitle());
                     addHistory(url, owner.getTitle());
                     dirtyStateTabs.add(owner);
                 } finally {
@@ -3192,8 +3490,15 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
                 }
                 pullToRefreshEligibleCache.remove(w);
                 pendingTabs.remove(w);
+                tabHistoryStates.remove(w);
+                backNavigationTabs.remove(w);
+                customBackTabs.remove(w);
+                customBackNavigationTabs.remove(w);
                 originalUserAgents.remove(w);
                 if (id != -1) {
+                    if (tabHistoryStore != null) {
+                        tabHistoryStore.delete(id);
+                    }
                     File snapFile = new File(getFilesDir(), "tab_snapshot_" + id + ".png");
                     safeDeleteFile(new File(getFilesDir(), "tab_state_" + id + ".dat"));
                     if (snapFile.exists()) {
@@ -3211,8 +3516,15 @@ public class MainActivity extends AppCompatActivity implements PluginHost {
             webViews.clear();
             webViews.add(current);
             currentTabIndex = 0;
+            int currentId = getTabId(current);
+            if (currentId >= 0 && tabHistoryStore != null) {
+                tabHistoryStore.delete(currentId);
+            }
+            tabHistoryStates.remove(current);
+            backNavigationTabs.remove(current);
+            customBackTabs.remove(current);
+            customBackNavigationTabs.remove(current);
             try {
-                stateSaveSuppressed.add(current);
                 current.clearHistory();
                 current.loadUrl(START_PAGE);
             } catch (Exception ignored) {
@@ -3847,7 +4159,7 @@ private void saveHistory() {
         }
         array.put(obj);
     }
-    pref.edit().putString(KEY_HISTORY, array.toString()).apply();
+    pref.edit().putString(KEY_HISTORY, array.toString()).commit();
 }
 
 private boolean shouldRecordHistory(String url) {
