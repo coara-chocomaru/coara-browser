@@ -99,6 +99,7 @@ import com.coara.browser.util.ExternalDownloadTabTracker;
 import com.coara.browser.util.DownloadSupport;
 import com.coara.browser.util.DownloadFallbackManager;
 import com.coara.browser.util.UiThread;
+import com.coara.browser.plugin.PluginHost;
 import com.coara.browser.plugin.PluginManagerActivity;
 import com.coara.browser.plugin.PluginRuntime;
 import com.coara.browser.util.BrowserVisualSettings;
@@ -140,7 +141,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements PluginHost {
 
     private static final String PREF_NAME = BrowserConstants.PREF_NAME;
     private static final String KEY_CURRENT_TAB_ID = BrowserConstants.KEY_CURRENT_TAB_ID;
@@ -198,10 +199,10 @@ public class MainActivity extends AppCompatActivity {
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
-    private int currentHistoryIndex = -1;
     private int currentMatchIndex = 0;
     private int totalMatches = 0;
-    private boolean isBackNavigation = false;
+    private final Set<WebView> externalTabs = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
+    private final Set<WebView> stateSaveSuppressed = Collections.newSetFromMap(new WeakHashMap<WebView, Boolean>());
     private final List<Bookmark> bookmarks = new ArrayList<>();
     private final List<HistoryItem> historyItems = Collections.synchronizedList(new ArrayList<>());
     private boolean darkModeEnabled = false;
@@ -355,12 +356,6 @@ public class MainActivity extends AppCompatActivity {
         };
         loadBookmarks();
         loadHistory();
-        if (!historyItems.isEmpty()) {
-            currentHistoryIndex = historyItems.size() - 1;
-        }
-         else {
-            currentHistoryIndex = -1;
-         }
         urlEditText = findViewById(R.id.urlEditText);
         urlEditText.setImeOptions(EditorInfo.IME_ACTION_GO);
         faviconImageView = findViewById(R.id.favicon);
@@ -521,23 +516,31 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
         WebView current = getCurrentWebView();
-        if (current != null && current.canGoBack()) { 
+        if (current != null && current.canGoBack()) {
             current.goBack();
-            isBackNavigation = true;
-            if (currentHistoryIndex > 0) {
-                currentHistoryIndex--; 
-            }
-        } else if (currentHistoryIndex > 0) {
-            isBackNavigation = true;
-            currentHistoryIndex--;
-            HistoryItem previousItem = historyItems.get(currentHistoryIndex);
-            current.loadUrl(previousItem.getUrl());
-        } else {
-            Toast.makeText(MainActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
-           }
+            return;
+        }
+        if (current != null && externalTabs.remove(current)) {
+            returnToCallingApp(current);
+            return;
+        }
+        Toast.makeText(MainActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
          }
      });
     }
+
+    private void returnToCallingApp(WebView tab) {
+        if (webViews.size() > 1) {
+            closeTab(tab);
+        }
+        moveTaskToBack(true);
+    }
+
+    private void markExternalTab(WebView tab, String url) {
+        ExternalDownloadTabTracker.markExternal(tab, url);
+        externalTabs.add(tab);
+    }
+
     private void saveBundleToFile(Bundle bundle, String fileName) {
         TabStateStore.saveBundleToFile(getFilesDir(), bundle, fileName);
     }
@@ -557,10 +560,11 @@ public class MainActivity extends AppCompatActivity {
             if (data != null) {
                 String url = data.toString();
                 if (BrowserUrlRouter.isWebUrl(url)) {
+                    int tabsBefore = webViews.size();
                     createNewTab(url);
                     WebView current = getCurrentWebView();
-                    if (current != null) {
-                        ExternalDownloadTabTracker.markExternal(current, url);
+                    if (current != null && webViews.size() > tabsBefore) {
+                        markExternalTab(current, url);
                     }
                 } else {
                     BrowserUrlRouter.handleUrlLoading(this, getCurrentWebView(), url);
@@ -573,10 +577,11 @@ public class MainActivity extends AppCompatActivity {
                 String extracted = extractUrlFromSharedText(sharedText.trim());
                 String url = BrowserUrlRouter.normalizeUserInput(extracted);
                 if (!url.isEmpty()) {
+                    int tabsBefore = webViews.size();
                     createNewTab(url);
                     WebView current = getCurrentWebView();
-                    if (current != null) {
-                        ExternalDownloadTabTracker.markExternal(current, url);
+                    if (current != null && webViews.size() > tabsBefore) {
+                        markExternalTab(current, url);
                     }
                 }
             }
@@ -586,7 +591,12 @@ public class MainActivity extends AppCompatActivity {
             if (query != null && !query.trim().isEmpty()) {
                 String url = BrowserUrlRouter.normalizeUserInput(query.trim());
                 if (!url.isEmpty()) {
+                    int tabsBefore = webViews.size();
                     createNewTab(url);
+                    WebView current = getCurrentWebView();
+                    if (current != null && webViews.size() > tabsBefore) {
+                        markExternalTab(current, url);
+                    }
                 }
             }
             setIntent(new Intent());
@@ -888,6 +898,11 @@ public class MainActivity extends AppCompatActivity {
                     url = webView.getUrl();
                     title = webView.getTitle();
                 }
+                boolean suppressed = stateSaveSuppressed.contains(webView);
+                if (suppressed) {
+                    url = START_PAGE;
+                    title = "";
+                }
                 if (url == null) {
                     url = "";
                 }
@@ -904,7 +919,7 @@ public class MainActivity extends AppCompatActivity {
                 }
                 tabsArray.put(tabObj);
 
-                if (pending == null && (webView == currentTab || dirtyStateTabs.remove(webView))) {
+                if (pending == null && !suppressed && (webView == currentTab || dirtyStateTabs.remove(webView))) {
                     Bundle state = new Bundle();
                     webView.saveState(state);
                     saveBundleToFile(state, "tab_state_" + id + ".dat");
@@ -1450,12 +1465,8 @@ public class MainActivity extends AppCompatActivity {
             }
            }
             clearPendingSpaHistory(view);
-            if (!isBackNavigation) {
-            addHistory(url, view.getTitle()); 
-            currentHistoryIndex = historyItems.size() - 1;
-           } else {
-            isBackNavigation = false;
-           }
+            stateSaveSuppressed.remove(view);
+            addHistory(url, view.getTitle());
             if (swipeRefreshLayout.isRefreshing()) {
               swipeRefreshLayout.setRefreshing(false);
             }
@@ -2213,6 +2224,7 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {
                 }
                 currentTabIndex = 0;
+                stateSaveSuppressed.add(webView);
                 webView.loadUrl(START_PAGE);
                 runOnUiThread(() -> {
                     try {
@@ -2529,6 +2541,31 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    @Override
+    public void onPluginOpenTab(String url) {
+        if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+            runOnUiThread(() -> createNewTab(url));
+        }
+    }
+
+    private void showPluginCommands() {
+        final WebView current = getCurrentWebView();
+        final java.util.List<PluginRuntime.PluginCommand> commands = PluginRuntime.getCommands(current);
+        if (commands.isEmpty()) {
+            Toast.makeText(MainActivity.this, "このページで使えるコマンドはありません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[commands.size()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = commands.get(i).pluginTitle + ": " + commands.get(i).title;
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                .setTitle("拡張機能コマンド")
+                .setItems(labels, (d, which) -> PluginRuntime.runCommand(current, commands.get(which).commandId))
+                .setNegativeButton("閉じる", null)
+                .show();
+    }
+
     private void createNewTab() {
         if (webViews.size() >= MAX_TABS) {
             WebView removed = webViews.remove(0);
@@ -2791,6 +2828,8 @@ public class MainActivity extends AppCompatActivity {
             startActivity(intent);
         } else if (id == R.id.action_plugins) {
             startActivity(new Intent(MainActivity.this, PluginManagerActivity.class));
+        } else if (id == R.id.action_plugin_commands) {
+            showPluginCommands();
         } else if (id == R.id.action_exec) {
             startActivity(new Intent(MainActivity.this, exec.class));
         } else if (id == R.id.action_downloads) {
@@ -2936,21 +2975,7 @@ public class MainActivity extends AppCompatActivity {
             }
             invalidateOptionsMenu();
         } else if (id == R.id.action_clear_history) {
-            WebView current = getCurrentWebView();
-            if (current != null) {
-                current.clearHistory();
-            }
-            historyItems.clear();
-            saveHistory();
-            clearWebStorage();
-            clearPageCache();
-            clearSSL();
-            clearTabs();
-            WebViewDatabase.getInstance(MainActivity.this).clearFormData();
-            BasicAuthManager.clear(MainActivity.this);
-            CookieManager cookieManager = CookieManager.getInstance();
-            cookieManager.removeAllCookies(null);
-            cookieManager.flush();
+            clearAllBrowsingData();
             urlEditText.setInputType(EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_VARIATION_URI | EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
             urlEditText.setRawInputType(EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_VARIATION_URI | EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
             urlEditText.setPrivateImeOptions("nm");
@@ -3054,6 +3079,96 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
+    private void clearAllBrowsingData() {
+        synchronized (historyItems) {
+            historyItems.clear();
+        }
+        historyDirty = false;
+        UiThread.mainHandler().removeCallbacks(historySaveRunnable);
+        saveHistory();
+        ArrayList<WebView> all;
+        synchronized (webViews) {
+            all = new ArrayList<>(webViews);
+        }
+        for (WebView w : all) {
+            try {
+                w.clearHistory();
+                w.clearCache(true);
+                w.clearFormData();
+                w.clearSslPreferences();
+                w.clearMatches();
+            } catch (Exception ignored) {
+            }
+        }
+        clearWebStorage();
+        clearTabs();
+        dirtyStateTabs.clear();
+        dirtySnapshotTabs.clear();
+        purgeTabFiles();
+        purgeFaviconFiles();
+        if (faviconCache != null) {
+            faviconCache.evictAll();
+        }
+        try {
+            WebViewDatabase db = WebViewDatabase.getInstance(MainActivity.this);
+            db.clearFormData();
+            db.clearHttpAuthUsernamePassword();
+        } catch (Exception ignored) {
+        }
+        BasicAuthManager.clear(MainActivity.this);
+        try {
+            android.webkit.GeolocationPermissions.getInstance().clearAll();
+        } catch (Exception ignored) {
+        }
+        CookieManager cookieManager = CookieManager.getInstance();
+        cookieManager.removeAllCookies(null);
+        cookieManager.removeSessionCookies(null);
+        cookieManager.flush();
+        saveTabsState();
+        urlEditText.setInputType(EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_VARIATION_URI | EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        urlEditText.setRawInputType(EditorInfo.TYPE_CLASS_TEXT | EditorInfo.TYPE_TEXT_VARIATION_URI | EditorInfo.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        urlEditText.setPrivateImeOptions("nm");
+        urlEditText.setAutofillHints("");
+        urlEditText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        urlEditText.setText("");
+        Toast.makeText(MainActivity.this, "履歴、フォームデータ、検索候補、及びタブとCookieを消去しました", Toast.LENGTH_SHORT).show();
+    }
+
+    private void purgeTabFiles() {
+        final File dir = getFilesDir();
+        backgroundExecutor.execute(() -> {
+            File[] files = dir.listFiles();
+            if (files == null) {
+                return;
+            }
+            for (File f : files) {
+                String n = f.getName();
+                if ((n.startsWith("tab_state_") && n.endsWith(".dat")) || (n.startsWith("tab_snapshot_") && n.endsWith(".png"))) {
+                    safeDeleteFile(f);
+                }
+            }
+        });
+    }
+
+    private void purgeFaviconFiles() {
+        final File dir = new File(getFilesDir(), "favicons");
+        final Set<String> keep = new java.util.HashSet<>();
+        for (Bookmark b : new ArrayList<>(bookmarks)) {
+            keep.add(getFaviconFilename(b.getUrl()));
+        }
+        backgroundExecutor.execute(() -> {
+            File[] files = dir.listFiles();
+            if (files == null) {
+                return;
+            }
+            for (File f : files) {
+                if (!keep.contains(f.getName())) {
+                    safeDeleteFile(f);
+                }
+            }
+        });
+    }
+
     private void clearTabs() {
         synchronized (webViews) {
             WebView current = getCurrentWebView();
@@ -3097,6 +3212,7 @@ public class MainActivity extends AppCompatActivity {
             webViews.add(current);
             currentTabIndex = 0;
             try {
+                stateSaveSuppressed.add(current);
                 current.clearHistory();
                 current.loadUrl(START_PAGE);
             } catch (Exception ignored) {
@@ -3715,8 +3831,12 @@ private void showHistoryDialog() {
 }
 
 private void saveHistory() {
+    ArrayList<HistoryItem> copy;
+    synchronized (historyItems) {
+        copy = new ArrayList<>(historyItems);
+    }
     JSONArray array = new JSONArray();
-    for (HistoryItem item : historyItems) {
+    for (HistoryItem item : copy) {
         JSONObject obj = new JSONObject();
         try {
             obj.put("title", item.getTitle());
@@ -3730,14 +3850,35 @@ private void saveHistory() {
     pref.edit().putString(KEY_HISTORY, array.toString()).apply();
 }
 
+private boolean shouldRecordHistory(String url) {
+    if (url == null || url.isEmpty() || url.equals(START_PAGE)) {
+        return false;
+    }
+    String lower = url.toLowerCase(Locale.ROOT);
+    return !(lower.startsWith("about:") || lower.startsWith("data:") || lower.startsWith("javascript:")
+            || lower.startsWith("blob:") || lower.startsWith("chrome-error:")
+            || lower.startsWith("file:///android_asset") || lower.startsWith("file:///android_res"));
+}
+
 private void addHistory(String url, String title) {
-    if (url == null || url.isEmpty() || url.equals("about:blank"))
+    if (!shouldRecordHistory(url)) {
         return;
-    if (!historyItems.isEmpty() && historyItems.get(historyItems.size() - 1).getUrl().equals(url))
-        return;
-    historyItems.add(new HistoryItem(title, url, System.currentTimeMillis()));
-    if (historyItems.size() > MAX_HISTORY_SIZE) {
-        historyItems.remove(0);
+    }
+    synchronized (historyItems) {
+        if (!historyItems.isEmpty()) {
+            HistoryItem last = historyItems.get(historyItems.size() - 1);
+            if (last.getUrl().equals(url)) {
+                if ((last.getTitle() == null || last.getTitle().isEmpty()) && title != null && !title.isEmpty()) {
+                    historyItems.set(historyItems.size() - 1, new HistoryItem(title, url, last.getTimestamp()));
+                    scheduleHistorySave();
+                }
+                return;
+            }
+        }
+        historyItems.add(new HistoryItem(title == null ? "" : title, url, System.currentTimeMillis()));
+        while (historyItems.size() > MAX_HISTORY_SIZE) {
+            historyItems.remove(0);
+        }
     }
     scheduleHistorySave();
 }
@@ -3867,7 +4008,12 @@ private class HistoryAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolde
     private void rebuildRows() {
         rows.clear();
         String lastGroupKey = null;
-        for (HistoryItem item : sourceItems) {
+        ArrayList<HistoryItem> copy;
+        synchronized (sourceItems) {
+            copy = new ArrayList<>(sourceItems);
+        }
+        Collections.reverse(copy);
+        for (HistoryItem item : copy) {
             String groupKey = groupKeyFormat.format(new Date(item.getTimestamp()));
             if (!groupKey.equals(lastGroupKey)) {
                 rows.add(HistoryRow.header(headerFormat.format(new Date(item.getTimestamp()))));

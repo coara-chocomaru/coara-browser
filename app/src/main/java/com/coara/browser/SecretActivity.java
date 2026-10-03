@@ -89,6 +89,7 @@ import com.coara.browser.util.BrowserUrlRouter;
 import com.coara.browser.webview.WebViewOptimizationUtils;
 import com.coara.browser.webview.BlobDownloadBridge;
 import com.coara.browser.util.UiThread;
+import com.coara.browser.plugin.PluginHost;
 import com.coara.browser.plugin.PluginManagerActivity;
 import com.coara.browser.plugin.PluginRuntime;
 
@@ -121,7 +122,7 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 @SuppressWarnings("deprecation")
-public class SecretActivity extends AppCompatActivity {
+public class SecretActivity extends AppCompatActivity implements PluginHost {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|yahoo|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "SecretBrowserPrefs";
@@ -173,10 +174,8 @@ public class SecretActivity extends AppCompatActivity {
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
-    private int currentHistoryIndex = -1;
     private int currentMatchIndex = 0;
     private int totalMatches = 0;
-    private boolean isBackNavigation = false;
     private final List<Bookmark> bookmarks = new ArrayList<>();
     private final List<HistoryItem> historyItems = new ArrayList<>();
 
@@ -304,7 +303,6 @@ public class SecretActivity extends AppCompatActivity {
         }
         loadBookmarks();
         historyItems.clear();
-        currentHistoryIndex = -1;
         if (pref != null) {
             pref.edit().remove(KEY_HISTORY).apply();
         }
@@ -451,20 +449,11 @@ public class SecretActivity extends AppCompatActivity {
             return;
         }
         WebView current = getCurrentWebView();
-        if (current != null && current.canGoBack()) {  
+        if (current != null && current.canGoBack()) {
             current.goBack();
-            isBackNavigation = true;
-            if (currentHistoryIndex > 0) {
-                currentHistoryIndex--; 
-            }
-        } else if (currentHistoryIndex > 0) {
-            isBackNavigation = true;
-            currentHistoryIndex--;
-            HistoryItem previousItem = historyItems.get(currentHistoryIndex);
-            current.loadUrl(previousItem.getUrl());
-        } else {
-            Toast.makeText(SecretActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
-           }
+            return;
+        }
+        Toast.makeText(SecretActivity.this, "履歴がありません", Toast.LENGTH_SHORT).show();
          }
        });
     }
@@ -480,7 +469,6 @@ public class SecretActivity extends AppCompatActivity {
             clearTabs();
         }
         historyItems.clear();
-        currentHistoryIndex = -1;
         if (pref != null) {
             pref.edit().remove(KEY_HISTORY).apply();
         }
@@ -533,7 +521,6 @@ public class SecretActivity extends AppCompatActivity {
                 if (BrowserUrlRouter.isWebUrl(url)) {
                     clearTabs();
                     historyItems.clear();
-                    currentHistoryIndex = -1;
                     if (pref != null) {
                         pref.edit().remove(KEY_HISTORY).apply();
                     }
@@ -1140,12 +1127,7 @@ public class SecretActivity extends AppCompatActivity {
             }
            }
          clearPendingSpaHistory(view);
-         if (!isBackNavigation) {
-            addHistory(url, view.getTitle()); 
-            currentHistoryIndex = historyItems.size() - 1;
-         } else {
-            isBackNavigation = false;
-          }
+         addHistory(url, view.getTitle());
         if (swipeRefreshLayout != null) {
             swipeRefreshLayout.setEnabled(false);
         }
@@ -1619,6 +1601,31 @@ public class SecretActivity extends AppCompatActivity {
             }
         });
     }
+    @Override
+    public void onPluginOpenTab(String url) {
+        if (url != null && (url.startsWith("http://") || url.startsWith("https://"))) {
+            runOnUiThread(() -> createNewTab(url));
+        }
+    }
+
+    private void showPluginCommands() {
+        final WebView current = getCurrentWebView();
+        final java.util.List<PluginRuntime.PluginCommand> commands = PluginRuntime.getCommands(current);
+        if (commands.isEmpty()) {
+            Toast.makeText(SecretActivity.this, "このページで使えるコマンドはありません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        String[] labels = new String[commands.size()];
+        for (int i = 0; i < labels.length; i++) {
+            labels[i] = commands.get(i).pluginTitle + ": " + commands.get(i).title;
+        }
+        new androidx.appcompat.app.AlertDialog.Builder(SecretActivity.this)
+                .setTitle("拡張機能コマンド")
+                .setItems(labels, (d, which) -> PluginRuntime.runCommand(current, commands.get(which).commandId))
+                .setNegativeButton("閉じる", null)
+                .show();
+    }
+
     private void createNewTab() {
         if (webViews.isEmpty()) {
             WebView newWebView = createNewWebView();
@@ -1798,6 +1805,8 @@ private class AndroidBridge {
             return true;
         } else if (id == R.id.action_plugins) {
             startActivity(new Intent(SecretActivity.this, PluginManagerActivity.class));
+        } else if (id == R.id.action_plugin_commands) {
+            showPluginCommands();
         } else if (id == R.id.action_exec) {
             startActivity(new Intent(SecretActivity.this, exec.class));
         } else if (id == R.id.action_downloads) {
@@ -1947,7 +1956,6 @@ private class AndroidBridge {
                 current.clearHistory();
             }
             historyItems.clear();
-            currentHistoryIndex = -1;
             if (pref != null) {
                 pref.edit().remove(KEY_HISTORY).apply();
             }
@@ -2029,7 +2037,6 @@ private class AndroidBridge {
 
         webViews.clear();
         currentTabIndex = 0;
-        currentHistoryIndex = -1;
         webViewContainer.removeAllViews();
         historyItems.clear();
         if (faviconCache != null) {
@@ -2600,13 +2607,18 @@ private String normalizeUrl(String url) {
 }
 
 private void addHistory(String url, String title) {
-    if (url == null || url.isEmpty() || url.equals("about:blank"))
+    if (url == null || url.isEmpty() || url.equals(START_PAGE))
+        return;
+    String lowerUrl = url.toLowerCase(java.util.Locale.ROOT);
+    if (lowerUrl.startsWith("about:") || lowerUrl.startsWith("data:") || lowerUrl.startsWith("javascript:")
+            || lowerUrl.startsWith("blob:") || lowerUrl.startsWith("chrome-error:")
+            || lowerUrl.startsWith("file:///android_asset") || lowerUrl.startsWith("file:///android_res"))
         return;
     String normalizedUrl = normalizeUrl(url);
     if (!historyItems.isEmpty() && normalizeUrl(historyItems.get(historyItems.size() - 1).getUrl()).equals(normalizedUrl))
         return;
-    historyItems.add(new HistoryItem(title, url, System.currentTimeMillis()));
-    if (historyItems.size() > MAX_HISTORY_SIZE) {
+    historyItems.add(new HistoryItem(title == null ? "" : title, url, System.currentTimeMillis()));
+    while (historyItems.size() > MAX_HISTORY_SIZE) {
         historyItems.remove(0);
     }
 }
