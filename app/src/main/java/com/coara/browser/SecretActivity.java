@@ -7,6 +7,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ComponentCallbacks2;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -22,7 +23,6 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
-import android.os.Looper;
 import android.os.Parcel;
 import android.text.InputType;
 import android.util.Base64;
@@ -51,7 +51,6 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
 import android.widget.Button;
 import android.widget.EditText;
@@ -73,7 +72,9 @@ import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
+import androidx.webkit.SafeBrowsingResponseCompat;
 import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -91,7 +92,9 @@ import com.coara.browser.webview.BlobDownloadBridge;
 import com.coara.browser.util.UiThread;
 import com.coara.browser.plugin.PluginHost;
 import com.coara.browser.plugin.PluginManagerActivity;
+import com.coara.browser.plugin.PluginManager;
 import com.coara.browser.plugin.PluginRuntime;
+import com.coara.browser.util.SafeBrowsingSupport;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -122,7 +125,7 @@ import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 @SuppressWarnings("deprecation")
-public class SecretActivity extends AppCompatActivity implements PluginHost {
+public class SecretActivity extends AppCompatActivity implements PluginHost, PluginManager.Listener {
 
     private static final Pattern CACHE_MODE_PATTERN = Pattern.compile("(^|[/.])(?:(chatx2|yahoo|chatx|chat|auth|nicovideo|login|disk|cgi|session|cloud))($|[/.])", Pattern.CASE_INSENSITIVE);
     private static final String PREF_NAME = "SecretBrowserPrefs";
@@ -170,7 +173,7 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = UiThread.newPool(4);
+    private final ExecutorService backgroundExecutor = UiThread.newPool(2);
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -195,10 +198,12 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
     private final Map<WebView, Runnable> pendingSpaHistoryTasks = new HashMap<>();
     private boolean defaultLoadsImagesAutomatically;
     private boolean defaultLoadsImagesAutomaticallyInitialized = false;
-    private WebView preloadedWebView = null;
-    private boolean preloadScheduled = false;
     private View customView = null;
     private WebChromeClient.CustomViewCallback customViewCallback = null;
+    private boolean pluginReloadPending = false;
+    private boolean pluginReloadRunning = false;
+    private int lastPluginRuntimeVersion = -1;
+    private PluginManager pluginManager;
     static {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
         try {
@@ -259,6 +264,7 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
         sWebViewDataDirectoryConfigured = true;
     }
     super.onCreate(savedInstanceState);
+    SafeBrowsingSupport.initialize(this);
     setContentView(R.layout.secret_main);
 
     toolbar = findViewById(R.id.topAppBar);
@@ -268,6 +274,9 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
     }
 
         pref = getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        pluginManager = PluginManager.get(this);
+        pluginManager.addListener(this);
+        lastPluginRuntimeVersion = pluginManager.runtimeVersion();
         checkSentinelAndClearTabsIfNecessary();
         ensureCacheSentinelExists();
         darkModeEnabled = pref.getBoolean(KEY_DARK_MODE, false);
@@ -280,7 +289,7 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
         ct3uaEnabled = pref.getBoolean(KEY_CT3UA_ENABLED, false);
 
         final int maxMemory = (int)(Runtime.getRuntime().maxMemory() / 1024);
-        final int cacheSize = maxMemory / 16; 
+        final int cacheSize = Math.max(1024, Math.min(maxMemory / 16, 4096)); 
              faviconCache = new LruCache<String, Bitmap>(cacheSize) {
          @Override
          protected int sizeOf(String key, Bitmap bitmap) {
@@ -340,7 +349,6 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
             clear0();
        }
 
-        preInitializeWebView();
         if (!defaultLoadsImagesAutomaticallyInitialized && !webViews.isEmpty()) {
             defaultLoadsImagesAutomatically = webViews.get(0).getSettings().getLoadsImagesAutomatically();
             defaultLoadsImagesAutomaticallyInitialized = true;
@@ -513,6 +521,65 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
         }
     }
 
+    private final Runnable reloadOpenTabsForPluginsRunnable = new Runnable() {
+        @Override
+        public void run() {
+            reloadOpenTabsForPlugins();
+        }
+    };
+
+    private void schedulePluginReload() {
+        pluginReloadPending = true;
+        UiThread.mainHandler().removeCallbacks(reloadOpenTabsForPluginsRunnable);
+        UiThread.mainHandler().postDelayed(reloadOpenTabsForPluginsRunnable, 150L);
+    }
+
+    private void reloadOpenTabsForPlugins() {
+        if (!pluginReloadPending || pluginReloadRunning || isFinishing() || isDestroyed() || pluginManager == null) {
+            return;
+        }
+        pluginReloadRunning = true;
+        try {
+            pluginManager.reloadIfChanged();
+            WebView current = getCurrentWebView();
+            if (current != null) {
+                String url = null;
+                try {
+                    url = current.getUrl();
+                } catch (Exception ignored) {
+                }
+                if (url != null && !url.isEmpty() && !START_PAGE.equals(url)) {
+                    PluginRuntime.prepareForFullReload(current);
+                    current.clearCache(true);
+                    current.stopLoading();
+                    current.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
+                    current.reload();
+                }
+            }
+            lastPluginRuntimeVersion = pluginManager.runtimeVersion();
+            pluginReloadPending = false;
+            UiThread.mainHandler().removeCallbacks(reloadOpenTabsForPluginsRunnable);
+        } finally {
+            pluginReloadRunning = false;
+        }
+    }
+
+    @Override
+    public void onPluginsChanged() {
+    }
+
+    @Override
+    public void onPluginAutoDisabled(com.coara.browser.plugin.PluginInfo info, String reason) {
+    }
+
+    @Override
+    public void onPluginRuntimeChanged() {
+        pluginReloadPending = true;
+        if (hasWindowFocus()) {
+            schedulePluginReload();
+        }
+    }
+
     private void handleIntent(Intent intent) {
         if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
             Uri data = intent.getData();
@@ -548,6 +615,39 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
     }
 
     @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && faviconCache != null) {
+            try {
+                faviconCache.trimToSize(Math.max(1, faviconCache.maxSize() / 2));
+            } catch (Exception ignored) {
+            }
+        }
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL && webView != null) {
+            try {
+                webView.clearCache(false);
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (pluginManager != null) {
+            pluginManager.reloadIfChanged();
+            int runtimeVersion = pluginManager.runtimeVersion();
+            if (runtimeVersion != lastPluginRuntimeVersion) {
+                lastPluginRuntimeVersion = runtimeVersion;
+                pluginReloadPending = true;
+            }
+        }
+        if (pluginReloadPending) {
+            schedulePluginReload();
+        }
+    }
+
+    @Override
     protected void onPause() {
         PluginRuntime.onHostPause(this);
         super.onPause();
@@ -557,7 +657,10 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
     @Override
     protected void onDestroy() {
         BasicAuthManager.cancelPendingForActivity(SecretActivity.this);
-        super.onDestroy();
+        UiThread.mainHandler().removeCallbacks(reloadOpenTabsForPluginsRunnable);
+        if (pluginManager != null) {
+            pluginManager.removeListener(this);
+        }
         pendingSpaHistoryTasks.clear();
         webViewContainer.removeAllViews();
         for (WebView tab : new ArrayList<>(webViews)) {
@@ -569,14 +672,8 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
             }
         }
         webViews.clear();
-        if (preloadedWebView != null) {
-            try {
-                preloadedWebView.destroy();
-            } catch (Exception ignored) {
-            }
-            preloadedWebView = null;
-        }
         backgroundExecutor.shutdown();
+        super.onDestroy();
     }
 
     private void saveTabsState() {
@@ -837,39 +934,8 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
             WebSettingsCompat.setRequestedWithHeaderOriginAllowList(settings, java.util.Collections.emptySet());
         }
     }
-    private void preInitializeWebView() {
-        if (preloadedWebView != null || preloadScheduled) {
-            return;
-        }
-        preloadScheduled = true;
-        Looper.getMainLooper().getQueue().addIdleHandler(new android.os.MessageQueue.IdleHandler() {
-            @Override
-            public boolean queueIdle() {
-                preloadScheduled = false;
-                if (preloadedWebView != null || isFinishing() || isDestroyed()) {
-                    return false;
-                }
-                try {
-                    WebView webView = new WebView(SecretActivity.this);
-                    WebSettings settings = webView.getSettings();
-                    applyOptimizedSettings(settings);
-                    preloadedWebView = webView;
-                } catch (Exception ignored) {
-                }
-                return false;
-            }
-        });
-    }
-
     private WebView createNewWebView() {
-        WebView webView;
-        if (preloadedWebView != null) {
-            webView = preloadedWebView;
-            preloadedWebView = null;
-            preInitializeWebView();
-        } else {
-            webView = new WebView(this);
-        }
+        WebView webView = new WebView(this);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(), "AndroidBridge");
@@ -880,6 +946,9 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
         String defaultUA = WebViewOptimizationUtils.sanitizeUserAgent(settings.getUserAgentString());
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(settings, true);
+        }
         settings.setUserAgentString(defaultUA);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false);
@@ -1079,7 +1148,12 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
             return false;
         });
 
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public void onSafeBrowsingHit(WebView view, WebResourceRequest request, int threatType, SafeBrowsingResponseCompat callback) {
+                SafeBrowsingSupport.handle(SecretActivity.this, view, request, threatType, callback);
+            }
+
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (request != null) {
@@ -1170,7 +1244,12 @@ public class SecretActivity extends AppCompatActivity implements PluginHost {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
                 final WebView transportWebView = new WebView(SecretActivity.this);
-                transportWebView.setWebViewClient(new WebViewClient() {
+                transportWebView.setWebViewClient(new WebViewClientCompat() {
+                    @Override
+                    public void onSafeBrowsingHit(WebView v, WebResourceRequest request, int threatType, SafeBrowsingResponseCompat callback) {
+                        SafeBrowsingSupport.handle(SecretActivity.this, v, request, threatType, callback);
+                    }
+
                     @Override
                     public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) {
                         BasicAuthManager.handleHttpAuthRequest(SecretActivity.this, v, handler, basicAuthEnabled, host, realm);

@@ -4,14 +4,18 @@ import android.os.Bundle;
 import android.os.Environment;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.webkit.ValueCallback;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.Switch;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.webkit.SafeBrowsingResponseCompat;
+import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewClientCompat;
+import androidx.webkit.WebViewFeature;
 import com.coara.browser.util.BasicAuthManager;
+import com.coara.browser.util.SafeBrowsingSupport;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -66,6 +70,7 @@ public class pagedl extends AppCompatActivity {
             sWebViewDataDirectoryConfigured = true;
         }
         super.onCreate(savedInstanceState);
+        SafeBrowsingSupport.initialize(this);
         setContentView(R.layout.activity_pgdl);
         basicAuthEnabled = getIntent().getBooleanExtra(BasicAuthManager.EXTRA_BASIC_AUTH_ENABLED, false);
 
@@ -77,6 +82,9 @@ public class pagedl extends AppCompatActivity {
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         WebSettings webSettings = webView.getSettings();
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(webSettings, true);
+        }
         webSettings.setJavaScriptEnabled(jsSwitch.isChecked());
         jsSwitch.setOnCheckedChangeListener((buttonView, isChecked) ->
                 webSettings.setJavaScriptEnabled(isChecked));
@@ -109,7 +117,12 @@ public class pagedl extends AppCompatActivity {
     }
 
     private void saveWithJavaScriptEnabled(String urlString, String siteName) {
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public void onSafeBrowsingHit(WebView view, android.webkit.WebResourceRequest request, int threatType, SafeBrowsingResponseCompat callback) {
+                SafeBrowsingSupport.handle(pagedl.this, view, request, threatType, callback);
+            }
+
             @Override
             public void onReceivedHttpAuthRequest(WebView view, android.webkit.HttpAuthHandler httpAuthHandler, String host, String realm) {
                 BasicAuthManager.handleHttpAuthRequest(pagedl.this, view, httpAuthHandler, basicAuthEnabled, host, realm);

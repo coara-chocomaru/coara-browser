@@ -53,7 +53,6 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebStorage;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.webkit.JavascriptInterface;
 import android.webkit.MimeTypeMap;
 import android.widget.Button;
@@ -78,7 +77,9 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
+import androidx.webkit.SafeBrowsingResponseCompat;
 import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.appbar.MaterialToolbar;
@@ -105,6 +106,7 @@ import com.coara.browser.plugin.PluginManagerActivity;
 import com.coara.browser.plugin.PluginManager;
 import com.coara.browser.plugin.PluginRuntime;
 import com.coara.browser.util.BrowserVisualSettings;
+import com.coara.browser.util.SafeBrowsingSupport;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -198,7 +200,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<String> permissionLauncher;
     private SharedPreferences pref;
-    private final ExecutorService backgroundExecutor = UiThread.newPool(Math.max(2, Runtime.getRuntime().availableProcessors() / 2));
+    private final ExecutorService backgroundExecutor = UiThread.newPool(Math.max(2, Math.min(4, Runtime.getRuntime().availableProcessors() / 2)));
     private final ArrayList<WebView> webViews = new ArrayList<>();
     private int currentTabIndex = 0;
     private int nextTabId = 0;
@@ -339,6 +341,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             sWebViewDataDirectoryConfigured = true;
         }
         super.onCreate(savedInstanceState);
+        SafeBrowsingSupport.initialize(this);
         setContentView(R.layout.activity_main);
 
         maybeRequestLaunchProtection();
@@ -729,11 +732,9 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             synchronized (webViews) {
                 tabs = new ArrayList<>(webViews);
             }
+            boolean cacheCleared = false;
             for (WebView tab : tabs) {
-                if (tab == null) {
-                    continue;
-                }
-                if (pendingTabs.containsKey(tab)) {
+                if (tab == null || pendingTabs.containsKey(tab)) {
                     continue;
                 }
                 String url;
@@ -747,12 +748,20 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
                 }
                 try {
                     saveTabHistoryState(tab);
+                    PluginRuntime.prepareForFullReload(tab);
+                    if (!cacheCleared) {
+                        tab.clearCache(true);
+                        cacheCleared = true;
+                    }
+                    tab.stopLoading();
+                    tab.getSettings().setCacheMode(WebSettings.LOAD_NO_CACHE);
                     tab.reload();
                 } catch (Exception ignored) {
                 }
             }
             lastPluginRuntimeVersion = pluginManager.runtimeVersion();
             pluginReloadPending = false;
+            UiThread.mainHandler().removeCallbacks(pluginReloadRunnable);
         } finally {
             pluginReloadRunning = false;
         }
@@ -858,6 +867,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
         }
         resumeAllWebViewTimers();
         resumeCurrentWebView();
+        applyRendererPriority(getCurrentWebView(), true);
         if (pluginReloadPending) {
             schedulePluginReload();
         }
@@ -872,6 +882,11 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
         captureSnapshotIfDirty();
         pauseCurrentWebView();
         pauseAllWebViewTimers();
+        synchronized (webViews) {
+            for (WebView tab : new ArrayList<>(webViews)) {
+                applyRendererPriority(tab, false);
+            }
+        }
         flushHistory();
         saveTabsState();
         super.onPause();
@@ -1105,10 +1120,22 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
 
     @SuppressWarnings("deprecation")
     private void trimBrowserMemory(int level) {
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && faviconCache != null) {
-            try {
-                faviconCache.trimToSize(Math.max(1, faviconCache.maxSize() / 2));
-            } catch (Exception ignored) {
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            if (faviconCache != null) {
+                try {
+                    faviconCache.trimToSize(Math.max(1, faviconCache.maxSize() / 2));
+                } catch (Exception ignored) {
+                }
+            }
+            if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL) {
+                synchronized (webViews) {
+                    if (!webViews.isEmpty()) {
+                        try {
+                            webViews.get(0).clearCache(false);
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
             }
         }
         if (level >= ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) {
@@ -1321,6 +1348,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
                     }
                     WebView current = getCurrentWebView();
                     ensureTabLoaded(current);
+                    applyRendererPriority(current, true);
                     webViewContainer.addView(current);
                     try {
                         current.onResume();
@@ -1399,6 +1427,16 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
         WebViewOptimizationUtils.applyOptimizedSettings(settings, darkModeEnabled);
     }
 
+    private void applyRendererPriority(WebView view, boolean foreground) {
+        if (view == null || Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            return;
+        }
+        try {
+            view.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_BOUND, !foreground);
+        } catch (Exception ignored) {
+        }
+    }
+
     private void applyCookiePolicy(WebView webView) {
         CookieManager cookieManager = CookieManager.getInstance();
         cookieManager.setAcceptCookie(true);
@@ -1407,6 +1445,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
 
     private WebView createNewWebView() {
         WebView webView = new WebView(this);
+        applyRendererPriority(webView, true);
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
         webView.setBackgroundColor(Color.WHITE);
         webView.addJavascriptInterface(new AndroidBridge(webView), "AndroidBridge");
@@ -1417,6 +1456,9 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
         String defaultUA = WebViewOptimizationUtils.sanitizeUserAgent(settings.getUserAgentString());
         originalUserAgents.put(webView, defaultUA);
         applyOptimizedSettings(settings);
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.SAFE_BROWSING_ENABLE)) {
+            WebSettingsCompat.setSafeBrowsingEnabled(settings, true);
+        }
         applyCookiePolicy(webView);
         settings.setUserAgentString(defaultUA);
         
@@ -1604,7 +1646,12 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             return false;
         });
 
-        webView.setWebViewClient(new WebViewClient() {
+        webView.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public void onSafeBrowsingHit(WebView view, WebResourceRequest request, int threatType, SafeBrowsingResponseCompat callback) {
+                SafeBrowsingSupport.handle(MainActivity.this, view, request, threatType, callback);
+            }
+
             @Override
             public boolean onRenderProcessGone(WebView view, android.webkit.RenderProcessGoneDetail detail) {
                 
@@ -1749,7 +1796,12 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
                 final WebView transportWebView = new WebView(MainActivity.this);
-                transportWebView.setWebViewClient(new WebViewClient() {
+                transportWebView.setWebViewClient(new WebViewClientCompat() {
+                    @Override
+                    public void onSafeBrowsingHit(WebView v, WebResourceRequest request, int threatType, SafeBrowsingResponseCompat callback) {
+                        SafeBrowsingSupport.handle(MainActivity.this, v, request, threatType, callback);
+                    }
+
                     @Override
                     public void onReceivedHttpAuthRequest(WebView v, HttpAuthHandler handler, String host, String realm) {
                         BasicAuthManager.handleHttpAuthRequest(MainActivity.this, v, handler, basicAuthEnabled, host, realm);
@@ -1935,6 +1987,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             }
             webViews.set(index, replacement);
 
+            applyRendererPriority(replacement, wasCurrent);
             if (wasCurrent) {
                 webViewContainer.addView(replacement);
                 replacement.loadUrl(recoverUrl);
@@ -2929,6 +2982,8 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
         webViewContainer.removeAllViews();
         currentTabIndex = index;
         WebView next = getCurrentWebView();
+        applyRendererPriority(current, false);
+        applyRendererPriority(next, true);
         ensureTabLoaded(next);
         webViewContainer.addView(next);
         try {
