@@ -79,6 +79,7 @@ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout;
 import androidx.viewpager2.widget.ViewPager2;
 import androidx.webkit.SafeBrowsingResponseCompat;
 import androidx.webkit.WebSettingsCompat;
+import androidx.webkit.WebResourceErrorCompat;
 import androidx.webkit.WebViewClientCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -1685,7 +1686,7 @@ public class MainActivity extends AppCompatActivity implements PluginHost, Plugi
             }
 
             @Override
-            public void onReceivedError(WebView view, WebResourceRequest request, android.webkit.WebResourceError error) {
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceErrorCompat error) {
                 super.onReceivedError(view, request, error);
                 
                 
