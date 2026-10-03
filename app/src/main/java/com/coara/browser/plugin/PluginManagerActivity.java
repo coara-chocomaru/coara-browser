@@ -7,6 +7,8 @@ import android.graphics.BitmapFactory;
 import android.graphics.Typeface;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.OpenableColumns;
+import android.database.Cursor;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -52,6 +54,7 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
     private ActivityResultLauncher<Intent> pickLauncher;
     private ActivityResultLauncher<Intent> saveLauncher;
     private String saveScopeId;
+    private boolean saveExport;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -169,8 +172,6 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
         Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
         i.setType("*/*");
-        i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
-                "application/zip", "application/x-zip-compressed", "application/octet-stream"});
         try {
             pickLauncher.launch(i);
         } catch (Exception e) {
@@ -186,19 +187,69 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
         if (uri == null) {
             return;
         }
-        Toast.makeText(this, "zipを検証しています…", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "ファイルを検証しています…", Toast.LENGTH_SHORT).show();
         UiThread.io().execute(() -> {
+            String displayName = queryDisplayName(uri);
             try (InputStream in = getContentResolver().openInputStream(uri)) {
-                final ParsedPlugin parsed = PluginInstaller.parse(in);
+                final ParsedPlugin parsed = PluginInstaller.parse(in, displayName, null);
                 runOnUiThread(() -> confirmInstall(parsed));
             } catch (PluginInstallException e) {
                 final String msg = e.getMessage();
                 runOnUiThread(() -> showMessage("インストールできません", msg));
             } catch (Throwable t) {
                 final String msg = String.valueOf(t.getMessage());
-                runOnUiThread(() -> showMessage("インストールできません", "zipを読み込めませんでした\n" + msg));
+                runOnUiThread(() -> showMessage("インストールできません", "ファイルを読み込めませんでした\n" + msg));
             }
         });
+    }
+
+    private String queryDisplayName(Uri uri) {
+        try (Cursor c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (c != null && c.moveToFirst()) {
+                String n = c.getString(0);
+                return n == null ? "" : n;
+            }
+        } catch (Throwable ignored) {
+        }
+        String last = uri.getLastPathSegment();
+        return last == null ? "" : last;
+    }
+
+    static String formatLabel(String format) {
+        if (PluginInfo.FORMAT_USERSCRIPT.equals(format)) {
+            return "ユーザースクリプト";
+        }
+        if (PluginInfo.FORMAT_WEBEXT.equals(format)) {
+            return "WebExtension";
+        }
+        if (PluginInfo.FORMAT_USERSTYLE.equals(format)) {
+            return "ユーザースタイル(CSS)";
+        }
+        return "Coaraプラグイン";
+    }
+
+    static String permissionLabel(PluginInfo p) {
+        if (p.permissions.isEmpty()) {
+            return "なし";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (String perm : p.permissions) {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            if (PluginInfo.PERM_XHR.equals(perm)) {
+                sb.append("外部通信");
+            } else if (PluginInfo.PERM_CLIPBOARD.equals(perm)) {
+                sb.append("クリップボード書込");
+            } else if (PluginInfo.PERM_NOTIFICATION.equals(perm)) {
+                sb.append("通知");
+            } else if (PluginInfo.PERM_OPENTAB.equals(perm)) {
+                sb.append("タブを開く");
+            } else {
+                sb.append(perm);
+            }
+        }
+        return sb.toString();
     }
 
     private void confirmInstall(final ParsedPlugin parsed) {
@@ -208,6 +259,7 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
         PluginInfo info = parsed.info;
         StringBuilder sb = new StringBuilder();
         sb.append("名前: ").append(info.title).append('\n');
+        sb.append("形式: ").append(formatLabel(info.format)).append('\n');
         if (!info.version.isEmpty()) {
             sb.append("バージョン: ").append(info.version).append('\n');
         }
@@ -217,16 +269,11 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
         if (!info.description.isEmpty()) {
             sb.append("説明: ").append(info.description).append('\n');
         }
-        sb.append("実行タイミング: ").append(info.runAt).append('\n');
-        sb.append("対象: ").append(join(PluginPatterns.effectiveMatches(info.matches))).append('\n');
-        if (!info.excludes.isEmpty()) {
-            sb.append("除外: ").append(join(info.excludes)).append('\n');
+        sb.append("権限: ").append(permissionLabel(info)).append('\n');
+        if (!info.connects.isEmpty()) {
+            sb.append("通信先: ").append(join(info.connects)).append('\n');
         }
-        sb.append("全フレーム: ").append(info.allFrames ? "はい" : "いいえ").append('\n');
-        sb.append("js: ").append(join(info.scripts)).append('\n');
-        if (!info.styles.isEmpty()) {
-            sb.append("css: ").append(join(info.styles)).append('\n');
-        }
+        appendEntries(sb, info);
         if (!parsed.warnings.isEmpty()) {
             sb.append("\n注意:\n");
             for (String w : parsed.warnings) {
@@ -240,6 +287,28 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
                 .setPositiveButton("インストール", (d, w) -> doInstall(parsed))
                 .setNegativeButton("キャンセル", null)
                 .show();
+    }
+
+    private static void appendEntries(StringBuilder sb, PluginInfo info) {
+        List<PluginEntry> entries = info.entries();
+        sb.append("スクリプト定義: ").append(entries.size()).append("件\n");
+        for (int i = 0; i < entries.size() && i < 6; i++) {
+            PluginEntry e = entries.get(i);
+            sb.append(" #").append(i + 1).append(' ').append(e.runAt).append(e.allFrames ? " 全フレーム" : "").append('\n');
+            sb.append("   対象: ").append(join(PluginPatterns.effectiveMatches(e.matches))).append('\n');
+            if (!e.excludes.isEmpty()) {
+                sb.append("   除外: ").append(join(e.excludes)).append('\n');
+            }
+            if (!e.scripts.isEmpty()) {
+                sb.append("   js: ").append(join(e.scripts)).append('\n');
+            }
+            if (!e.styles.isEmpty()) {
+                sb.append("   css: ").append(join(e.styles)).append('\n');
+            }
+        }
+        if (entries.size() > 6) {
+            sb.append(" …ほか").append(entries.size() - 6).append("件\n");
+        }
     }
 
     private void doInstall(final ParsedPlugin parsed) {
@@ -287,16 +356,16 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
         if (!p.description.isEmpty()) {
             sb.append("説明: ").append(p.description).append('\n');
         }
-        sb.append("実行タイミング: ").append(p.runAt).append('\n');
-        sb.append("全フレーム: ").append(p.allFrames ? "はい" : "いいえ").append('\n');
-        sb.append("対象: ").append(join(PluginPatterns.effectiveMatches(p.matches))).append('\n');
-        if (!p.excludes.isEmpty()) {
-            sb.append("除外: ").append(join(p.excludes)).append('\n');
+        sb.append("形式: ").append(formatLabel(p.format)).append('\n');
+        if (!p.homepage.isEmpty()) {
+            sb.append("ホームページ: ").append(p.homepage).append('\n');
         }
-        sb.append("js: ").append(join(p.scripts)).append('\n');
-        if (!p.styles.isEmpty()) {
-            sb.append("css: ").append(join(p.styles)).append('\n');
+        sb.append("権限: ").append(permissionLabel(p)).append('\n');
+        if (!p.connects.isEmpty()) {
+            sb.append("通信先: ").append(join(p.connects)).append('\n');
         }
+        appendEntries(sb, p);
+        sb.append("保存データ: ").append(manager.storageCount(p.id)).append("件\n");
         sb.append("インストール: ").append(df.format(new Date(p.installedAt))).append('\n');
         sb.append("エラー回数: ").append(p.errorCount).append('\n');
         sb.append("クラッシュ回数: ").append(p.crashCount).append('\n');
@@ -312,6 +381,32 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
                 .setMessage(sb.toString())
                 .setPositiveButton("閉じる", null)
                 .show();
+    }
+
+    private void confirmClearData(final PluginInfo p) {
+        new AlertDialog.Builder(this)
+                .setTitle("保存データ消去")
+                .setMessage("「" + p.title + "」が保存したデータを消去しますか?")
+                .setPositiveButton("消去", (d, w) -> {
+                    manager.clearData(p.id);
+                    Toast.makeText(this, "消去しました", Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("キャンセル", null)
+                .show();
+    }
+
+    private void startExport(PluginInfo p) {
+        saveScopeId = p.id;
+        saveExport = true;
+        Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        i.setType("application/zip");
+        i.putExtra(Intent.EXTRA_TITLE, p.id + ".zip");
+        try {
+            saveLauncher.launch(i);
+        } catch (Exception e) {
+            Toast.makeText(this, "保存先を選択できません", Toast.LENGTH_SHORT).show();
+        }
     }
 
     private void confirmDelete(final PluginInfo p) {
@@ -364,6 +459,7 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
 
     private void startSave(String scopeId) {
         saveScopeId = scopeId;
+        saveExport = false;
         String stamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
         Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         i.addCategory(Intent.CATEGORY_OPENABLE);
@@ -385,11 +481,14 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
             return;
         }
         final String scope = saveScopeId;
+        final boolean export = saveExport;
         UiThread.io().execute(() -> {
             boolean ok = false;
             try (OutputStream os = getContentResolver().openOutputStream(uri)) {
                 if (os != null) {
-                    if (scope == null) {
+                    if (export) {
+                        manager.exportPlugin(scope, os);
+                    } else if (scope == null) {
                         manager.exportLog(os);
                     } else {
                         os.write(manager.readLogFor(scope, 2_000_000).getBytes(StandardCharsets.UTF_8));
@@ -400,9 +499,23 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
             } catch (Throwable ignored) {
             }
             final boolean success = ok;
-            runOnUiThread(() -> Toast.makeText(this, success ? "ログを保存しました" : "ログを保存できませんでした",
+            runOnUiThread(() -> Toast.makeText(this, success ? (export ? "エクスポートしました" : "ログを保存しました")
+                    : (export ? "エクスポートできませんでした" : "ログを保存できませんでした"),
                     Toast.LENGTH_SHORT).show());
         });
+    }
+
+    private static String shortFormat(String format) {
+        if (PluginInfo.FORMAT_USERSCRIPT.equals(format)) {
+            return "UserJS";
+        }
+        if (PluginInfo.FORMAT_WEBEXT.equals(format)) {
+            return "WebExt";
+        }
+        if (PluginInfo.FORMAT_USERSTYLE.equals(format)) {
+            return "CSS";
+        }
+        return "Coara";
     }
 
     private static String join(List<String> list) {
@@ -462,6 +575,7 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
             }
             h.title.setText(p.title);
             StringBuilder meta = new StringBuilder();
+            meta.append('[').append(shortFormat(p.format)).append("] ");
             if (!p.version.isEmpty()) {
                 meta.append('v').append(p.version).append("  ");
             }
@@ -471,6 +585,9 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
             meta.append(p.runAt);
             if (p.allFrames) {
                 meta.append("  全フレーム");
+            }
+            if (!p.permissions.isEmpty()) {
+                meta.append("  権限").append(p.permissions.size());
             }
             h.meta.setText(meta.toString());
             if (p.description.isEmpty()) {
@@ -505,7 +622,9 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
                 PopupMenu popup = new PopupMenu(PluginManagerActivity.this, v);
                 popup.getMenu().add(0, 1, 0, "詳細");
                 popup.getMenu().add(0, 2, 1, "ログ");
-                popup.getMenu().add(0, 3, 2, "削除");
+                popup.getMenu().add(0, 4, 2, "エクスポート(zip)");
+                popup.getMenu().add(0, 5, 3, "保存データ消去");
+                popup.getMenu().add(0, 3, 4, "削除");
                 popup.setOnMenuItemClickListener(item -> {
                     int id = item.getItemId();
                     if (id == 1) {
@@ -514,6 +633,10 @@ public class PluginManagerActivity extends AppCompatActivity implements PluginMa
                         showLogDialog(p.id);
                     } else if (id == 3) {
                         confirmDelete(p);
+                    } else if (id == 4) {
+                        startExport(p);
+                    } else if (id == 5) {
+                        confirmClearData(p);
                     }
                     return true;
                 });

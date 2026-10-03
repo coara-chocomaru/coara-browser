@@ -3,6 +3,7 @@ package com.coara.browser.plugin;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
 import android.widget.Toast;
 
 import org.json.JSONArray;
@@ -30,6 +31,11 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 public final class PluginManager {
     public static final String BRIDGE_NAME = "__coaraPluginBridge";
@@ -83,7 +89,9 @@ public final class PluginManager {
     private final Set<String> lastInjectedIds = new LinkedHashSet<>();
     private final byte[] tokenBytes;
     private final String token;
-    private final PluginBridge bridge;
+    private final Map<String, XhrState> xhrs = new ConcurrentHashMap<>();
+    private final Map<String, WebExtParser.Messages> i18nCache = new HashMap<>();
+    private final ExecutorService xhrPool = Executors.newFixedThreadPool(3);
     private final Runnable clearMarkerRunnable = new Runnable() {
         @Override
         public void run() {
@@ -114,7 +122,13 @@ public final class PluginManager {
         new SecureRandom().nextBytes(raw);
         this.tokenBytes = toHex(raw).getBytes(StandardCharsets.US_ASCII);
         this.token = new String(tokenBytes, StandardCharsets.US_ASCII);
-        this.bridge = new PluginBridge(this);
+    }
+
+    private static final class XhrState {
+        final PluginHttp.Call call = new PluginHttp.Call();
+        final long startedAt = System.currentTimeMillis();
+        volatile String result;
+        volatile long doneAt;
     }
 
     public static PluginManager get(Context context) {
@@ -138,6 +152,10 @@ public final class PluginManager {
             m.consumeActiveMarker();
         } catch (Throwable ignored) {
         }
+        try {
+            m.cleanupOrphans();
+        } catch (Throwable ignored) {
+        }
     }
 
     public static boolean isSecretProcess() {
@@ -155,8 +173,8 @@ public final class PluginManager {
         }
     }
 
-    public Object bridge() {
-        return bridge;
+    public Object createBridge(PluginViewOps ops) {
+        return new PluginBridge(this, ops);
     }
 
     public String getToken() {
@@ -205,6 +223,7 @@ public final class PluginManager {
             loadLocked();
             version++;
             sourceCache.clear();
+            i18nCache.clear();
             notifyChanged();
             return true;
         }
@@ -265,8 +284,16 @@ public final class PluginManager {
             throw new PluginInstallException("作業ディレクトリを作成できません");
         }
         try {
+            String tmpCanonical = tmp.getCanonicalPath();
             for (Map.Entry<String, byte[]> e : parsed.files.entrySet()) {
                 File out = new File(tmp, e.getKey());
+                if (!out.getCanonicalPath().startsWith(tmpCanonical + File.separator)) {
+                    continue;
+                }
+                File parent = out.getParentFile();
+                if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                    throw new IOException("mkdir failed");
+                }
                 try (FileOutputStream fos = new FileOutputStream(out)) {
                     fos.write(e.getValue());
                 }
@@ -302,10 +329,12 @@ public final class PluginManager {
         }
         recentErrors.remove(info.id);
         sourceCache.clear();
+        i18nCache.remove(info.id);
         saveLocked();
         logger.log("I", info.id, (updated ? "更新" : "インストール") + ": " + info.title
                 + (info.version.isEmpty() ? "" : " v" + info.version)
-                + " (js=" + info.scripts.size() + ", css=" + info.styles.size() + ", runAt=" + info.runAt + ")");
+                + " (" + info.format + ", entries=" + info.entries().size() + ", js=" + info.scripts.size()
+                + ", css=" + info.styles.size() + ", perms=" + info.permissions + ")");
         for (String w : parsed.warnings) {
             logger.log("W", info.id, w);
         }
@@ -352,9 +381,11 @@ public final class PluginManager {
         deleteStorageFiles(id);
         storageCache.remove(id);
         recentErrors.remove(id);
+        i18nCache.remove(id);
+        logRate.remove(id);
         sourceCache.clear();
+        logger.removeFor(id);
         saveLocked();
-        logger.log("I", id, "削除しました: " + p.title);
         notifyChanged();
         return true;
     }
@@ -525,7 +556,7 @@ public final class PluginManager {
         clearActiveMarker();
     }
 
-    String handleBridge(String id, String op, String a, String b, String c) {
+    String handleBridge(PluginViewOps ops, String id, String op, String a, String b, String c) {
         PluginInfo p;
         synchronized (this) {
             ensureLoadedLocked();
@@ -556,10 +587,391 @@ public final class PluginManager {
                 return storageSet(id, a, b) ? "1" : "0";
             case "sdel":
                 return storageRemove(id, a) ? "1" : "0";
+            case "skeys":
+                return storageKeys(id);
+            case "sclear":
+                return storageClear(id) ? "1" : "0";
             case "res":
-                return readText(p, a);
+                return readText(p, resolveName(p, a));
+            case "resurl":
+                return resourceDataUrl(p, a);
+            case "i18n":
+                return i18nMessage(p, a, b);
+            case "uilang":
+                return Locale.getDefault().toString();
+            case "cmd":
+                if (ops == null || a == null || a.isEmpty() || a.length() > 64) {
+                    return "0";
+                }
+                ops.registerCommand(id, a, b == null ? a : (b.length() > 60 ? b.substring(0, 60) : b));
+                return "1";
+            case "uncmd":
+                if (ops != null && a != null) {
+                    ops.unregisterCommand(id, a);
+                }
+                return "1";
+            case "xhr":
+                if (!p.hasPermission(PluginInfo.PERM_XHR)) {
+                    logger.log("W", id, "権限「xhr」が無いためGM_xmlhttpRequestを拒否しました");
+                    return "0";
+                }
+                return xhrStart(p, a, b) ? "1" : "0";
+            case "xhrPoll":
+                return xhrPoll(id, a);
+            case "xhrAbort":
+                xhrAbort(id, a);
+                return "1";
+            case "open": {
+                if (!p.hasPermission(PluginInfo.PERM_OPENTAB) || ops == null || !isHttpUrl(a)) {
+                    return "0";
+                }
+                ops.openTab(a);
+                return "1";
+            }
+            case "notify":
+                if (!p.hasPermission(PluginInfo.PERM_NOTIFICATION) || ops == null || !allowLog(id + "#n")) {
+                    return "0";
+                }
+                ops.notifyUser(a == null ? p.title : a, b == null ? "" : b);
+                return "1";
+            case "clip":
+                if (!p.hasPermission(PluginInfo.PERM_CLIPBOARD) || ops == null || a == null || a.length() > 200000) {
+                    return "0";
+                }
+                return ops.copyText(a) ? "1" : "0";
             default:
                 return null;
+        }
+    }
+
+    private static boolean isHttpUrl(String u) {
+        if (u == null) {
+            return false;
+        }
+        String l = u.toLowerCase(Locale.US);
+        return l.startsWith("http://") || l.startsWith("https://");
+    }
+
+    private String resolveName(PluginInfo p, String name) {
+        if (name == null) {
+            return null;
+        }
+        String mapped = p.resourceMap.get(name);
+        if (mapped != null) {
+            return mapped;
+        }
+        String ref = PluginInstaller.refPath(name);
+        return ref == null ? name : ref;
+    }
+
+    private boolean xhrStart(PluginInfo p, String reqId, String optsJson) {
+        if (reqId == null || reqId.isEmpty() || reqId.length() > 40 || optsJson == null) {
+            return false;
+        }
+        final JSONObject opts;
+        try {
+            opts = new JSONObject(optsJson);
+        } catch (JSONException e) {
+            return false;
+        }
+        final String key = p.id + ":" + reqId;
+        long now = System.currentTimeMillis();
+        int active = 0;
+        for (Map.Entry<String, XhrState> e : xhrs.entrySet()) {
+            XhrState s = e.getValue();
+            if (s.result != null && now - s.doneAt > 120_000L) {
+                xhrs.remove(e.getKey());
+            } else if (s.result == null && e.getKey().startsWith(p.id + ":")) {
+                active++;
+            }
+        }
+        if (active >= 8 || xhrs.containsKey(key) || xhrs.size() > 64) {
+            return false;
+        }
+        final XhrState state = new XhrState();
+        xhrs.put(key, state);
+        final List<String> connects = new ArrayList<>(p.connects);
+        final String pid = p.id;
+        final String shownUrl = isSecretProcess() ? "(secret)" : opts.optString("url", "");
+        xhrPool.execute(new Runnable() {
+            @Override
+            public void run() {
+                JSONObject result = PluginHttp.execute(opts, connects, state.call);
+                if (result.has("error") && !result.optBoolean("aborted", false)) {
+                    logger.log("W", pid, "xhr失敗: " + result.optString("error") + " url=" + shownUrl);
+                }
+                state.result = result.toString();
+                state.doneAt = System.currentTimeMillis();
+            }
+        });
+        return true;
+    }
+
+    private String xhrPoll(String id, String reqId) {
+        if (reqId == null) {
+            return null;
+        }
+        String key = id + ":" + reqId;
+        XhrState s = xhrs.get(key);
+        if (s == null) {
+            return null;
+        }
+        String r = s.result;
+        if (r == null) {
+            return "";
+        }
+        xhrs.remove(key);
+        return r;
+    }
+
+    private void xhrAbort(String id, String reqId) {
+        if (reqId == null) {
+            return;
+        }
+        XhrState s = xhrs.get(id + ":" + reqId);
+        if (s != null) {
+            s.call.abort();
+        }
+    }
+
+    public synchronized byte[] readBytes(PluginInfo p, String name, int maxBytes) {
+        if (p == null || name == null) {
+            return null;
+        }
+        if (!p.resources.contains(name) && !p.assets.contains(name) && !p.scripts.contains(name)
+                && !p.styles.contains(name) && !name.equals(p.icon)) {
+            return null;
+        }
+        File dir = new File(root, p.id);
+        File f = new File(dir, name);
+        try {
+            if (!f.getCanonicalPath().startsWith(dir.getCanonicalPath() + File.separator)) {
+                return null;
+            }
+            if (!f.isFile() || f.length() > maxBytes) {
+                return null;
+            }
+            try (InputStream in = new FileInputStream(f)) {
+                ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = in.read(buf)) > 0) {
+                    bos.write(buf, 0, n);
+                }
+                return bos.toByteArray();
+            }
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private String resourceDataUrl(PluginInfo p, String name) {
+        String path = resolveName(p, name);
+        byte[] data = readBytes(p, path, 2 * 1024 * 1024);
+        if (data == null) {
+            return null;
+        }
+        return "data:" + mimeOf(path) + ";base64," + Base64.encodeToString(data, Base64.NO_WRAP);
+    }
+
+    private static String mimeOf(String path) {
+        String ext = PluginInstaller.extOf(path == null ? "" : path);
+        switch (ext) {
+            case "png":
+                return "image/png";
+            case "jpg":
+            case "jpeg":
+                return "image/jpeg";
+            case "gif":
+                return "image/gif";
+            case "webp":
+                return "image/webp";
+            case "svg":
+                return "image/svg+xml";
+            case "ico":
+                return "image/x-icon";
+            case "bmp":
+                return "image/bmp";
+            case "woff":
+                return "font/woff";
+            case "woff2":
+                return "font/woff2";
+            case "ttf":
+                return "font/ttf";
+            case "otf":
+                return "font/otf";
+            case "css":
+                return "text/css";
+            case "js":
+            case "mjs":
+                return "text/javascript";
+            case "json":
+                return "application/json";
+            case "html":
+            case "htm":
+                return "text/html";
+            case "txt":
+            case "md":
+            case "csv":
+                return "text/plain";
+            case "xml":
+                return "text/xml";
+            default:
+                return "application/octet-stream";
+        }
+    }
+
+    private String i18nMessage(PluginInfo p, String key, String subsJson) {
+        WebExtParser.Messages m;
+        synchronized (this) {
+            m = i18nCache.get(p.id);
+            if (m == null) {
+                m = loadMessages(p);
+                i18nCache.put(p.id, m);
+            }
+        }
+        String[] subs = null;
+        if (subsJson != null && !subsJson.isEmpty()) {
+            try {
+                JSONArray a = new JSONArray(subsJson);
+                subs = new String[a.length()];
+                for (int i = 0; i < a.length(); i++) {
+                    subs[i] = a.isNull(i) ? "" : a.optString(i, "");
+                }
+            } catch (JSONException ignored) {
+            }
+        }
+        String v = m.lookup(key, subs);
+        return v == null ? "" : v;
+    }
+
+    private WebExtParser.Messages loadMessages(PluginInfo p) {
+        File locales = new File(new File(root, p.id), "_locales");
+        File[] dirs = locales.listFiles();
+        java.util.Set<String> available = new java.util.HashSet<>();
+        if (dirs != null) {
+            for (File d : dirs) {
+                if (d.isDirectory() && new File(d, "messages.json").isFile()) {
+                    available.add(d.getName());
+                }
+            }
+        }
+        String chosen = WebExtParser.pickLocale(available, p.defaultLocale);
+        if (chosen == null) {
+            return WebExtParser.Messages.of("{}", p.id);
+        }
+        try {
+            File f = new File(new File(locales, chosen), "messages.json");
+            if (f.length() > MAX_READ_BYTES) {
+                return WebExtParser.Messages.of("{}", p.id);
+            }
+            return WebExtParser.Messages.of(readFileText(f), p.id);
+        } catch (Exception e) {
+            return WebExtParser.Messages.of("{}", p.id);
+        }
+    }
+
+    public synchronized String storageKeys(String id) {
+        JSONObject o = loadStorage(id);
+        JSONArray a = new JSONArray();
+        java.util.Iterator<String> it = o.keys();
+        while (it.hasNext()) {
+            a.put(it.next());
+        }
+        return a.toString();
+    }
+
+    public synchronized boolean storageClear(String id) {
+        JSONObject o = new JSONObject();
+        storageCache.put(id, o);
+        return saveStorage(id, o);
+    }
+
+    public synchronized int storageCount(String id) {
+        return loadStorage(id).length();
+    }
+
+    public synchronized void clearData(String id) {
+        storageClear(id);
+        File[] files = storageDir.listFiles();
+        if (files != null) {
+            String prefix = id + ".";
+            for (File f : files) {
+                String n = f.getName();
+                if (n.startsWith(prefix) && n.endsWith(".json") && n.indexOf('.', prefix.length()) == n.length() - 5) {
+                    f.delete();
+                }
+            }
+        }
+        storageCache.remove(id);
+        logger.log("I", id, "保存データを消去しました");
+        notifyChanged();
+    }
+
+    public synchronized void exportPlugin(String id, OutputStream out) throws IOException {
+        PluginInfo p = find(id);
+        if (p == null) {
+            throw new IOException("not found");
+        }
+        File dir = new File(root, id);
+        ZipOutputStream zos = new ZipOutputStream(out);
+        zipDir(zos, dir, "");
+        zos.finish();
+        zos.flush();
+    }
+
+    private static void zipDir(ZipOutputStream zos, File dir, String prefix) throws IOException {
+        File[] children = dir.listFiles();
+        if (children == null) {
+            return;
+        }
+        java.util.Arrays.sort(children);
+        for (File c : children) {
+            String name = prefix + c.getName();
+            if (c.isDirectory()) {
+                zipDir(zos, c, name + "/");
+            } else {
+                zos.putNextEntry(new ZipEntry(name));
+                try (InputStream in = new FileInputStream(c)) {
+                    byte[] buf = new byte[8192];
+                    int n;
+                    while ((n = in.read(buf)) > 0) {
+                        zos.write(buf, 0, n);
+                    }
+                }
+                zos.closeEntry();
+            }
+        }
+    }
+
+    public synchronized void cleanupOrphans() {
+        if (isSecretProcess()) {
+            return;
+        }
+        ensureLoadedLocked();
+        File[] dirs = root.listFiles();
+        long now = System.currentTimeMillis();
+        if (dirs != null) {
+            for (File d : dirs) {
+                if (d.getName().startsWith(".tmp_") && now - d.lastModified() > 60L * 60_000L) {
+                    deleteRecursive(d);
+                }
+            }
+        }
+        File[] stored = storageDir.listFiles();
+        if (stored != null) {
+            for (File f : stored) {
+                String n = f.getName();
+                if (!n.endsWith(".json")) {
+                    continue;
+                }
+                String stem = n.substring(0, n.length() - 5);
+                int dot = stem.lastIndexOf('.');
+                String pid = dot > 0 ? stem.substring(0, dot) : stem;
+                if (find(pid) == null) {
+                    f.delete();
+                }
+            }
         }
     }
 

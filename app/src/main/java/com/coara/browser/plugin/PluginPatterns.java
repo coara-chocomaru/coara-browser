@@ -52,7 +52,7 @@ public final class PluginPatterns {
             return null;
         }
         String p = pattern.trim();
-        if (p.isEmpty() || p.length() > 512) {
+        if (p.isEmpty() || p.length() > 2048) {
             return null;
         }
         if (p.equals("*")) {
@@ -143,10 +143,150 @@ public final class PluginPatterns {
         if (info == null || url == null) {
             return false;
         }
-        List<String> excludes = toRegexList(info.excludes);
-        if (!excludes.isEmpty() && matchesAny(excludes, url)) {
-            return false;
+        return info.isTarget(url);
+    }
+
+    public static String quoteRegex(String s) {
+        StringBuilder sb = new StringBuilder(s.length() + 8);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (SPECIALS.indexOf(c) >= 0 || c == '/' || c == '*' || c == '?' || c == '-') {
+                sb.append('\\');
+            }
+            sb.append(c);
         }
-        return matchesAny(toRegexList(effectiveMatches(info.matches)), url);
+        return sb.toString();
+    }
+
+    public static String globBodyToRegex(String glob) {
+        StringBuilder sb = new StringBuilder(glob.length() + 8);
+        for (int i = 0; i < glob.length(); i++) {
+            char c = glob.charAt(i);
+            if (c == '*') {
+                sb.append(".*");
+            } else if (c == '?') {
+                sb.append('.');
+            } else {
+                sb.append(quoteRegex(String.valueOf(c)));
+            }
+        }
+        return sb.toString();
+    }
+
+    public static String fromMatchPattern(String raw) {
+        if (raw == null) {
+            return null;
+        }
+        String p = raw.trim();
+        if (p.isEmpty() || p.length() > 512) {
+            return null;
+        }
+        if (p.equals("<all_urls>")) {
+            return "<all_urls>";
+        }
+        if (p.equals("*")) {
+            return "<all_urls>";
+        }
+        int sep = p.indexOf("://");
+        if (sep <= 0) {
+            return null;
+        }
+        String scheme = p.substring(0, sep).toLowerCase(java.util.Locale.US);
+        String rest = p.substring(sep + 3);
+        String schemeRegex;
+        switch (scheme) {
+            case "*":
+                schemeRegex = "(?:https?|wss?)";
+                break;
+            case "http":
+            case "https":
+            case "file":
+            case "ftp":
+            case "ws":
+            case "wss":
+                schemeRegex = scheme;
+                break;
+            default:
+                return null;
+        }
+        int slash = rest.indexOf('/');
+        String host;
+        String path;
+        if (slash < 0) {
+            if (scheme.equals("file")) {
+                return null;
+            }
+            host = rest;
+            path = "/";
+        } else {
+            host = rest.substring(0, slash);
+            path = rest.substring(slash);
+        }
+        String hostRegex;
+        if (scheme.equals("file")) {
+            hostRegex = "";
+        } else {
+            if (host.isEmpty()) {
+                return null;
+            }
+            String portPart = "";
+            int colon = host.lastIndexOf(':');
+            if (colon >= 0 && host.indexOf(']') < colon) {
+                portPart = host.substring(colon);
+                host = host.substring(0, colon);
+            }
+            if (host.equals("*")) {
+                hostRegex = "[^/:]*";
+            } else if (host.startsWith("*.")) {
+                hostRegex = "(?:[^/:]*\\.)?" + quoteRegex(host.substring(2));
+            } else if (host.contains("*")) {
+                return null;
+            } else {
+                hostRegex = quoteRegex(host);
+            }
+            if (portPart.isEmpty()) {
+                hostRegex += "(?::\\d+)?";
+            } else if (portPart.equals(":*")) {
+                hostRegex += "(?::\\d+)?";
+            } else {
+                hostRegex += quoteRegex(portPart);
+            }
+        }
+        String regex = "^" + schemeRegex + ":\\/\\/" + hostRegex + globBodyToRegex(path) + "$";
+        try {
+            Pattern.compile(regex);
+        } catch (Exception e) {
+            return null;
+        }
+        return "/" + regex + "/";
+    }
+
+    public static String intersect(String slashRegexA, String slashRegexB) {
+        if (slashRegexA == null || slashRegexB == null) {
+            return null;
+        }
+        String a = innerOf(slashRegexA);
+        String b = innerOf(slashRegexB);
+        if (a == null || b == null) {
+            return null;
+        }
+        String regex = "^(?=" + a + ")(?=" + b + ")";
+        try {
+            Pattern.compile(regex);
+        } catch (Exception e) {
+            return null;
+        }
+        return "/" + regex + "/";
+    }
+
+    private static String innerOf(String p) {
+        if (p.equals("<all_urls>")) {
+            return "^(?:https?|file):\\/\\/.*$";
+        }
+        if (p.length() > 2 && p.startsWith("/") && p.endsWith("/")) {
+            return p.substring(1, p.length() - 1);
+        }
+        String r = toRegex(p);
+        return r;
     }
 }

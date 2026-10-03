@@ -110,6 +110,48 @@ final class PluginLogger {
         }
     }
 
+    synchronized void removeFor(String id) {
+        filterFile(file, "[" + id + "]");
+        filterFile(old, "[" + id + "]");
+    }
+
+    private static void filterFile(File f, String marker) {
+        if (!f.exists()) {
+            return;
+        }
+        try {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            copyTo(f, bos);
+            String text = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            StringBuilder out = new StringBuilder();
+            boolean skip = false;
+            for (String line : text.split("\n", -1)) {
+                if (RECORD_START.matcher(line).matches()) {
+                    skip = line.contains(marker);
+                }
+                if (!skip) {
+                    out.append(line).append('\n');
+                }
+            }
+            String result = out.toString();
+            while (result.endsWith("\n\n")) {
+                result = result.substring(0, result.length() - 1);
+            }
+            if (result.trim().isEmpty()) {
+                f.delete();
+            } else {
+                try (FileOutputStream fos = new FileOutputStream(f)) {
+                    fos.write(result.getBytes(StandardCharsets.UTF_8));
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void copyTo(File f, OutputStream out) throws IOException {
+        copy(f, out);
+    }
+
     synchronized void exportTo(OutputStream out) throws IOException {
         copy(old, out);
         copy(file, out);

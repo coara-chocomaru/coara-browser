@@ -1,8 +1,14 @@
 package com.coara.browser.plugin;
 
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.ContextWrapper;
+import android.os.Handler;
+import android.os.Looper;
 import android.webkit.ValueCallback;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import androidx.webkit.ScriptHandler;
 import androidx.webkit.WebViewCompat;
@@ -16,18 +22,40 @@ import org.json.JSONObject;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 public final class PluginRuntime {
     private static final String RUNTIME_ASSET = "plugin_runtime.js";
     private static final String WATCHDOG_ASSET = "plugin_watchdog.js";
 
+    private static final int MAX_COMMANDS = 32;
+
     private static String runtimeTemplate;
     private static String watchdogTemplate;
+    private static final Map<String, String> PRELUDES = new HashMap<>();
+    private static final Handler MAIN = new Handler(Looper.getMainLooper());
+
+    public static final class PluginCommand {
+        public final String pluginId;
+        public final String pluginTitle;
+        public final String commandId;
+        public final String title;
+
+        PluginCommand(String pluginId, String pluginTitle, String commandId, String title) {
+            this.pluginId = pluginId;
+            this.pluginTitle = pluginTitle;
+            this.commandId = commandId;
+            this.title = title;
+        }
+    }
 
     private static final class ViewState {
         final List<ScriptHandler> handlers = new ArrayList<>();
@@ -36,6 +64,143 @@ public final class PluginRuntime {
         boolean startScriptsActive = false;
         boolean injectedForNavigation = false;
         long navigationStartedAt = 0L;
+        final Map<String, String[]> commands = new LinkedHashMap<>();
+    }
+
+    private static final class ViewOpsImpl implements PluginViewOps {
+        private final WeakReference<WebView> ref;
+        private final ViewState state;
+
+        ViewOpsImpl(WebView view, ViewState state) {
+            this.ref = new WeakReference<>(view);
+            this.state = state;
+        }
+
+        @Override
+        public void registerCommand(String pluginId, String cmdId, String title) {
+            synchronized (state.commands) {
+                if (state.commands.size() >= MAX_COMMANDS && !state.commands.containsKey(cmdId)) {
+                    return;
+                }
+                state.commands.put(cmdId, new String[]{pluginId, title});
+            }
+        }
+
+        @Override
+        public void unregisterCommand(String pluginId, String cmdId) {
+            synchronized (state.commands) {
+                String[] cur = state.commands.get(cmdId);
+                if (cur != null && cur[0].equals(pluginId)) {
+                    state.commands.remove(cmdId);
+                }
+            }
+        }
+
+        @Override
+        public void openTab(final String url) {
+            final WebView v = ref.get();
+            if (v == null) {
+                return;
+            }
+            MAIN.post(new Runnable() {
+                @Override
+                public void run() {
+                    PluginHost host = hostOf(v.getContext());
+                    if (host != null) {
+                        host.onPluginOpenTab(url);
+                    }
+                }
+            });
+        }
+
+        @Override
+        public void notifyUser(final String title, final String text) {
+            final WebView v = ref.get();
+            if (v == null) {
+                return;
+            }
+            MAIN.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        String shown = text.isEmpty() ? title : title + ": " + text;
+                        Toast.makeText(v.getContext().getApplicationContext(), shown, Toast.LENGTH_LONG).show();
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+        }
+
+        @Override
+        public boolean copyText(final String text) {
+            final WebView v = ref.get();
+            if (v == null) {
+                return false;
+            }
+            MAIN.post(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        ClipboardManager cm = (ClipboardManager) v.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                        if (cm != null) {
+                            cm.setPrimaryClip(ClipData.newPlainText("plugin", text));
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+            });
+            return true;
+        }
+    }
+
+    private static PluginHost hostOf(Context context) {
+        Context c = context;
+        int depth = 0;
+        while (c != null && depth < 8) {
+            if (c instanceof PluginHost) {
+                return (PluginHost) c;
+            }
+            if (c instanceof ContextWrapper) {
+                c = ((ContextWrapper) c).getBaseContext();
+            } else {
+                break;
+            }
+            depth++;
+        }
+        return null;
+    }
+
+    public static List<PluginCommand> getCommands(WebView view) {
+        List<PluginCommand> out = new ArrayList<>();
+        if (view == null) {
+            return out;
+        }
+        ViewState state = stateOf(view);
+        if (state == null) {
+            return out;
+        }
+        PluginManager manager = PluginManager.get(view.getContext());
+        synchronized (state.commands) {
+            for (Map.Entry<String, String[]> e : state.commands.entrySet()) {
+                PluginInfo p = manager.get(e.getValue()[0]);
+                if (p != null && p.enabled) {
+                    out.add(new PluginCommand(p.id, p.title, e.getKey(), e.getValue()[1]));
+                }
+            }
+        }
+        return out;
+    }
+
+    public static void runCommand(WebView view, String commandId) {
+        if (view == null || commandId == null) {
+            return;
+        }
+        String q = JSONObject.quote(commandId);
+        String js = "(function(i){try{var c=window.__coaraPlgCmd;var k=i.split(':')[0];if(c&&c[k])c[k](i);}catch(e){}})(" + q + ");";
+        try {
+            view.evaluateJavascript(js, null);
+        } catch (Throwable ignored) {
+        }
     }
 
     private PluginRuntime() {
@@ -48,8 +213,8 @@ public final class PluginRuntime {
         try {
             PluginManager manager = PluginManager.get(context);
             manager.reloadIfChanged();
-            view.addJavascriptInterface(manager.bridge(), PluginManager.BRIDGE_NAME);
             ViewState state = new ViewState();
+            view.addJavascriptInterface(manager.createBridge(new ViewOpsImpl(view, state)), PluginManager.BRIDGE_NAME);
             view.setTag(R.id.plugin_view_state, state);
             syncStartScripts(view, state, manager);
         } catch (Throwable t) {
@@ -74,6 +239,9 @@ public final class PluginRuntime {
             state.injectedForNavigation = false;
             state.navigationStartedAt = System.currentTimeMillis();
             state.activeIds.clear();
+            synchronized (state.commands) {
+                state.commands.clear();
+            }
             if (url != null) {
                 List<String> ids = manager.matchingEnabledIds(url);
                 if (!ids.isEmpty()) {
@@ -145,31 +313,30 @@ public final class PluginRuntime {
             }
             state.injectedForNavigation = true;
             for (final PluginInfo info : enabled) {
-                if (!PluginPatterns.isTarget(info, url)) {
+                if (!info.isTarget(url)) {
                     continue;
                 }
-                String js = buildPluginScript(manager, info);
-                if (js == null) {
-                    continue;
-                }
+                List<String> scripts = buildPluginScripts(manager, info, url);
                 final String id = info.id;
-                view.evaluateJavascript(js, new ValueCallback<String>() {
-                    @Override
-                    public void onReceiveValue(String value) {
-                        if (value != null && !"null".equals(value)) {
-                            return;
+                for (String js : scripts) {
+                    view.evaluateJavascript(js, new ValueCallback<String>() {
+                        @Override
+                        public void onReceiveValue(String value) {
+                            if (value != null && !"null".equals(value)) {
+                                return;
+                            }
+                            String current = null;
+                            try {
+                                current = view.getUrl();
+                            } catch (Exception ignored) {
+                            }
+                            if (current != null && current.equals(url)) {
+                                manager.recordError(id, "load",
+                                        "プラグインのスクリプトを実行できませんでした(構文エラーの可能性)", "", url);
+                            }
                         }
-                        String current = null;
-                        try {
-                            current = view.getUrl();
-                        } catch (Exception ignored) {
-                        }
-                        if (current != null && current.equals(url)) {
-                            manager.recordError(id, "load",
-                                    "プラグインのスクリプトを実行できませんでした(構文エラーの可能性)", "", url);
-                        }
-                    }
-                });
+                    });
+                }
             }
         } catch (Throwable t) {
             logFailure(view.getContext(), "injectFallback", t);
@@ -200,8 +367,7 @@ public final class PluginRuntime {
                 state.handlers.add(WebViewCompat.addDocumentStartJavaScript(view, watchdog, origins));
             }
             for (PluginInfo info : enabled) {
-                String js = buildPluginScript(manager, info);
-                if (js != null) {
+                for (String js : buildPluginScripts(manager, info, null)) {
                     state.handlers.add(WebViewCompat.addDocumentStartJavaScript(view, js, origins));
                 }
             }
@@ -230,13 +396,20 @@ public final class PluginRuntime {
         }
         JSONArray expected = new JSONArray();
         for (PluginInfo p : enabled) {
-            JSONObject o = new JSONObject();
-            o.put("id", p.id);
-            o.put("key", manager.keyFor(p.id));
-            o.put("allFrames", p.allFrames);
-            o.put("matches", new JSONArray(PluginPatterns.toRegexList(PluginPatterns.effectiveMatches(p.matches))));
-            o.put("excludes", new JSONArray(PluginPatterns.toRegexList(p.excludes)));
-            expected.put(o);
+            List<PluginEntry> entries = p.entries();
+            for (int i = 0; i < entries.size(); i++) {
+                PluginEntry e = entries.get(i);
+                if (!e.hasContent()) {
+                    continue;
+                }
+                JSONObject o = new JSONObject();
+                o.put("id", p.id);
+                o.put("key", manager.keyFor(p.id + "#" + i));
+                o.put("allFrames", e.allFrames);
+                o.put("matches", new JSONArray(PluginPatterns.toRegexList(PluginPatterns.effectiveMatches(e.matches))));
+                o.put("excludes", new JSONArray(PluginPatterns.toRegexList(e.excludes)));
+                expected.put(o);
+            }
         }
         List<String[]> values = new ArrayList<>();
         values.add(new String[]{"%BRIDGE%", PluginManager.BRIDGE_NAME});
@@ -245,14 +418,30 @@ public final class PluginRuntime {
         return fill(template, values);
     }
 
-    static String buildPluginScript(PluginManager manager, PluginInfo info) {
+    static List<String> buildPluginScripts(PluginManager manager, PluginInfo info, String url) {
+        List<String> out = new ArrayList<>();
+        List<PluginEntry> entries = info.entries();
+        for (int i = 0; i < entries.size(); i++) {
+            PluginEntry e = entries.get(i);
+            if (url != null && !e.isTarget(url)) {
+                continue;
+            }
+            String js = buildEntryScript(manager, info, e, i);
+            if (js != null) {
+                out.add(js);
+            }
+        }
+        return out;
+    }
+
+    static String buildEntryScript(PluginManager manager, PluginInfo info, PluginEntry entry, int index) {
         try {
             String template = loadTemplate(manager.context(), RUNTIME_ASSET, false);
             if (template == null) {
                 return null;
             }
             StringBuilder body = new StringBuilder();
-            for (String name : info.scripts) {
+            for (String name : entry.scripts) {
                 String src = manager.readText(info, name);
                 if (src == null) {
                     manager.log("W", info.id, "スクリプトを読み込めません: " + name);
@@ -261,7 +450,7 @@ public final class PluginRuntime {
                 body.append(src).append("\n;\n");
             }
             JSONArray css = new JSONArray();
-            for (String name : info.styles) {
+            for (String name : entry.styles) {
                 String text = manager.readText(info, name);
                 if (text == null) {
                     manager.log("W", info.id, "スタイルを読み込めません: " + name);
@@ -276,10 +465,25 @@ public final class PluginRuntime {
             meta.put("id", info.id);
             meta.put("title", info.title);
             meta.put("version", info.version);
-            meta.put("runAt", info.runAt);
-            meta.put("allFrames", info.allFrames);
-            meta.put("matches", new JSONArray(PluginPatterns.toRegexList(PluginPatterns.effectiveMatches(info.matches))));
-            meta.put("excludes", new JSONArray(PluginPatterns.toRegexList(info.excludes)));
+            meta.put("description", info.description);
+            meta.put("author", info.author);
+            meta.put("homepage", info.homepage);
+            meta.put("format", info.format);
+            meta.put("runAt", entry.runAt);
+            meta.put("allFrames", entry.allFrames);
+            meta.put("permissions", new JSONArray(info.permissions));
+            meta.put("rawMatches", new JSONArray(entry.matches));
+            meta.put("rawExcludes", new JSONArray(entry.excludes));
+            meta.put("matches", new JSONArray(PluginPatterns.toRegexList(PluginPatterns.effectiveMatches(entry.matches))));
+            meta.put("excludes", new JSONArray(PluginPatterns.toRegexList(entry.excludes)));
+
+            String prelude = "";
+            String kind = info.apiKind();
+            if (kind.equals("gm")) {
+                prelude = loadPrelude(manager.context(), "plugin_api_gm.js");
+            } else if (kind.equals("webext")) {
+                prelude = loadPrelude(manager.context(), "plugin_api_webext.js");
+            }
 
             int idx = template.indexOf("%BODY%");
             if (idx < 0) {
@@ -292,13 +496,35 @@ public final class PluginRuntime {
             headValues.add(new String[]{"%TOKEN%", manager.getToken()});
             headValues.add(new String[]{"%META%", meta.toString()});
             headValues.add(new String[]{"%CSS%", css.toString()});
-            headValues.add(new String[]{"%KEY%", manager.keyFor(info.id)});
+            headValues.add(new String[]{"%KEY%", manager.keyFor(info.id + "#" + index)});
+            headValues.add(new String[]{"%PKEY%", manager.keyFor(info.id)});
+            headValues.add(new String[]{"%PRELUDE%", prelude});
             List<String[]> tailValues = new ArrayList<>();
-            tailValues.add(new String[]{"%ID%", info.id});
+            tailValues.add(new String[]{"%ID%", info.id + "/" + index});
             return fill(head, headValues) + body + fill(tail, tailValues);
         } catch (Throwable t) {
             manager.log("E", info.id, "スクリプト生成に失敗: " + t);
             return null;
+        }
+    }
+
+    private static synchronized String loadPrelude(Context context, String asset) {
+        String cached = PRELUDES.get(asset);
+        if (cached != null) {
+            return cached;
+        }
+        try (InputStream in = context.getAssets().open(asset)) {
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) > 0) {
+                bos.write(buf, 0, n);
+            }
+            String text = new String(bos.toByteArray(), StandardCharsets.UTF_8);
+            PRELUDES.put(asset, text);
+            return text;
+        } catch (Exception e) {
+            return "";
         }
     }
 

@@ -4,9 +4,11 @@ import android.webkit.JavascriptInterface;
 
 public final class PluginBridge {
     private final PluginManager manager;
+    private final PluginViewOps ops;
 
-    PluginBridge(PluginManager manager) {
+    PluginBridge(PluginManager manager, PluginViewOps ops) {
         this.manager = manager;
+        this.ops = ops;
     }
 
     @JavascriptInterface
@@ -15,7 +17,7 @@ public final class PluginBridge {
             if (!manager.checkToken(token) || id == null || op == null) {
                 return null;
             }
-            return manager.handleBridge(id, op, a, b, c);
+            return manager.handleBridge(ops, id, op, a, b, c);
         } catch (Throwable t) {
             return null;
         }

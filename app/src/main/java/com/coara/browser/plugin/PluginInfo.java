@@ -5,13 +5,26 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 public final class PluginInfo {
     public static final String RUN_AT_START = "document_start";
     public static final String RUN_AT_END = "document_end";
     public static final String RUN_AT_IDLE = "document_idle";
+
+    public static final String FORMAT_COARA = "coara";
+    public static final String FORMAT_USERSCRIPT = "userscript";
+    public static final String FORMAT_WEBEXT = "webext";
+    public static final String FORMAT_USERSTYLE = "userstyle";
+
+    public static final String PERM_XHR = "xhr";
+    public static final String PERM_CLIPBOARD = "clipboard";
+    public static final String PERM_NOTIFICATION = "notification";
+    public static final String PERM_OPENTAB = "opentab";
 
     public String id = "";
     public String title = "";
@@ -27,6 +40,14 @@ public final class PluginInfo {
     public final List<String> scripts = new ArrayList<>();
     public final List<String> styles = new ArrayList<>();
     public final List<String> resources = new ArrayList<>();
+    public final List<String> assets = new ArrayList<>();
+    public final List<String> permissions = new ArrayList<>();
+    public final List<String> connects = new ArrayList<>();
+    public final List<PluginEntry> entries = new ArrayList<>();
+    public final Map<String, String> resourceMap = new LinkedHashMap<>();
+    public String format = FORMAT_COARA;
+    public String defaultLocale = "";
+    public String homepage = "";
     public long installedAt = 0L;
     public long lastErrorAt = 0L;
     public long disabledAt = 0L;
@@ -48,6 +69,52 @@ public final class PluginInfo {
             return RUN_AT_IDLE;
         }
         return RUN_AT_END;
+    }
+
+    public static String normalizeFormat(String raw) {
+        if (FORMAT_USERSCRIPT.equals(raw) || FORMAT_WEBEXT.equals(raw) || FORMAT_USERSTYLE.equals(raw)) {
+            return raw;
+        }
+        return FORMAT_COARA;
+    }
+
+    public boolean hasPermission(String perm) {
+        return permissions.contains(perm);
+    }
+
+    public String apiKind() {
+        if (FORMAT_USERSCRIPT.equals(format)) {
+            return "gm";
+        }
+        if (FORMAT_WEBEXT.equals(format)) {
+            return "webext";
+        }
+        return "coara";
+    }
+
+    public List<PluginEntry> entries() {
+        if (!entries.isEmpty()) {
+            return entries;
+        }
+        List<PluginEntry> one = new ArrayList<>();
+        PluginEntry e = new PluginEntry();
+        e.runAt = runAt;
+        e.allFrames = allFrames;
+        e.matches.addAll(matches);
+        e.excludes.addAll(excludes);
+        e.scripts.addAll(scripts);
+        e.styles.addAll(styles);
+        one.add(e);
+        return one;
+    }
+
+    public boolean isTarget(String url) {
+        for (PluginEntry e : entries()) {
+            if (e.isTarget(url)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public JSONObject toJson() throws JSONException {
@@ -74,6 +141,22 @@ public final class PluginInfo {
         o.put("failStreak", failStreak);
         o.put("lastError", lastError);
         o.put("disabledReason", disabledReason);
+        o.put("format", format);
+        o.put("defaultLocale", defaultLocale);
+        o.put("homepage", homepage);
+        o.put("assets", toArray(assets));
+        o.put("permissions", toArray(permissions));
+        o.put("connects", toArray(connects));
+        JSONArray ea = new JSONArray();
+        for (PluginEntry e : entries) {
+            ea.put(e.toJson());
+        }
+        o.put("entries", ea);
+        JSONObject rm = new JSONObject();
+        for (Map.Entry<String, String> kv : resourceMap.entrySet()) {
+            rm.put(kv.getKey(), kv.getValue());
+        }
+        o.put("resourceMap", rm);
         return o;
     }
 
@@ -101,6 +184,32 @@ public final class PluginInfo {
         p.failStreak = o.optInt("failStreak", 0);
         p.lastError = o.optString("lastError", "");
         p.disabledReason = o.optString("disabledReason", "");
+        p.format = normalizeFormat(o.optString("format", FORMAT_COARA));
+        p.defaultLocale = o.optString("defaultLocale", "");
+        p.homepage = o.optString("homepage", "");
+        readArray(o.optJSONArray("assets"), p.assets);
+        readArray(o.optJSONArray("permissions"), p.permissions);
+        readArray(o.optJSONArray("connects"), p.connects);
+        JSONArray ea = o.optJSONArray("entries");
+        if (ea != null) {
+            for (int i = 0; i < ea.length(); i++) {
+                JSONObject eo = ea.optJSONObject(i);
+                if (eo != null) {
+                    p.entries.add(PluginEntry.fromJson(eo));
+                }
+            }
+        }
+        JSONObject rm = o.optJSONObject("resourceMap");
+        if (rm != null) {
+            Iterator<String> it = rm.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                String v = rm.optString(k, "");
+                if (!v.isEmpty()) {
+                    p.resourceMap.put(k, v);
+                }
+            }
+        }
         return p;
     }
 
@@ -123,7 +232,7 @@ public final class PluginInfo {
         return a;
     }
 
-    private static void readArray(JSONArray a, List<String> out) {
+    static void readArray(JSONArray a, List<String> out) {
         if (a == null) {
             return;
         }
