@@ -100,6 +100,10 @@
         android:theme="@style/Theme.MaterialComponents.Light.NoActionBar">
 
         <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="true" />
+
+        <meta-data
             android:name="android.theme.customization.icon"
             android:resource="@xml/icon_palette" />
 
@@ -134,16 +138,14 @@
             <meta-data
             android:name="android.app.shortcuts"
             android:resource="@xml/shortcuts" />
-            <meta-data 
-            android:name="android.webkit.WebView.EnableSafeBrowsing"
-            android:value="true"/>
         </activity>
         
         <activity
             android:name=".SecretActivity"
             android:process=":Secret_webview"
             android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
-            android:exported="false" />
+            android:exported="false"
+            android:launchMode="singleTask" />
 
         <activity
             android:name=".grepmd5appActivity"
